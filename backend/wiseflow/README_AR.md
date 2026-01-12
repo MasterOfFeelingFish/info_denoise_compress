@@ -1,0 +1,155 @@
+# المساعد الذكي للمعلومات (Wiseflow)
+
+**[简体中文](README.md) | [English](README_EN.md) | [日本語](README_JP.md) | [한국어](README_KR.md) | [Deutsch](README_DE.md) | [Français](README_FR.md) | [العربية](README_AR.md)**
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/TeamWiseFlow/wiseflow)
+
+🚀 **استخدم النماذج اللغوية الكبيرة لتتبع المعلومات التي تهتم بها أكثر من مختلف المصادر يومياً!**
+
+يقوم wiseflow بمراقبة وتتبع مختلف مصادر الشبكة بذكاء، بما في ذلك وسائل التواصل الاجتماعي الرئيسية والمواقع الإلكترونية وRSS ومحركات البحث، ويستخرج بذكاء المعلومات التي تهمك أكثر.
+
+## 🎉 إصدار WiseFlow Pro متاح الآن!
+
+قدرات زحف أقوى، دعم شامل لوسائل التواصل الاجتماعي، يتضمن واجهة ويب وحزمة تشغيل بنقرة واحدة بدون تثبيت!
+
+https://github.com/user-attachments/assets/880af7a3-7b28-44ff-86b6-aaedecd22761
+
+🔥🔥 **الإصدار Pro متاح الآن للبيع في جميع أنحاء العالم**: https://shouxiqingbaoguan.com/ 
+
+🌹 بدءاً من اليوم، المساهمون الذين يقدمون طلبات سحب (PR) لنسخة wiseflow مفتوحة المصدر (نرحب بالكود والوثائق ومشاركة حالات النجاح)، سيحصلون على حق استخدام نسخة wiseflow pro لمدة عام كامل عند قبول مساهمتهم!
+
+## نسخة Wiseflow 4.30 مفتوحة المصدر
+
+تمت ترقية نسخة wiseflow مفتوحة المصدر إلى نفس بنية نسخة pro، وهي تمتلك نفس واجهة برمجة التطبيقات (API)، ويمكنها مشاركة نظام [wiseflow+](https://github.com/TeamWiseFlow/wiseflow-plus) البيئي بسلاسة!
+
+## الرعاة
+
+بدعم من <a href="https://www.baotianqi.cn" target="_blank"><img src="./docs/logos/tianqibao.png" alt="Tianqibao" height="40"/></a>
+
+[Thordata](https://www.thordata.com/products/serp-api?ls=github&lk=wiseflow): احصل على وكلاء (Proxies) عالميين موثوقين بقيمة لا تقبل المنافسة. جمع البيانات بنقرة واحدة مع استقرار وتوافق على مستوى المؤسسات. انضم إلى آلاف المطورين الذين يستخدمون ThorData للعمليات واسعة النطاق.
+
+🎁 عرض حصري: سجل للحصول على تجربة مجانية للوكلاء السكنيين و 2,000 مكالمة SERP API مجانية!
+
+<a href="https://www.thordata.com/products/serp-api?ls=github&lk=wiseflow" target="_blank"><img src="./docs/logos/thordata_en.png" alt="Thordata" height="120"/></a>
+
+## مقارنة بين نسخة wiseflow مفتوحة المصدر ونسخة pro
+
+| الميزات | النسخة مفتوحة المصدر | النسخة Pro |
+| :--- | :---: | :---: |
+| **دعم مصادر المراقبة** | web، rss | web، rss، بالإضافة إلى 7 منصات صينية رئيسية للمحتوى الذاتي |
+| **دعم مصادر البحث** | bing، github، arxiv | bing، github، arxiv، بالإضافة إلى 6 منصات صينية رئيسية للمحتوى الذاتي |
+| **التثبيت والنشر** | يتطلب تثبيت البيئة والنشر يدوياً | لا يحتاج لتثبيت، تشغيل بنقرة واحدة |
+| **واجهة المستخدم** | لا توجد | واجهة ويب باللغة الصينية |
+| **تكلفة LLM** | المستخدم يشترك بنفسه في خدمة LLM أو يبني خدمة LLM محلية | الاشتراك يتضمن تكاليف استدعاء LLM (لا حاجة لإعدادات إضافية) |
+| **الدعم الفني** | GitHub Issues | مجموعة WeChat للمشتركين |
+| **السعر** | مجاني | 488 ￥ سنوياً |
+| **الفئة المستهدفة** | استكشاف المجتمع وتعلم المشاريع | الاستخدام اليومي (الأفراد أو الشركات) |
+
+## 🧐 تموضع منتج wiseflow
+
+wiseflow ليس وكيلاً عاماً مثل ChatGPT أو Manus؛ بل هو متخصص في مراقبة المعلومات واستخراجها، ويدعم المصادر التي يحددها المستخدم، ويضمن الحصول على أحدث المعلومات من خلال وضع المهام الدورية (يدعم الحصول على المعلومات حتى 4 مرات يومياً، أي كل 6 ساعات). كما يدعم wiseflow البحث الشامل عن المعلومات في منصات محددة (مثل "البحث عن أشخاص").
+
+ولكن لا تساوِ بين wiseflow وبين برامج الزحف التقليدية أو RPA! سلوك الحصول على المعلومات في wiseflow مدفوع بالكامل بواسطة LLM، ويستخدم متصفحات حقيقية (بدلاً من المتصفحات عديمة الرأس أو الافتراضية)، وتتم عمليات الحصول والاستخراج في وقت واحد:
+
+- آلية ذكية ومبتكرة لتحليل HTML: يمكنها التعرف تلقائياً على المعلومات الرئيسية والروابط القابلة للاستكشاف.
+- استراتيجية "الزحف والبحث في آن واحد": يقوم LLM بالتحكيم والاستخراج في الوقت الفعلي أثناء عملية الزحف، ويلتقط المعلومات ذات الصلة فقط، مما يقلل بشكل كبير من مخاطر الحظر.
+- جاهز للاستخدام حقاً: لا حاجة لـ Xpath أو نصوص برمجية أو إعدادات يدوية، يمكن للمستخدمين العاديين استخدامه بسهولة.
+
+    ……
+
+لمزيد من التفاصيل، يرجى الرجوع إلى: https://shouxiqingbaoguan.com/
+
+## 🌟 البدء السريع
+
+**ثلاث خطوات فقط للبدء!**
+
+**بدءاً من الإصدار 4.2، يجب تثبيت متصفح Google Chrome أولاً (باستخدام مسار التثبيت الافتراضي).**
+
+**يجب على مستخدمي Windows تحميل أداة Git Bash مسبقاً وتنفيذ الأوامر التالية في bash [رابط تحميل Bash](https://git-scm.com/downloads/win)**
+
+### 📋 تثبيت أداة إدارة البيئة uv وتحميل كود مصدر wiseflow
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+git clone https://github.com/TeamWiseFlow/wiseflow.git
+```
+
+ستكتمل عملية تثبيت uv وتحميل كود مصدر wiseflow من خلال الخطوات السابقة.
+
+### 📥 إعداد ملف .env بناءً على env_sample
+
+في مجلد wiseflow (المجلد الرئيسي للمشروع)، قم بإنشاء ملف .env بناءً على env_sample وأدخل الإعدادات المطلوبة (بشكل أساسي إعدادات خدمة LLM).
+
+**تتطلب نسخة wiseflow مفتوحة المصدر من المستخدم إعداد خدمة LLM الخاصة به.**
+
+لا يفرض wiseflow قيوداً على مزودي خدمات النماذج، طالما أنها متوافقة مع تنسيق واجهة طلب OpenAI SDK. يمكنك اختيار خدمات MaaS الموجودة أو خدمات النماذج المنشورة محلياً مثل Ollama.
+
+للمستخدمين في الصين القارية، نوصي باستخدام خدمة نماذج Siliconflow.
+
+😄 لا تتردد في استخدام [رابط الإحالة](https://cloud.siliconflow.cn/i/WNLYbBpi) الخاص بي للتقديم - ستحصل أنت وأنا على مكافأة منصة بقيمة ￥14.
+
+إذا كنت تفضل استخدام النماذج الأجنبية مغلقة المصدر مثل OpenAI، يمكنك استخدام خدمة نماذج AiHubMix، والتي تعمل بسلاسة في الصين القارية:
+
+😄 نرحب بالتسجيل عبر [رابط دعوة AiHubMix](https://aihubmix.com?aff=Gp54) الخاص بي.
+
+يمكن للمستخدمين في الخارج استخدام النسخة الدولية من Siliconflow: https://www.siliconflow.com/
+
+### 🚀 انطلق!
+
+```bash
+cd wiseflow
+uv venv # مطلوب في المرة الأولى فقط
+source .venv/bin/activate  # Linux/macOS
+# أو على Windows:
+# .venv\Scripts\activate
+uv sync # مطلوب في المرة الأولى فقط
+python core/entry.py
+```
+
+## 📚 كيفية استخدام البيانات التي يجمعها wiseflow في برامجك الخاصة
+
+يمكن الرجوع إلى [wiseflow backend api](./core/backend/README.md)
+
+سواء كنت تعتمد على نسخة wiseflow أو نسخة wiseflow-pro، نرحب بمشاركة حالات التطبيق الخاصة بك والترويج لها في المستودع التالي!
+
+- https://github.com/TeamWiseFlow/wiseflow-plus
+
+(المساهمة بطلبات السحب في هذا المستودع ستمنحك أيضاً حق استخدام نسخة wiseflow-pro لمدة عام عند قبولها)
+
+**بنية الإصدار 4.2x ليست متوافقة تماماً مع 4.30. الإصدار النهائي لـ 4.2x (v4.29) توقف دعمه. إذا كنت بحاجة لمرجع كود، يمكنك الانتقال إلى فرع "2025".**
+
+## 🛡️ الترخيص
+
+بدءاً من الإصدار 4.2، قمنا بتحديث اتفاقية ترخيص المصدر المفتوح، يرجى مراجعة: [LICENSE](LICENSE) 
+
+للتعاون التجاري، يرجى التواصل عبر **البريد الإلكتروني: zm.zhao@foxmail.com**
+
+## 📬 معلومات التواصل
+
+لأي أسئلة أو اقتراحات، نرحب بترك رسالة عبر [issue](https://github.com/TeamWiseFlow/wiseflow/issues).
+
+للمتطلبات المتعلقة بنسخة pro أو ملاحظات التعاون، يرجى التواصل مع "مدير" AI Chief Intelligence Officer عبر WeChat الخاص بالشركات:
+
+<img src="docs/wechat.jpg" alt="wechat" width="360">
+
+## 🤝 هذا المشروع مبني على المشاريع مفتوحة المصدر المميزة التالية:
+
+- Crawl4ai (Open-source LLM Friendly Web Crawler & Scraper) https://github.com/unclecode/crawl4ai
+- Patchright (Undetected Python version of the Playwright testing and automation library) https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python
+- MediaCrawler (xhs/dy/wb/ks/bilibili/zhihu crawler) https://github.com/NanmiCoder/MediaCrawler
+- NoDriver (توفير إطار عمل سريع جداً للأتمتة والزحف والبوتات وأي أفكار إبداعية أخرى...) https://github.com/ultrafunkamsterdam/nodriver
+- Feedparser (تحليل الخلاصات في Python) https://github.com/kurtmckee/feedparser
+- SearXNG (محرك بحث تجميعي مجاني يجمع النتائج من مختلف خدمات وقواعد بيانات البحث) https://github.com/searxng/searxng
+
+## الاقتباس
+
+إذا قمت بالإشارة إلى هذا المشروع أو اقتباسه كلياً أو جزئياً في أعمال ذات صلة، يرجى ذكر المعلومات التالية:
+
+```
+Author：Wiseflow Team
+https://github.com/TeamWiseFlow/wiseflow
+```
+
+## روابط صديقة
+
+[<img src="docs/logos/SiliconFlow.png" alt="siliconflow" width="360">](https://siliconflow.com/)

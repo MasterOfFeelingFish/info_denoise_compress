@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  web3digest:
+    build:
+      context: ../../..  # WiseFlow 项目根目录
+      dockerfile: core/custom_processes/web3digest/Dockerfile
+    container_name: web3digest
+    restart: unless-stopped
+    env_file:
+      - ../../../.env  # WiseFlow 项目的 .env 文件
+    volumes:
+      - ../../../data/web3digest:/app/data/web3digest
+    environment:
+      - PYTHONPATH=/app/wiseflow
+      - PYTHONUNBUFFERED=1
+    
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "python", "-c", "import telegram; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
