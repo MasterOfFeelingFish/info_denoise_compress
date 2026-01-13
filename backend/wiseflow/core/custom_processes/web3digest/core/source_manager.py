@@ -69,19 +69,20 @@ class SourceManager:
         """获取默认预设源列表（全部启用）"""
         preset_sources = []
         
-        # Twitter 账号
-        for i, account in enumerate(DefaultRSSSources.TWITTER_ACCOUNTS, 1):
-            preset_sources.append({
-                "id": f"preset_twitter_{i}",
-                "name": f"@{account['name']}",
-                "type": "twitter",
-                "category": account["category"],
-                "url": self.rss_app_client.get_twitter_rss_url(account["name"]),
-                "enabled": True,
-                "is_preset": True
-            })
+        # 1. 优先添加已验证的 RSS.app 真实订阅（Twitter）
+        if hasattr(DefaultRSSSources, 'RSSAPP_FEEDS'):
+            for i, feed in enumerate(DefaultRSSSources.RSSAPP_FEEDS, 1):
+                preset_sources.append({
+                    "id": f"preset_rssapp_{i}",
+                    "name": feed["name"],
+                    "type": "twitter",
+                    "category": feed.get("category", "行业领袖"),
+                    "url": feed["url"],  # 真实的 RSS.app URL
+                    "enabled": feed.get("enabled", True),
+                    "is_preset": True
+                })
         
-        # 网站 RSS
+        # 2. 网站 RSS（这些是真实可用的）
         for i, rss in enumerate(DefaultRSSSources.WEBSITE_RSS, 1):
             preset_sources.append({
                 "id": f"preset_website_{i}",
@@ -89,9 +90,12 @@ class SourceManager:
                 "type": "website",
                 "category": rss["category"],
                 "url": rss["url"],
-                "enabled": True,
+                "enabled": rss.get("enabled", True),  # 使用配置中的 enabled 状态
                 "is_preset": True
             })
+        
+        # 注意：TWITTER_ACCOUNTS 中的账号需要用户在 RSS.app 创建订阅后才能使用
+        # 这些账号不会自动添加到预设源，但用户可以通过"添加 Twitter"功能手动添加
         
         return preset_sources
     

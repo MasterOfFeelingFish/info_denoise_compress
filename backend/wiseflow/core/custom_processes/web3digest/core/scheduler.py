@@ -3,7 +3,7 @@
 """
 import asyncio
 from datetime import datetime, time
-from typing import Optional
+from typing import Optional, List, Dict
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -145,30 +145,145 @@ class DigestScheduler:
         except Exception as e:
             logger.error(f"每日简报任务失败: {e}", exc_info=True)
     
-    async def _send_digest(self, user_id: int, digest: str):
-        """发送简报给用户"""
+    async def _send_digest(self, user_id: int, digest_data):
+        """
+        发送简报给用户
+        
+        Args:
+            user_id: 用户ID
+            digest_data: 可以是字符串（旧格式）或字典（新格式）
+                字典格式: {"text": "简报文本", "top_items": [...], "stats": {...}}
+        """
         try:
-            # 分批发送，避免消息过长
-            messages = self._split_message(digest, max_length=4000)
+            # 兼容旧格式
+            if isinstance(digest_data, str):
+                digest_text = digest_data
+                top_items = []
+            else:
+                digest_text = digest_data.get("text", "")
+                top_items = digest_data.get("top_items", [])
+            
+            logger.info(f"开始发送简报给用户 {user_id}，长度: {len(digest_text)}，Top条目: {len(top_items)}")
+            
+            # 1. 先发送简报概览（带整体反馈按钮）
+            messages = self._split_message(digest_text, max_length=4000)
             
             for i, msg in enumerate(messages):
-                if i == len(messages) - 1:
-                    # 最后一条消息添加反馈按钮
-                    await self._send_with_feedback(user_id, msg)
-                else:
-                    await self.bot.application.bot.send_message(
-                        chat_id=user_id,
-                        text=msg,
-                        parse_mode="Markdown"
-                    )
+                try:
+                    if i == len(messages) - 1:
+                        await self._send_with_feedback(user_id, msg)
+                    else:
+                        await self.bot.application.bot.send_message(
+                            chat_id=user_id,
+                            text=msg,
+                            parse_mode="Markdown"
+                        )
+                except Exception as parse_err:
+                    logger.warning(f"Markdown 解析失败，尝试纯文本: {parse_err}")
+                    if i == len(messages) - 1:
+                        await self._send_with_feedback(user_id, msg, use_markdown=False)
+                    else:
+                        await self.bot.application.bot.send_message(chat_id=user_id, text=msg)
                 
-                # 避免发送过快
                 if i < len(messages) - 1:
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.3)
+            
+            # 2. 发送 Top 3 信息的单独卡片（带单条反馈按钮）
+            if top_items:
+                await asyncio.sleep(0.5)
+                await self._send_item_cards(user_id, top_items)
+            
+            logger.info(f"✅ 简报已成功发送给用户 {user_id}")
                     
         except Exception as e:
-            logger.error(f"发送简报失败 {user_id}: {e}")
+            logger.error(f"发送简报失败 {user_id}: {e}", exc_info=True)
             raise
+    
+    async def _send_item_cards(self, user_id: int, items: List[Dict]):
+        """发送单条信息卡片（带反馈按钮）"""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        import re
+        
+        def clean_html(text: str) -> str:
+            """清理 HTML 标签"""
+            if not text:
+                return ""
+            # 移除 HTML 标签
+            text = re.sub(r'<[^>]+>', '', text)
+            # 移除多余空白
+            text = re.sub(r'\s+', ' ', text).strip()
+            return text
+        
+        def safe_url(url: str) -> str:
+            """处理 URL，确保可以在 Markdown 中使用"""
+            if not url:
+                return ""
+            # URL 编码特殊字符
+            url = url.replace('(', '%28').replace(')', '%29')
+            return url
+        
+        # 发送分隔提示
+        await self.bot.application.bot.send_message(
+            chat_id=user_id,
+            text="📋 *今日必看详情* (点击反馈帮助我们优化)",
+            parse_mode="Markdown"
+        )
+        await asyncio.sleep(0.3)
+        
+        emoji_list = ["1️⃣", "2️⃣", "3️⃣"]
+        
+        for i, item in enumerate(items[:3]):
+            item_id = item.get("id", f"item_{i}")
+            title = clean_html(item.get("title", ""))[:60]
+            summary = clean_html(item.get("summary", ""))[:150]
+            source = item.get("source", "未知")
+            url = safe_url(item.get("url", ""))
+            
+            # 构建消息
+            emoji = emoji_list[i] if i < len(emoji_list) else "📌"
+            card_text = f"{emoji} *{self._escape_md(title)}*\n\n"
+            if summary:
+                card_text += f"{self._escape_md(summary)}\n\n"
+            card_text += f"📍 来源: {source}"
+            
+            # 单条反馈按钮 + 查看原文按钮
+            buttons = [
+                InlineKeyboardButton("⭐ 很有用", callback_data=f"item_like_{item_id}_{source[:10]}"),
+                InlineKeyboardButton("👎 不感兴趣", callback_data=f"item_dislike_{item_id}_{source[:10]}")
+            ]
+            
+            keyboard = [buttons]
+            
+            # 添加查看原文按钮（使用 URL 按钮，更可靠）
+            if url:
+                keyboard.append([InlineKeyboardButton("🔗 查看原文", url=url)])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            try:
+                await self.bot.application.bot.send_message(
+                    chat_id=user_id,
+                    text=card_text,
+                    parse_mode="Markdown",
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                # Markdown 失败则纯文本
+                logger.warning(f"发送信息卡片失败: {e}")
+                await self.bot.application.bot.send_message(
+                    chat_id=user_id,
+                    text=f"{emoji} {title}\n\n{summary}\n\n来源: {source}",
+                    reply_markup=reply_markup
+                )
+            
+            await asyncio.sleep(0.3)
+    
+    def _escape_md(self, text: str) -> str:
+        """转义 Markdown 特殊字符"""
+        if not text:
+            return ""
+        return text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
     
     async def _send_digest_with_retry(self, user_id: int, digest: str, max_retries: int = 3):
         """发送简报，带重试机制"""
@@ -189,7 +304,7 @@ class DigestScheduler:
                     return False
         return False
     
-    async def _send_with_feedback(self, user_id: int, message: str):
+    async def _send_with_feedback(self, user_id: int, message: str, use_markdown: bool = True):
         """发送带反馈按钮的消息"""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         
@@ -205,7 +320,7 @@ class DigestScheduler:
         await self.bot.application.bot.send_message(
             chat_id=user_id,
             text=message,
-            parse_mode="Markdown",
+            parse_mode="Markdown" if use_markdown else None,
             reply_markup=reply_markup
         )
     
@@ -254,6 +369,15 @@ class DigestScheduler:
             logger.error(f"手动生成简报失败: {e}", exc_info=True)
             return {"success": False, "error": f"生成失败：{str(e)}"}
     
+    async def _safe_edit_message(self, status_msg, text: str):
+        """安全地编辑消息，忽略内容相同的错误"""
+        try:
+            await status_msg.edit_text(text)
+        except Exception as e:
+            # 忽略 "Message is not modified" 错误
+            if "Message is not modified" not in str(e):
+                raise
+    
     async def trigger_manual_digest_with_status(self, user_id: int, status_msg):
         """
         手动触发完整流程，带状态更新
@@ -264,7 +388,7 @@ class DigestScheduler:
         
         try:
             # 步骤 1: 抓取信息
-            await status_msg.edit_text("🚀 开始完整流程测试...\n\n步骤 1/4: 正在抓取信息...")
+            await self._safe_edit_message(status_msg, "🚀 开始完整流程测试...\n\n📥 步骤 1/4: 正在抓取信息...")
             
             from core.custom_processes.web3digest.core.crawler_scheduler import CrawlerScheduler
             crawler = CrawlerScheduler()
@@ -272,35 +396,58 @@ class DigestScheduler:
             user_sources = await self.bot.source_manager.get_enabled_sources_for_crawl(user_id)
             crawl_result = await crawler.wiseflow_client.trigger_crawl(sources=user_sources)
             
+            articles_count = crawl_result.get("articles_count", 0)
+            rss_sources = crawl_result.get("rss_sources", 0)
+            
             if crawl_result.get("status") != 0:
+                await self._safe_edit_message(status_msg, f"❌ 抓取失败\n\n错误：{crawl_result.get('warnings', [])}")
                 return {"success": False, "error": f"抓取失败：{crawl_result.get('warnings', [])}"}
             
-            logger.info(f"抓取完成：{crawl_result.get('articles_count', 0)} 条文章")
+            logger.info(f"抓取完成：{articles_count} 条文章")
             
             # 步骤 2: 获取用户画像
-            await status_msg.edit_text("✅ 步骤 1/4 完成：已抓取信息\n\n步骤 2/4: 正在筛选个性化内容...")
+            await self._safe_edit_message(status_msg, 
+                f"✅ 步骤 1/4 完成\n   抓取 {rss_sources} 个源，获取 {articles_count} 条内容\n\n🔍 步骤 2/4: 正在加载用户画像...")
             
             profile = await self.bot.profile_manager.get_profile(user_id)
             if not profile:
+                await self._safe_edit_message(status_msg, "❌ 未找到用户画像\n\n请先使用 /start 完成偏好设置")
                 return {"success": False, "error": "请先使用 /start 完成偏好设置"}
             
             # 步骤 3: 生成简报
-            await status_msg.edit_text("✅ 步骤 2/4 完成：已筛选内容\n\n步骤 3/4: 正在生成简报...")
+            await self._safe_edit_message(status_msg, 
+                f"✅ 步骤 1/4 完成\n   抓取 {rss_sources} 个源，获取 {articles_count} 条内容\n✅ 步骤 2/4 完成\n   用户画像已加载\n\n🤖 步骤 3/4: AI 正在筛选和生成简报...")
             
             digest = await self.digest_generator.generate_digest(user_id, profile)
             
             if not digest:
+                await self._safe_edit_message(status_msg, "⚠️ 暂无符合您偏好的信息\n\n可能原因：\n• 今日资讯与您的关注领域不匹配\n• 请尝试调整偏好设置 /settings")
                 return {"success": False, "error": "抱歉，暂无符合您偏好的信息"}
             
             # 步骤 4: 推送简报
-            await status_msg.edit_text("✅ 步骤 3/4 完成：简报已生成\n\n步骤 4/4: 正在推送...")
+            await self._safe_edit_message(status_msg, 
+                f"✅ 步骤 1/4 完成\n   抓取 {rss_sources} 个源，获取 {articles_count} 条内容\n✅ 步骤 2/4 完成\n   用户画像已加载\n✅ 步骤 3/4 完成\n   简报已生成\n\n📤 步骤 4/4: 正在推送...")
             
+            # 更新状态消息为"正在发送"
+            await self._safe_edit_message(status_msg, "📤 正在发送简报...")
+            
+            # 发送简报
             await self._send_digest(user_id, digest)
+            
+            # 删除状态消息
+            try:
+                await status_msg.delete()
+            except:
+                pass
             
             return {"success": True, "message": "完整流程测试成功！"}
             
         except Exception as e:
             logger.error(f"完整流程失败: {e}", exc_info=True)
+            try:
+                await self._safe_edit_message(status_msg, f"❌ 流程失败\n\n错误：{str(e)}")
+            except:
+                pass
             return {"success": False, "error": f"流程失败：{str(e)}"}
     
     async def _weekly_feedback_analysis_job(self):

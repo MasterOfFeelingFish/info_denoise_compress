@@ -16,12 +16,12 @@ async def fetch_rss(url, existings: set=set(), cache_manager: SqliteCache = None
             return [], '', {}
         
     if not entries:
-        max_retries = 3
-        base_delay = 10  # seconds
+        max_retries = 1  # 减少重试次数，提高响应速度
+        base_delay = 2  # seconds
         for attempt in range(max_retries):
             try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    response = await client.get(url)
+                async with httpx.AsyncClient(timeout=10) as client:  # 10秒超时
+                    response = await client.get(url, follow_redirects=True)
                     response.raise_for_status()
                 content = response.content  # bytes
                 break
@@ -31,8 +31,8 @@ async def fetch_rss(url, existings: set=set(), cache_manager: SqliteCache = None
                     wis_logger.debug(f"fetching RSS from {url} attempt {attempt + 1} failed with error: {str(e)}, retrying in {delay} seconds")
                     await asyncio.sleep(delay)
                 else:
-                    wis_logger.warning(f"fetching RSS from {url} failed after {max_retries} attempts with error: {str(e)}")
-                    await notify_user(15, [url])
+                    wis_logger.debug(f"fetching RSS from {url} failed: {str(e)}")
+                    # await notify_user(15, [url])  # 不再通知，避免干扰
                     return [], '', {}
         
         parsed = feedparser.parse(content)

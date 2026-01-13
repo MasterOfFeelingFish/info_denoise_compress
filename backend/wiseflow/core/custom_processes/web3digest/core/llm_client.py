@@ -80,79 +80,159 @@ class LLMClient:
                 "reason": "解析失败"
             }
     
-    async def generate_digest(self, user_profile: str, info_list: List[Dict], stats: Dict) -> str:
-        """生成简报"""
-        # 格式化信息列表，去重（基于标题相似度）
-        unique_info_list = self._deduplicate_info(info_list)
+    async def batch_filter_info(self, info_list: List[Dict], user_profile: str, max_select: int = 10) -> List[int]:
+        """
+        批量筛选信息（一次 LLM 调用完成所有筛选，大幅提升速度）
         
-        # 按重要性排序，取 Top 3
-        top3_info = sorted(unique_info_list, key=lambda x: x.get("importance", 5), reverse=True)[:3]
-        other_info = sorted(unique_info_list[3:], key=lambda x: x.get("importance", 5), reverse=True) if len(unique_info_list) > 3 else []
+        Args:
+            info_list: 信息列表，每条包含 index, title, content, source
+            user_profile: 用户画像
+            max_select: 最多选择几条
         
-        # 格式化 Top 3
-        top3_text = "\n".join([
-            f"{i+1}. **{info['title']}**\n   {info.get('summary', '')}\n   来源: {info.get('source', '未知')} | [查看原文]({info.get('url', '#')})"
-            for i, info in enumerate(top3_info)
+        Returns:
+            选中的信息索引列表
+        """
+        # 构建信息摘要列表
+        info_summary = "\n".join([
+            f"[{item['index']}] {item['source']}: {item['title'][:60]}"
+            for item in info_list
         ])
         
-        # 格式化其他信息（按来源分组）
-        other_text = ""
-        if other_info:
-            # 按来源分组
-            by_source = {}
-            for info in other_info:
-                source = info.get('source', '其他')
-                if source not in by_source:
-                    by_source[source] = []
-                by_source[source].append(info)
-            
-            # 生成分类文本
-            sections = []
-            for source, items in by_source.items():
-                section = f"**{source}**\n"
-                for item in items[:3]:  # 每个来源最多3条
-                    section += f"• {item['title']} | [查看]({item.get('url', '#')})\n"
-                sections.append(section)
-            other_text = "\n".join(sections)
-        
-        prompt = f"""
-你是一个 Web3 资讯编辑。请为用户生成一份简洁、有层次的每日简报。
+        prompt = f"""你是 Web3 资讯筛选专家。请根据用户画像，从以下信息中选出最相关、最有价值的 {max_select} 条。
 
 ## 用户画像
 {user_profile}
 
-## 今日必看（Top 3）
-{top3_text if top3_text else "今日暂无重要信息"}
+## 待筛选信息
+{info_summary}
 
-## 更多信息
-{other_text if other_text else "暂无其他信息"}
+## 任务
+从上述信息中选出最符合用户兴趣的 {max_select} 条，返回它们的索引号。
+优先选择：
+1. 与用户关注领域直接相关的
+2. 重大事件、突发新闻
+3. 大额链上操作（如果用户关注）
+4. 空投、Meme 币信息（如果用户关注）
 
-## 价值统计
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## 输出格式
+只返回选中的索引号，用逗号分隔，例如：0,3,5,7,12
+不要返回其他任何内容。"""
+        
+        try:
+            response = await self.complete(prompt, max_tokens=100, temperature=0.1)
+            
+            # 解析返回的索引
+            indices = []
+            for part in response.replace(" ", "").split(","):
+                try:
+                    idx = int(part.strip())
+                    if 0 <= idx < len(info_list):
+                        indices.append(idx)
+                except ValueError:
+                    continue
+            
+            logger.info(f"AI 批量筛选完成，选出 {len(indices)} 条")
+            return indices[:max_select]
+            
+        except Exception as e:
+            logger.error(f"批量筛选失败: {e}")
+            # 失败时返回前 N 条
+            return list(range(min(max_select, len(info_list))))
+    
+    async def generate_digest(self, user_profile: str, info_list: List[Dict], stats: Dict) -> str:
+        """生成美化的简报（Telegram 兼容格式）"""
+        from datetime import datetime
+        import re
+        
+        def escape_md(text: str) -> str:
+            """转义 Markdown 特殊字符"""
+            # 只转义可能导致问题的字符
+            text = text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+            return text
+        
+        def safe_title(text: str, max_len: int = 50) -> str:
+            """安全处理标题"""
+            text = text[:max_len] if len(text) > max_len else text
+            return escape_md(text)
+        
+        # 去重
+        unique_info_list = self._deduplicate_info(info_list)
+        
+        # 获取当前日期
+        today = datetime.now().strftime("%Y年%m月%d日")
+        weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][datetime.now().weekday()]
+        
+        # 分类整理信息
+        top_info = unique_info_list[:3] if unique_info_list else []
+        other_info = unique_info_list[3:7] if len(unique_info_list) > 3 else []
+        
+        # 构建今日必看部分（含可点击链接）
+        top_section = ""
+        emoji_list = ["🔥", "⚡", "💎"]
+        for i, info in enumerate(top_info):
+            emoji = emoji_list[i] if i < len(emoji_list) else "📌"
+            title = safe_title(info.get('title', ''), 45)
+            summary = escape_md(info.get('summary', '')[:80]) if info.get('summary') else ""
+            source = info.get('source', '未知')
+            url = info.get('url', '')
+            
+            top_section += f"{emoji} {title}\n"
+            if summary:
+                top_section += f"   {summary}\n"
+            # 添加可点击链接
+            if url and url != '#':
+                top_section += f"   📍 {source} | [查看原文]({url})\n\n"
+            else:
+                top_section += f"   📍 {source}\n\n"
+        
+        # 构建更多资讯部分（含可点击链接）
+        more_section = ""
+        if other_info:
+            for info in other_info:
+                title = safe_title(info.get('title', ''), 35)
+                source = info.get('source', '')
+                url = info.get('url', '')
+                if url and url != '#':
+                    more_section += f"• [{title}]({url}) ({source})\n"
+                else:
+                    more_section += f"• {title} ({source})\n"
+        
+        # 直接生成格式化简报
+        digest = f"""
+┏━━━━━━━━━━━━━━━━━━━━━━┓
+   🌐 Web3 每日精选
+   📅 {today} {weekday}
+┗━━━━━━━━━━━━━━━━━━━━━━┛
 
-📊 **今日为您做了什么**
+🎯 今日必看
+{'─' * 25}
 
-• 监控信息源: {stats['sources_count']} 个
-• 扫描原始信息: {stats['raw_count']} 条
-• 为您精选: {stats['selected_count']} 条（仅占 {stats['filter_rate']}）
-• 今日为您节省: 约 {stats['time_saved']} 小时
-• 累计为您节省: {stats.get('total_time_saved', 0)} 小时
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-## 简报格式要求
-1. 使用 Markdown 格式，确保 Telegram 能正确渲染
-2. 标题使用 **粗体**
-3. 链接使用 [文本](URL) 格式
-4. 使用分隔线 `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━` 分隔模块
-5. 保持简洁，每条信息不超过2行描述
-6. 避免语义重复的信息
-7. 在最后添加提示："💬 这份简报对您有帮助吗？请点击下方按钮反馈"
-
-请直接输出完整的 Markdown 格式简报，不要添加额外的说明文字。
+{top_section if top_section else "今日暂无重大新闻\n"}
 """
         
-        return await self.complete(prompt, max_tokens=2500, temperature=0.5)
+        if more_section:
+            digest += f"""📰 更多资讯
+{'─' * 25}
+
+{more_section}
+"""
+        
+        digest += f"""📊 价值统计
+{'─' * 25}
+
+🔍 监控 {stats.get('sources_count', 5)} 个信息源
+📥 扫描 {stats.get('raw_count', 0)} 条原始信息
+✨ 精选 {stats.get('selected_count', 0)} 条 ({stats.get('filter_rate', '5%')})
+⏱ 今日节省 ~{stats.get('time_saved', 1)}小时 阅读时间
+📈 累计节省 {stats.get('total_time_saved', 0)}小时
+
+{'━' * 25}
+
+💬 这份简报对您有帮助吗？
+点击下方按钮反馈 👇
+"""
+        
+        return digest.strip()
     
     def _deduplicate_info(self, info_list: List[Dict]) -> List[Dict]:
         """去重：避免语义重复的信息"""

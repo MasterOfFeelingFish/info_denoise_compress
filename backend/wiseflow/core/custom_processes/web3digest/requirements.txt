@@ -1,33 +1,36 @@
 # Telegram Bot
-python-telegram-bot==20.7
+python-telegram-bot>=20.7
 
 # Async support
-aiohttp==3.9.1
-aiofiles==23.2.1
+aiohttp>=3.9.1
+aiofiles>=23.2.1
 
 # LLM API (OpenAI compatible)
-openai==1.6.1
+openai>=1.6.1
 
 # RSS parsing
-feedparser==6.0.10
+feedparser>=6.0.10
 
 # JSON handling
-orjson==3.9.10
+orjson>=3.9.10
 
 # Logging
-loguru==0.7.2
+loguru>=0.7.2
 
 # Schedule
-apscheduler==3.10.4
+apscheduler>=3.10.4
 
 # Environment variables
-python-dotenv==1.0.0
+python-dotenv>=1.0.0
 
 # Date handling
-python-dateutil==2.8.2
+python-dateutil>=2.8.2
 
 # HTTP requests
-httpx==0.26.0
+httpx>=0.25.0
 
 # Pydantic for settings
-pydantic==2.5.0
+pydantic>=1.10.0
+
+# Timezone support
+pytz>=2023.3

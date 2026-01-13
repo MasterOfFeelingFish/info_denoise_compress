@@ -38,18 +38,24 @@ class RSSAppClient:
         """获取所有 Twitter 账号的 RSS 源配置"""
         sources = []
         
-        for account in DefaultRSSSources.TWITTER_ACCOUNTS:
-            username = account["name"]
-            rss_url = self.get_twitter_rss_url(username)
-            
-            sources.append({
-                "type": "rss",
-                "name": f"@{username}",
-                "category": account["category"],
-                "url": rss_url,
-                "source_type": "twitter",
-                "enabled": True
-            })
+        # 1. 优先使用已配置的真实 RSS.app 订阅链接
+        if hasattr(DefaultRSSSources, 'RSSAPP_FEEDS'):
+            for feed in DefaultRSSSources.RSSAPP_FEEDS:
+                sources.append({
+                    "type": "rss",
+                    "name": feed["name"],
+                    "category": feed["category"],
+                    "url": feed["url"],
+                    "source_type": "twitter",
+                    "enabled": feed.get("enabled", True)
+                })
+        
+        # 2. 其他 Twitter 账号（如果有 RSS.app Token 可以自动生成）
+        # 这些账号需要用户手动在 RSS.app 创建订阅
+        # for account in DefaultRSSSources.TWITTER_ACCOUNTS:
+        #     username = account["name"]
+        #     rss_url = self.get_twitter_rss_url(username)
+        #     sources.append({...})
         
         return sources
     

@@ -7,16 +7,29 @@ Web3 Daily Digest - Main Entry Point
 import asyncio
 import logging
 import sys
+import os
 from pathlib import Path
-from dotenv import load_dotenv
-
-# 加载环境变量
-load_dotenv()
 
 # 添加项目根目录到路径，确保可以导入 core 模块
-_project_root = Path(__file__).parent.parent.parent.parent.parent
+# web3digest/main.py -> custom_processes -> core -> wiseflow (项目根)
+_project_root = Path(__file__).parent.parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
+
+# 加载环境变量（从 web3digest 目录）- 必须在导入其他模块之前
+from dotenv import load_dotenv
+_env_file = Path(__file__).parent / ".env"
+load_dotenv(_env_file, override=True)
+
+# 确保 LLM 环境变量已设置（WiseFlow 依赖）
+if not os.getenv("LLM_API_BASE"):
+    os.environ["LLM_API_BASE"] = "https://api.moonshot.cn/v1"
+if not os.getenv("LLM_API_KEY"):
+    print("[ERROR] LLM_API_KEY not set in .env file")
+    sys.exit(1)
+
+print(f"[INFO] Loaded .env from: {_env_file}")
+print(f"[INFO] LLM_API_BASE: {os.getenv('LLM_API_BASE')}")
 
 from core.custom_processes.web3digest.bot.telegram_bot import Web3DigestBot
 from core.custom_processes.web3digest.core.config import settings

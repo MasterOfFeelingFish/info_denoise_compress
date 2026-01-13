@@ -23,8 +23,20 @@ class DigestGenerator:
         self.wiseflow_client = WiseFlowClient()
         self.data_dir = Path(settings.DATA_DIR)
     
-    async def generate_digest(self, user_id: int, user_profile: str) -> Optional[str]:
-        """为用户生成简报"""
+    async def generate_digest(self, user_id: int, user_profile: str) -> Optional[Dict]:
+        """
+        为用户生成简报
+        
+        Returns:
+            {
+                "text": "简报文本",
+                "top_items": [
+                    {"id": "xxx", "title": "xxx", "summary": "xxx", "source": "xxx", "url": "xxx"},
+                    ...
+                ],
+                "stats": {...}
+            }
+        """
         try:
             # 1. 获取今日原始信息
             raw_info = await self._fetch_raw_info()
@@ -42,12 +54,19 @@ class DigestGenerator:
             
             # 3. 生成简报
             stats = await self._calculate_stats(len(raw_info), len(selected_info), user_id)
-            digest = await self.llm_client.generate_digest(user_profile, selected_info, stats)
+            digest_text = await self.llm_client.generate_digest(user_profile, selected_info, stats)
             
             # 4. 保存统计信息
             await self._save_daily_stats(user_id, stats)
             
-            return digest
+            # 5. 返回结构化数据（包含 Top 3 信息用于单条反馈）
+            top_items = selected_info[:3] if selected_info else []
+            
+            return {
+                "text": digest_text,
+                "top_items": top_items,
+                "stats": stats
+            }
             
         except Exception as e:
             logger.error(f"生成简报失败 {user_id}: {e}")
@@ -60,78 +79,69 @@ class DigestGenerator:
         return await self.wiseflow_client.get_today_info()
     
     async def _filter_info(self, raw_info: List[Dict], user_profile: str) -> List[Dict]:
-        """使用 AI 筛选信息"""
-        selected = []
+        """使用 AI 批量筛选信息（优化版：一次筛选多条）"""
         
-        # 并发处理，提高效率
-        semaphore = asyncio.Semaphore(settings.LLM_CONCURRENT_NUMBER)
+        # 1. 限制输入数量，只取最新的 40 条（避免 token 超限）
+        MAX_INPUT = 40
+        if len(raw_info) > MAX_INPUT:
+            logger.info(f"原始信息 {len(raw_info)} 条，只取最新 {MAX_INPUT} 条进行筛选")
+            raw_info = raw_info[:MAX_INPUT]
         
-        async def process_info(info):
-            async with semaphore:
-                result = await self.llm_client.extract_info(
-                    content=info.get("content", ""),
-                    user_profile=user_profile
-                )
-                
-                if result.get("is_valuable") and result.get("importance_score", 0) >= 5:
-                    # 合并信息
-                    return {
-                        "id": info.get("id"),
-                        "title": result.get("title", info.get("title", "")),
-                        "summary": result.get("summary", ""),
-                        "source": info.get("source", ""),
-                        "url": info.get("url", ""),
-                        "importance": result.get("importance_score", 5),
-                        "reason": result.get("reason", ""),
-                        "publish_time": info.get("publish_time", "")
-                    }
-                return None
-        
-        # 并发处理所有信息
-        tasks = [process_info(info) for info in raw_info]
-        results = await asyncio.gather(*tasks)
-        
-        # 过滤并排序
-        selected = [r for r in results if r is not None]
-        selected.sort(key=lambda x: x["importance"], reverse=True)
-        
-        # 限制数量
-        max_count = settings.MAX_INFO_PER_USER
-        min_count = settings.MIN_INFO_PER_USER
-        
-        if len(selected) > max_count:
-            selected = selected[:max_count]
-        elif len(selected) < min_count and len(raw_info) > min_count:
-            # 如果选出的太少，降低标准再选一次
-            logger.info(f"初次筛选只选出 {len(selected)} 条，降低标准重新筛选")
-            return await self._filter_info_with_lower_threshold(raw_info, user_profile)
-        
-        return selected
-    
-    async def _filter_info_with_lower_threshold(self, raw_info: List[Dict], user_profile: str) -> List[Dict]:
-        """降低阈值重新筛选"""
-        selected = []
-        
-        for info in raw_info:
-            result = await self.llm_client.extract_info(
-                content=info.get("content", ""),
-                user_profile=user_profile
-            )
+        # 2. 准备批量筛选的内容（只提取关键信息，减少 token）
+        info_list = []
+        for i, info in enumerate(raw_info):
+            title = info.get("title", "")[:100]  # 限制标题长度
+            content = info.get("content", "")[:300]  # 限制内容长度
+            source = info.get("source", "")
             
-            if result.get("is_valuable") and result.get("importance_score", 0) >= 3:
+            info_list.append({
+                "index": i,
+                "title": title,
+                "content": content,
+                "source": source
+            })
+        
+        # 3. 调用 LLM 批量筛选
+        selected_indices = await self.llm_client.batch_filter_info(
+            info_list=info_list,
+            user_profile=user_profile,
+            max_select=settings.MAX_INFO_PER_USER
+        )
+        
+        # 4. 根据选中的索引构建结果
+        selected = []
+        for idx in selected_indices:
+            if 0 <= idx < len(raw_info):
+                info = raw_info[idx]
                 selected.append({
                     "id": info.get("id"),
-                    "title": result.get("title", info.get("title", "")),
-                    "summary": result.get("summary", ""),
+                    "title": info.get("title", ""),
+                    "summary": info.get("content", "")[:200],  # 摘要
                     "source": info.get("source", ""),
                     "url": info.get("url", ""),
-                    "importance": result.get("importance_score", 5),
-                    "reason": result.get("reason", ""),
+                    "importance": 7,  # 默认重要度
+                    "reason": "",
                     "publish_time": info.get("publish_time", "")
                 })
         
-        # 排序并限制数量
-        selected.sort(key=lambda x: x["importance"], reverse=True)
+        # 5. 如果筛选结果太少，直接返回前 N 条
+        if len(selected) < settings.MIN_INFO_PER_USER:
+            logger.info(f"AI 筛选只选出 {len(selected)} 条，补充到最少数量")
+            for info in raw_info:
+                if len(selected) >= settings.MIN_INFO_PER_USER:
+                    break
+                if info.get("id") not in [s.get("id") for s in selected]:
+                    selected.append({
+                        "id": info.get("id"),
+                        "title": info.get("title", ""),
+                        "summary": info.get("content", "")[:200],
+                        "source": info.get("source", ""),
+                        "url": info.get("url", ""),
+                        "importance": 5,
+                        "reason": "",
+                        "publish_time": info.get("publish_time", "")
+                    })
+        
         return selected[:settings.MAX_INFO_PER_USER]
     
     async def _get_sources_count(self, user_id: int = None) -> int:
