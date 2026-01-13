@@ -1,18 +1,20 @@
 # Web3 Daily Digest
 
-> 🚀 AI 驱动的 Web3 个性化信息聚合服务
+> AI 驱动的 Web3 个性化信息聚合服务
 
-每天帮你从海量信息中筛选出真正有价值的内容，10 分钟看完，不错过任何重要信息。
+每天从海量信息中筛选出真正有价值的内容，10 分钟看完，不错过任何重要信息。
 
-## ✨ 核心特点
+## 核心特点
 
-- **AI 个性化筛选** - 基于用户画像，LLM 语义理解，不是关键词匹配
+- **AI 个性化筛选** - 基于用户画像的 LLM 语义理解，不是关键词匹配
 - **对话式偏好设置** - 3 轮 AI 对话完成偏好收集，无需填表
 - **价值可感知** - 每份简报展示"扫描了多少、精选了多少、节省了多少时间"
-- **反馈学习闭环** - 用户反馈 → AI 学习 → 推送越来越准
-- **More Intelligence, Less Structure** - 用户画像用自然语言描述，AI 自己决定如何使用
+- **反馈学习闭环** - 用户反馈 → AI 分析 → 画像更新 → 推送越来越准
+- **自然语言画像** - 用户偏好以自然语言描述，AI 自己决定如何使用
 
-## 📦 功能概览
+---
+
+## 功能概览
 
 ```
 用户注册 → AI 对话收集偏好 → 每日自动抓取 → AI 智能筛选 → 生成简报 → Telegram 推送
@@ -20,62 +22,191 @@
                                     └──────── AI 分析反馈，更新用户画像 ←──────┘
 ```
 
-**MVP 范围**：
-- ✅ Twitter + 网站信息源
-- ✅ AI 个性化筛选与简报生成
-- ✅ Telegram Bot 推送
-- ✅ 用户反馈收集与学习闭环
+### Bot 命令
 
-## 🛠 技术栈
-
-| 模块 | 选型 |
+| 命令 | 功能 |
 |------|------|
-| 核心框架 | [WiseFlow](https://github.com/TeamWiseFlow/wiseflow) - LLM 驱动的信息抓取 |
-| 推送能力 | 借鉴 [TrendRadar](https://github.com/zhu327/TrendRadar) |
-| Twitter 信源 | RSS.app（Twitter → RSS） |
-| AI 服务 | 硅基流动 / DeepSeek（OpenAI 兼容 API） |
-| 数据存储 | JSON 文件（MVP 轻量方案） |
-| 部署 | Docker |
+| `/start` | 主菜单 / 新用户注册流程 |
+| `/settings` | 查看/更新/重置偏好设置 |
+| `/sources` | 管理信息源 (Twitter/网站) |
+| `/stats` | 查看个人统计 |
+| `/help` | 帮助信息 |
 
-## 📁 项目结构
+### 已实现功能
+
+- [x] Telegram Bot 完整交互
+- [x] 3 轮 AI 对话注册流程
+- [x] RSS 异步抓取 (Twitter + 网站)
+- [x] AI 内容筛选与排序
+- [x] 个性化简报生成
+- [x] 每日定时推送
+- [x] 用户反馈收集
+- [x] AI 反馈学习闭环
+- [x] Docker 部署
+
+---
+
+## 技术栈
+
+| 模块 | 技术 |
+|------|------|
+| Bot 框架 | python-telegram-bot v22 |
+| HTTP 客户端 | httpx (异步) |
+| RSS 解析 | feedparser |
+| 定时任务 | telegram JobQueue |
+| LLM | Google Gemini 3 Pro REST API |
+| 数据存储 | JSON 文件 |
+
+---
+
+## 项目结构
 
 ```
 .
-├── README.md                           # 本文件
-├── 【定稿】产品需求文档_PRD_Final.md      # 产品需求文档
-├── 技术路线文档_Technical_Roadmap.md     # 技术方案详细说明
-├── 测试用例与验收标准_Test_Cases.md      # 测试与验收文档
-├── Bot/                                # 开发代码（待开发）
-├── WiseFlow/                           # WiseFlow 核心框架
-└── TrendRadar/                         # TrendRadar 参考代码
+├── bot/                          # Telegram Bot (Python)
+│   ├── main.py                   # 入口 + 定时任务
+│   ├── config.py                 # 配置管理
+│   ├── handlers/                 # 命令处理器
+│   │   ├── start.py              # /start + 注册流程
+│   │   ├── settings.py           # /settings 偏好管理
+│   │   ├── feedback.py           # 反馈收集
+│   │   └── sources.py            # /sources 信息源
+│   ├── services/                 # 业务服务
+│   │   ├── gemini.py             # Gemini API 封装
+│   │   ├── rss_fetcher.py        # RSS 抓取
+│   │   ├── content_filter.py     # AI 筛选
+│   │   ├── report_generator.py   # 简报生成
+│   │   └── profile_updater.py    # 画像更新
+│   ├── utils/
+│   │   ├── json_storage.py       # JSON 存储
+│   │   └── prompt_loader.py      # Prompt 加载
+│   ├── prompts/                  # Prompt 模板
+│   ├── tests/                    # 测试用例
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── .env.example
+│
+├── data/                         # 数据存储
+│   ├── users.json                # 用户列表
+│   ├── sources.json              # 信息源配置
+│   ├── profiles/                 # 用户画像
+│   ├── feedback/                 # 反馈记录
+│   └── daily_stats/              # 每日统计
+│
+├── docker-compose.yml            # Docker 编排
+├── CLAUDE.md                     # 项目规范
+└── README.md                     # 本文件
 ```
 
-## 🚀 快速开始
+---
+
+## 快速开始
+
+### 1. 克隆仓库
 
 ```bash
-# 1. 克隆仓库
 git clone https://github.com/your-username/web3-daily-digest.git
 cd web3-daily-digest
+```
 
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env，填入 LLM API Key、Telegram Bot Token 等
+### 2. 配置环境变量
 
-# 3. 启动服务
+```bash
+cp bot/.env.example bot/.env
+```
+
+编辑 `bot/.env`:
+
+```bash
+# ============ 必填 ============
+GEMINI_API_KEY=your_gemini_api_key
+TELEGRAM_BOT_TOKEN=your_bot_token
+
+# ============ Gemini 配置 (可选) ============
+# 自定义 API URL (代理或不同区域)
+# 支持两种格式:
+#   1. Base URL: https://your-proxy.com (自动补全路径)
+#   2. 完整 URL: https://your-proxy.com/v1beta/models/gemini-3-pro:generateContent
+GEMINI_API_URL=
+
+# 模型选择 (默认: gemini-3-pro)
+GEMINI_MODEL=gemini-3-pro
+
+# 推理深度 (仅 Gemini 3 Pro): LOW = 更快, HIGH = 更好
+GEMINI_THINKING_LEVEL=HIGH
+
+# ============ 推送配置 (可选) ============
+PUSH_HOUR=9          # 推送时间 (小时，北京时间)
+PUSH_MINUTE=0        # 推送时间 (分钟)
+
+# ============ 数据存储 (可选) ============
+DATA_DIR=./data      # 数据目录
+```
+
+### 3. Docker 部署 (推荐)
+
+```bash
 docker-compose up -d
 ```
 
-详细部署说明请参考 [技术路线文档](./技术路线文档_Technical_Roadmap.md)。
+查看日志:
 
-## 📖 文档索引
+```bash
+docker-compose logs -f
+```
+
+### 4. 本地开发
+
+```bash
+cd bot
+pip install -r requirements.txt
+python main.py
+```
+
+---
+
+## 配置信息源
+
+### Twitter 源
+
+Twitter 不提供公开 RSS，需要使用 [RSS.app](https://rss.app) 服务转换。
+
+1. 在 RSS.app 创建 Twitter Feed
+2. 获取 RSS URL
+3. 通过 Bot `/sources` 命令添加
+
+### 网站 RSS 源
+
+预置 4 个 Web3 媒体:
+
+- The Block: `https://www.theblock.co/rss.xml`
+- CoinDesk: `https://www.coindesk.com/arc/outboundfeeds/rss/`
+- Decrypt: `https://decrypt.co/feed`
+- Cointelegraph: `https://cointelegraph.com/rss`
+
+可通过 `/sources` 命令添加更多。
+
+---
+
+## 测试
+
+```bash
+cd bot
+python -m pytest tests/ -v
+```
+
+---
+
+## 文档索引
 
 | 文档 | 说明 |
 |------|------|
-| [产品需求文档](./产品需求文档_PRD_Final.md) | 产品定位、功能设计、商业模式 |
-|仅参考这份文档，不要盲从 [技术路线文档](./技术路线文档_Technical_Roadmap.md) | 技术选型、架构设计、Prompt 设计 |
-| [测试与验收](./测试用例与验收标准_Test_Cases.md) | 测试用例、验收标准 |
+| [产品需求文档](./产品需求文档_PRD_Final.md) | 产品定位、功能设计 |
+| [测试用例](./测试用例与验收标准_Test_Cases.md) | 测试用例、验收标准 |
 
-## 🎯 MVP 目标
+---
+
+## MVP 目标
 
 | 指标 | 目标 |
 |------|------|
@@ -84,10 +215,12 @@ docker-compose up -d
 | 推送渠道 | Telegram |
 | 推送频率 | 每日 1 次 |
 
-## 📄 License
+---
+
+## License
 
 MIT
 
 ---
 
-**问题反馈**：请提交 Issue 或联系项目负责人
+**问题反馈**: 请提交 Issue

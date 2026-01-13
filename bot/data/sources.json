@@ -1,0 +1,22 @@
+{
+  "twitter": {
+    "@VitalikButerin": "",
+    "@lookonchain": "",
+    "@whale_alert": "",
+    "@EmberCN": "",
+    "@ai_9684xtpa": "",
+    "@ethereum": "",
+    "@solana": "",
+    "@arbitrum": "",
+    "@CoinDesk": "",
+    "@TheBlock__": "",
+    "@WuBlockchain": "",
+    "@BlockBeatsAsia": ""
+  },
+  "websites": {
+    "The Block": "https://www.theblock.co/rss.xml",
+    "CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "Decrypt": "https://decrypt.co/feed",
+    "Cointelegraph": "https://cointelegraph.com/rss"
+  }
+}
