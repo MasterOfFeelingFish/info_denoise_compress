@@ -37,16 +37,13 @@ class DigestScheduler:
         # 启动抓取调度器（每小时抓取一次）
         await self.crawler_scheduler.start()
         
-        # 添加每日推送任务
-        push_time = settings.DAILY_PUSH_TIME.split(":")
-        hour = int(push_time[0])
-        minute = int(push_time[1])
-        
+        # 添加每小时检查推送任务（支持用户自定义推送时间）
+        # 每小时的第0分钟执行，检查哪些用户需要推送
         self.scheduler.add_job(
-            func=self._daily_digest_job,
-            trigger=CronTrigger(hour=hour, minute=minute),
-            id="daily_digest",
-            name="每日简报推送",
+            func=self._check_and_push_digest,
+            trigger=CronTrigger(minute=0),  # 每小时执行一次
+            id="hourly_digest_check",
+            name="每小时检查推送任务",
             replace_existing=True
         )
         
@@ -63,7 +60,7 @@ class DigestScheduler:
         self.scheduler.start()
         self._running = True
         
-        logger.info(f"调度器已启动，每日 {settings.DAILY_PUSH_TIME} 推送简报")
+        logger.info("调度器已启动，每小时检查用户推送时间并推送简报")
     
     async def stop(self):
         """停止调度器"""
@@ -77,15 +74,19 @@ class DigestScheduler:
         self._running = False
         logger.info("调度器已停止")
     
-    async def _daily_digest_job(self):
-        """每日简报任务"""
+    async def _check_and_push_digest(self):
+        """每小时检查并推送简报（支持用户自定义推送时间）"""
         from datetime import datetime
-        job_start_time = datetime.now()
-        logger.info(f"开始执行每日简报任务 - {job_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        current_time = datetime.now()
+        current_hour = current_time.hour
+        current_minute = current_time.minute
+        
+        logger.info(f"开始检查推送任务 - {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
         success_count = 0
         failed_count = 0
         skipped_count = 0
+        checked_count = 0
         
         try:
             # 获取所有活跃用户
@@ -95,12 +96,28 @@ class DigestScheduler:
                 logger.info("没有活跃用户，任务结束")
                 return
             
-            logger.info(f"找到 {len(users)} 个活跃用户，开始推送")
+            logger.info(f"找到 {len(users)} 个活跃用户，开始检查推送时间")
             
-            # 为每个用户生成并推送简报
+            # 为每个用户检查推送时间并推送
             for user in users:
                 try:
                     user_id = int(user["id"])
+                    checked_count += 1
+                    
+                    # 获取用户推送时间
+                    user_push_time = await self.bot.profile_manager.get_push_time(user_id)
+                    push_hour, push_minute = map(int, user_push_time.split(":"))
+                    
+                    # 检查是否到了该用户的推送时间
+                    # 由于调度器每小时执行一次（在整点），所以只检查小时是否匹配
+                    # 如果用户设置了非整点时间（如 09:30），会在该小时的整点（09:00）推送
+                    if current_hour != push_hour:
+                        # 不是这个用户的推送时间，跳过
+                        continue
+                    
+                    # 当前是整点（current_minute == 0），且小时匹配，执行推送
+                    
+                    logger.info(f"用户 {user_id} 的推送时间到了 ({user_push_time})，开始推送")
                     
                     # 检查用户是否有画像
                     profile = await self.bot.profile_manager.get_profile(user_id)
@@ -116,7 +133,7 @@ class DigestScheduler:
                         # 推送简报（带重试）
                         success = await self._send_digest_with_retry(user_id, digest, max_retries=3)
                         if success:
-                            logger.info(f"✅ 已为用户 {user_id} 推送简报")
+                            logger.info(f"✅ 已为用户 {user_id} 推送简报（推送时间：{user_push_time}）")
                             success_count += 1
                         else:
                             logger.error(f"❌ 用户 {user_id} 推送失败（已重试）")
@@ -133,17 +150,18 @@ class DigestScheduler:
                     failed_count += 1
                     continue
             
-            job_end_time = datetime.now()
-            duration = (job_end_time - job_start_time).total_seconds()
-            
-            logger.info(
-                f"每日简报任务完成 - "
-                f"成功: {success_count}, 失败: {failed_count}, 跳过: {skipped_count}, "
-                f"耗时: {duration:.1f}秒"
-            )
+            if checked_count > 0:
+                logger.info(
+                    f"推送检查完成 - "
+                    f"检查: {checked_count}, 成功: {success_count}, 失败: {failed_count}, 跳过: {skipped_count}"
+                )
             
         except Exception as e:
-            logger.error(f"每日简报任务失败: {e}", exc_info=True)
+            logger.error(f"推送检查任务失败: {e}", exc_info=True)
+    
+    async def _daily_digest_job(self):
+        """每日简报任务（保留用于兼容性，实际使用 _check_and_push_digest）"""
+        await self._check_and_push_digest()
     
     async def _send_digest(self, user_id: int, digest_data):
         """
@@ -421,8 +439,15 @@ class DigestScheduler:
             digest = await self.digest_generator.generate_digest(user_id, profile)
             
             if not digest:
-                await self._safe_edit_message(status_msg, "⚠️ 暂无符合您偏好的信息\n\n可能原因：\n• 今日资讯与您的关注领域不匹配\n• 请尝试调整偏好设置 /settings")
-                return {"success": False, "error": "抱歉，暂无符合您偏好的信息"}
+                # 这种情况应该很少见，因为 generate_digest 现在有完整的兜底逻辑
+                logger.error(f"用户 {user_id} 简报生成失败（返回 None），这不应该发生")
+                await self._safe_edit_message(status_msg, 
+                    "⚠️ 简报生成遇到问题\n\n"
+                    "抱歉，在生成简报时遇到了技术问题。\n\n"
+                    "💡 建议：\n"
+                    "• 请稍后使用 /test 命令重新生成简报\n"
+                    "• 如果问题持续，请联系管理员")
+                return {"success": False, "error": "简报生成失败"}
             
             # 步骤 4: 推送简报
             await self._safe_edit_message(status_msg, 

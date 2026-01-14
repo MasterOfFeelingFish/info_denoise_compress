@@ -3,6 +3,7 @@ LLM 客户端模块 - 封装 OpenAI 兼容 API
 """
 import asyncio
 import json
+import re
 from typing import List, Dict, Optional
 import openai
 from core.custom_processes.web3digest.utils.logger import setup_logger
@@ -92,34 +93,64 @@ class LLMClient:
         Returns:
             选中的信息索引列表
         """
-        # 构建信息摘要列表
+        if not info_list:
+            return []
+        
+        # 构建信息摘要列表（包含更多内容信息）
         info_summary = "\n".join([
-            f"[{item['index']}] {item['source']}: {item['title'][:60]}"
+            f"[{item['index']}] {item['source']}: {item['title'][:80]}"
             for item in info_list
         ])
         
+        # 从用户画像中提取关键偏好（结构化数据）
+        interests_keywords = []
+        dislikes_keywords = []
+        
+        if "关注领域" in user_profile:
+            interests_match = re.search(r'关注领域[：:]\s*([^\n]+)', user_profile)
+            if interests_match:
+                interests_text = interests_match.group(1)
+                interests_keywords = [x.strip() for x in interests_text.replace("•", "").split(",") if x.strip()]
+        
+        if "不感兴趣" in user_profile or "不感兴趣的内容" in user_profile:
+            dislikes_match = re.search(r'不感兴趣[：:]\s*([^\n]+)', user_profile)
+            if dislikes_match:
+                dislikes_text = dislikes_match.group(1)
+                dislikes_keywords = [x.strip() for x in dislikes_text.replace("•", "").split(",") if x.strip()]
+        
+        # 构建更精确的 prompt
         prompt = f"""你是 Web3 资讯筛选专家。请根据用户画像，从以下信息中选出最相关、最有价值的 {max_select} 条。
 
-## 用户画像
+## 用户画像（结构化数据）
 {user_profile}
 
-## 待筛选信息
+## 关键偏好提取
+- 关注领域关键词: {', '.join(interests_keywords) if interests_keywords else '未明确指定'}
+- 不感兴趣内容: {', '.join(dislikes_keywords) if dislikes_keywords else '无'}
+
+## 待筛选信息（共 {len(info_list)} 条）
 {info_summary}
 
-## 任务
-从上述信息中选出最符合用户兴趣的 {max_select} 条，返回它们的索引号。
-优先选择：
-1. 与用户关注领域直接相关的
-2. 重大事件、突发新闻
-3. 大额链上操作（如果用户关注）
-4. 空投、Meme 币信息（如果用户关注）
+## 筛选任务
+**必须**从上述信息中选出 {max_select} 条，返回它们的索引号。
+
+筛选策略：
+1. **优先选择**：与用户关注领域直接相关的（{', '.join(interests_keywords[:3]) if interests_keywords else 'Web3相关'}）
+2. **必须包含**：重大事件、突发新闻、重要公告
+3. **如果用户关注**：链上数据、空投信息、Meme币、技术进展
+4. **避免选择**：用户明确不感兴趣的内容（{', '.join(dislikes_keywords) if dislikes_keywords else '无'}）
+
+**重要**：
+- 即使信息不完全匹配用户偏好，也要选出 {max_select} 条最有价值的信息
+- 优先选择重要新闻和重大事件
+- 确保返回 {max_select} 个索引号，不要返回空列表
 
 ## 输出格式
-只返回选中的索引号，用逗号分隔，例如：0,3,5,7,12
-不要返回其他任何内容。"""
+只返回选中的索引号，用逗号分隔，例如：0,3,5,7,12,15,18,20
+必须返回 {max_select} 个索引号，不要返回其他任何内容。"""
         
         try:
-            response = await self.complete(prompt, max_tokens=100, temperature=0.1)
+            response = await self.complete(prompt, max_tokens=150, temperature=0.1)
             
             # 解析返回的索引
             indices = []
@@ -131,13 +162,25 @@ class LLMClient:
                 except ValueError:
                     continue
             
+            # 如果解析出的索引不足，补充到 max_select 条
+            if len(indices) < max_select:
+                logger.warning(f"AI 只选出 {len(indices)} 条，少于要求的 {max_select} 条，补充信息")
+                # 补充未选中的信息
+                for i in range(len(info_list)):
+                    if len(indices) >= max_select:
+                        break
+                    if i not in indices:
+                        indices.append(i)
+            
             logger.info(f"AI 批量筛选完成，选出 {len(indices)} 条")
             return indices[:max_select]
             
         except Exception as e:
             logger.error(f"批量筛选失败: {e}")
-            # 失败时返回前 N 条
-            return list(range(min(max_select, len(info_list))))
+            # 失败时返回前 N 条（确保不返回空）
+            fallback = list(range(min(max_select, len(info_list))))
+            logger.warning(f"使用兜底逻辑，返回前 {len(fallback)} 条")
+            return fallback
     
     async def generate_digest(self, user_profile: str, info_list: List[Dict], stats: Dict) -> str:
         """生成美化的简报（Telegram 兼容格式）"""

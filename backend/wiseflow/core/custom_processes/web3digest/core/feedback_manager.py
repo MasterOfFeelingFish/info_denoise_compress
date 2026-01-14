@@ -65,9 +65,12 @@ class FeedbackManager:
             
             logger.info(f"保存用户 {user_id} 的反馈: {overall}")
             
-            # 检查是否达到阈值，如果达到则触发分析
+            # 每次反馈都实时更新画像
             from core.custom_processes.web3digest.core.feedback_analyzer import FeedbackAnalyzer
             analyzer = FeedbackAnalyzer()
+            # 实时更新画像（基于单条反馈）
+            await analyzer.update_profile_with_feedback(user_id, feedback_record)
+            # 如果达到阈值，触发深度分析
             await analyzer.analyze_if_threshold_reached(user_id)
             
             return True
@@ -163,6 +166,18 @@ class FeedbackManager:
                 json.dump(feedbacks_data, f, ensure_ascii=False, indent=2)
             
             logger.info(f"保存用户 {user_id} 的单条反馈: {item_id} - {rating}")
+            
+            # 单条反馈也实时更新画像
+            from core.custom_processes.web3digest.core.feedback_analyzer import FeedbackAnalyzer
+            analyzer = FeedbackAnalyzer()
+            # 构建反馈记录格式
+            feedback_record = {
+                "overall": "positive" if rating == "like" else "negative",
+                "reason_selected": [f"单条信息{'喜欢' if rating == 'like' else '不感兴趣'}"],
+                "reason_text": f"信息ID: {item_id}, 来源: {source}"
+            }
+            await analyzer.update_profile_with_feedback(user_id, feedback_record)
+            
             return True
             
         except Exception as e:

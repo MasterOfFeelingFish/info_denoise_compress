@@ -3,6 +3,7 @@
 """
 import asyncio
 import json
+from collections import Counter
 from datetime import datetime, date
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -38,21 +39,118 @@ class DigestGenerator:
             }
         """
         try:
-            # 1. 获取今日原始信息
+            # 1. 获取结构化画像数据（用于AI筛选）
+            from core.custom_processes.web3digest.core.profile_manager import ProfileManager
+            profile_manager = ProfileManager()
+            structured_profile = await profile_manager.get_structured_profile(user_id)
+            
+            # 构建增强的画像描述（结合结构化数据和文本）
+            enhanced_profile = await self._build_enhanced_profile(user_profile, structured_profile)
+            
+            # 2. 获取今日原始信息
             raw_info = await self._fetch_raw_info()
             
             if not raw_info:
-                logger.warning("没有获取到原始信息")
-                return None
+                logger.warning("没有获取到原始信息，生成友好提示简报")
+                # 即使没有原始信息，也生成一个友好的提示简报
+                try:
+                    total_time_saved = await self._get_total_time_saved(user_id, exclude_today=False)
+                except Exception as e:
+                    logger.warning(f"获取累计节省时间失败: {e}")
+                    total_time_saved = 0.0
+                
+                stats = {
+                    "sources_count": 0,
+                    "raw_count": 0,
+                    "selected_count": 0,
+                    "filter_rate": "0%",
+                    "time_saved": 0,
+                    "total_time_saved": total_time_saved
+                }
+                
+                digest_text = f"""📰 **Web3 每日简报** - {datetime.now().strftime('%Y年%m月%d日')}
+
+⚠️ **今日暂无新信息**
+
+可能原因：
+• 信息源正在更新中，请稍后再试
+• 今日暂无符合您偏好的新内容
+
+💡 **建议**：
+• 您可以稍后使用 /test 命令重新生成简报
+• 或调整偏好设置，扩大关注范围
+
+📊 **统计信息**
+• 累计节省时间：{stats['total_time_saved']} 小时
+"""
+                
+                return {
+                    "text": digest_text,
+                    "top_items": [],
+                    "stats": stats
+                }
             
-            # 2. AI 筛选个性化内容
-            selected_info = await self._filter_info(raw_info, user_profile)
+            # 3. AI 筛选个性化内容（使用增强的画像）
+            selected_info = await self._filter_info(raw_info, enhanced_profile)
             
+            # 确保筛选结果不为空（_filter_info 已有兜底逻辑，但这里再检查一次）
             if not selected_info:
-                logger.warning(f"用户 {user_id} 没有符合条件的信息")
-                return None
+                logger.error(f"用户 {user_id} 筛选结果为空，使用原始信息前 {settings.MIN_INFO_PER_USER} 条作为兜底")
+                # 最终兜底：直接使用原始信息前 N 条
+                selected_info = []
+                for info in raw_info[:settings.MIN_INFO_PER_USER]:
+                    selected_info.append({
+                        "id": info.get("id"),
+                        "title": info.get("title", ""),
+                        "summary": info.get("content", "")[:200],
+                        "source": info.get("source", ""),
+                        "url": info.get("url", ""),
+                        "importance": 5,
+                        "reason": "系统兜底（确保有内容）",
+                        "publish_time": info.get("publish_time", "")
+                    })
+                
+                if not selected_info:
+                    logger.error(f"用户 {user_id} 原始信息也为空，生成友好提示简报")
+                    # 即使原始信息为空，也生成一个友好的提示简报
+                    try:
+                        total_time_saved = await self._get_total_time_saved(user_id, exclude_today=False)
+                    except Exception as e:
+                        logger.warning(f"获取累计节省时间失败: {e}")
+                        total_time_saved = 0.0
+                    
+                    stats = {
+                        "sources_count": 0,
+                        "raw_count": 0,
+                        "selected_count": 0,
+                        "filter_rate": "0%",
+                        "time_saved": 0,
+                        "total_time_saved": total_time_saved
+                    }
+                    
+                    digest_text = f"""📰 **Web3 每日简报** - {datetime.now().strftime('%Y年%m月%d日')}
+
+⚠️ **今日暂无新信息**
+
+可能原因：
+• 信息源正在更新中，请稍后再试
+• 今日暂无符合您偏好的新内容
+
+💡 **建议**：
+• 您可以稍后使用 /test 命令重新生成简报
+• 或调整偏好设置，扩大关注范围
+
+📊 **统计信息**
+• 累计节省时间：{stats['total_time_saved']} 小时
+"""
+                    
+                    return {
+                        "text": digest_text,
+                        "top_items": [],
+                        "stats": stats
+                    }
             
-            # 3. 生成简报
+            # 4. 生成简报
             stats = await self._calculate_stats(len(raw_info), len(selected_info), user_id)
             digest_text = await self.llm_client.generate_digest(user_profile, selected_info, stats)
             
@@ -69,8 +167,70 @@ class DigestGenerator:
             }
             
         except Exception as e:
-            logger.error(f"生成简报失败 {user_id}: {e}")
-            return None
+            logger.error(f"生成简报失败 {user_id}: {e}", exc_info=True)
+            # 即使发生异常，也返回一个友好的错误提示简报
+            try:
+                # 尝试获取累计节省时间，如果失败则使用默认值
+                try:
+                    total_time_saved = await self._get_total_time_saved(user_id, exclude_today=False)
+                except Exception as time_error:
+                    logger.warning(f"获取累计节省时间失败: {time_error}")
+                    total_time_saved = 0.0
+                
+                stats = {
+                    "sources_count": 0,
+                    "raw_count": 0,
+                    "selected_count": 0,
+                    "filter_rate": "0%",
+                    "time_saved": 0,
+                    "total_time_saved": total_time_saved
+                }
+                
+                digest_text = f"""📰 **Web3 每日简报** - {datetime.now().strftime('%Y年%m月%d日')}
+
+⚠️ **简报生成遇到问题**
+
+抱歉，在生成简报时遇到了技术问题。
+
+💡 **建议**：
+• 请稍后使用 /test 命令重新生成简报
+• 如果问题持续，请联系管理员
+
+📊 **统计信息**
+• 累计节省时间：{total_time_saved} 小时
+"""
+                
+                return {
+                    "text": digest_text,
+                    "top_items": [],
+                    "stats": stats
+                }
+            except Exception as fallback_error:
+                # 如果连兜底都失败了，记录错误并返回一个最简单的简报
+                logger.error(f"兜底简报生成也失败: {fallback_error}", exc_info=True)
+                digest_text = f"""📰 **Web3 每日简报** - {datetime.now().strftime('%Y年%m月%d日')}
+
+⚠️ **简报生成遇到问题**
+
+抱歉，在生成简报时遇到了技术问题。
+
+💡 **建议**：
+• 请稍后使用 /test 命令重新生成简报
+• 如果问题持续，请联系管理员
+"""
+                
+                return {
+                    "text": digest_text,
+                    "top_items": [],
+                    "stats": {
+                        "sources_count": 0,
+                        "raw_count": 0,
+                        "selected_count": 0,
+                        "filter_rate": "0%",
+                        "time_saved": 0,
+                        "total_time_saved": 0.0
+                    }
+                }
     
     async def _fetch_raw_info(self, user_id: int = None) -> List[Dict]:
         """获取今日原始信息"""
@@ -124,13 +284,14 @@ class DigestGenerator:
                     "publish_time": info.get("publish_time", "")
                 })
         
-        # 5. 如果筛选结果太少，直接返回前 N 条
+        # 5. 确保至少返回 MIN_INFO_PER_USER 条（兜底逻辑）
         if len(selected) < settings.MIN_INFO_PER_USER:
-            logger.info(f"AI 筛选只选出 {len(selected)} 条，补充到最少数量")
+            logger.info(f"AI 筛选只选出 {len(selected)} 条，补充到最少数量 {settings.MIN_INFO_PER_USER}")
+            selected_ids = {s.get("id") for s in selected}
             for info in raw_info:
                 if len(selected) >= settings.MIN_INFO_PER_USER:
                     break
-                if info.get("id") not in [s.get("id") for s in selected]:
+                if info.get("id") not in selected_ids:
                     selected.append({
                         "id": info.get("id"),
                         "title": info.get("title", ""),
@@ -138,11 +299,95 @@ class DigestGenerator:
                         "source": info.get("source", ""),
                         "url": info.get("url", ""),
                         "importance": 5,
-                        "reason": "",
+                        "reason": "补充信息（确保最少数量）",
                         "publish_time": info.get("publish_time", "")
                     })
+                    selected_ids.add(info.get("id"))
+        
+        # 6. 最终检查：如果还是为空，返回前 N 条（绝对不能返回空）
+        if not selected and raw_info:
+            logger.warning(f"筛选结果为空，使用兜底逻辑返回前 {settings.MIN_INFO_PER_USER} 条")
+            for info in raw_info[:settings.MIN_INFO_PER_USER]:
+                selected.append({
+                    "id": info.get("id"),
+                    "title": info.get("title", ""),
+                    "summary": info.get("content", "")[:200],
+                    "source": info.get("source", ""),
+                    "url": info.get("url", ""),
+                    "importance": 5,
+                    "reason": "兜底信息（确保有内容）",
+                    "publish_time": info.get("publish_time", "")
+                })
         
         return selected[:settings.MAX_INFO_PER_USER]
+    
+    async def _build_enhanced_profile(self, text_profile: str, structured_profile: Optional[Dict] = None) -> str:
+        """构建增强的画像描述（结合结构化数据和文本，用于 AI 筛选）"""
+        if not structured_profile:
+            return text_profile
+        
+        # 从结构化数据中提取关键信息
+        interests = structured_profile.get("interests", [])
+        preferences = structured_profile.get("preferences", {})
+        feedback_history = structured_profile.get("feedback_history", [])
+        ai_understanding = structured_profile.get("ai_understanding", "")
+        
+        # 构建结构化偏好描述（用于 AI 筛选的精确 prompt）
+        structured_parts = []
+        
+        # 1. 关注领域（最重要）
+        if interests:
+            structured_parts.append(f"【关注领域】{', '.join(interests)}")
+        
+        # 2. 内容类型偏好
+        if preferences.get("content_types"):
+            structured_parts.append(f"【内容类型偏好】{', '.join(preferences['content_types'])}")
+        
+        # 3. 偏好信息源
+        if preferences.get("sources"):
+            structured_parts.append(f"【偏好信息源】{', '.join(preferences['sources'])}")
+        
+        # 4. 喜欢的内容
+        if preferences.get("likes"):
+            structured_parts.append(f"【喜欢的内容】{', '.join(preferences['likes'])}")
+        
+        # 5. 不感兴趣的内容（重要：用于排除）
+        if preferences.get("dislikes"):
+            structured_parts.append(f"【不感兴趣】{', '.join(preferences['dislikes'])}（避免选择此类内容）")
+        
+        # 6. AI 理解（从反馈中学习到的）
+        if ai_understanding:
+            structured_parts.append(f"【AI 理解】{ai_understanding}")
+        
+        # 7. 最近的反馈模式（用于优化筛选）
+        if feedback_history:
+            recent_feedback = feedback_history[-5:]  # 最近5条反馈
+            negative_reasons = []
+            positive_count = 0
+            for fb in recent_feedback:
+                if fb.get("overall") == "negative" and fb.get("reason_selected"):
+                    negative_reasons.extend(fb["reason_selected"])
+                elif fb.get("overall") == "positive":
+                    positive_count += 1
+            
+            if negative_reasons:
+                # 统计最常见的负面反馈原因
+                reason_counts = Counter(negative_reasons)
+                top_reasons = [reason for reason, _ in reason_counts.most_common(3)]
+                structured_parts.append(f"【最近反馈问题】{', '.join(top_reasons)}（避免类似问题）")
+            
+            if positive_count > 0:
+                structured_parts.append(f"【最近正面反馈】{positive_count}次（保持当前方向）")
+        
+        # 组合：结构化数据优先，文本画像作为补充
+        if structured_parts:
+            enhanced = "## 用户偏好画像（结构化数据）\n" + "\n".join(structured_parts)
+            if text_profile:
+                enhanced += f"\n\n## 详细描述\n{text_profile}"
+        else:
+            enhanced = text_profile
+        
+        return enhanced
     
     async def _get_sources_count(self, user_id: int = None) -> int:
         """获取实际的信息源数量（用户启用的源）"""
@@ -162,9 +407,15 @@ class DigestGenerator:
             logger.warning(f"获取源数量失败，使用默认值: {e}")
             return 20  # 默认值
     
-    async def _get_total_time_saved(self, user_id: int) -> float:
-        """获取累计节省时间（小时）"""
+    async def _get_total_time_saved(self, user_id: int, exclude_today: bool = False) -> float:
+        """获取累计节省时间（小时）
+        
+        Args:
+            user_id: 用户ID
+            exclude_today: 是否排除今日的统计（用于计算时避免重复计算）
+        """
         total_hours = 0.0
+        today_str = date.today().isoformat()
         
         try:
             # 读取所有历史统计文件
@@ -175,6 +426,10 @@ class DigestGenerator:
             # 遍历所有统计文件
             for stats_file in stats_dir.glob("*.json"):
                 try:
+                    # 如果排除今日，跳过今日的统计文件
+                    if exclude_today and stats_file.stem == today_str:
+                        continue
+                    
                     with open(stats_file, 'r', encoding='utf-8') as f:
                         daily_stats = json.load(f)
                     
@@ -203,8 +458,11 @@ class DigestGenerator:
         # 获取实际源数量（用户启用的源）
         sources_count = await self._get_sources_count(user_id)
         
-        # 获取累计节省时间
-        total_time_saved = await self._get_total_time_saved(user_id)
+        # 获取历史累计节省时间（不包括今日）
+        historical_total = await self._get_total_time_saved(user_id, exclude_today=True)
+        
+        # 累计时间 = 历史累计 + 今日节省
+        total_time_saved = round(historical_total + time_saved_today, 1)
         
         return {
             "sources_count": sources_count,

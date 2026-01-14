@@ -27,7 +27,7 @@ class Web3DigestBot:
         self._stop_event: Optional[asyncio.Event] = None
         self.user_manager = UserManager()
         self.profile_manager = ProfileManager()
-        self.conversation_manager = ConversationManager()
+        self.conversation_manager = ConversationManager(bot=self)
         from core.custom_processes.web3digest.core.feedback_manager import FeedbackManager
         self.feedback_manager = FeedbackManager()
         from core.custom_processes.web3digest.core.source_manager import SourceManager
@@ -35,6 +35,9 @@ class Web3DigestBot:
         from core.custom_processes.web3digest.core.auth_manager import AuthManager
         self.auth_manager = AuthManager()
         self._adding_source_state = {}  # user_id -> {"type": "twitter"/"website", "step": "waiting"}
+        self._custom_push_time_state = {}  # user_id -> True (正在输入自定义推送时间)
+        self._pending_item_feedback = {}  # user_id -> {"item_id": "...", "source": "...", "message_id": ...}
+        self._active_feedback_reasons = {}  # user_id -> message_id (当前显示的反馈原因选择消息ID)
         
     async def start(self):
         """启动 Bot"""
@@ -142,34 +145,123 @@ class Web3DigestBot:
         """处理 /profile 命令"""
         user_id = update.effective_user.id
         
-        # 获取用户画像
-        profile = await self.profile_manager.get_profile(user_id)
+        # 判断是命令还是回调
+        is_callback = update.callback_query is not None
+        query = update.callback_query if is_callback else None
         
-        if profile:
-            # 显示当前画像
-            await update.message.reply_text(
-                f"📝 **您的当前偏好画像：**\n\n{profile}",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            
-            # 询问是否要修改
-            keyboard = [
-                [InlineKeyboardButton("✏️ 修改偏好", callback_data="profile_edit")],
-                [InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text("请选择操作：", reply_markup=reply_markup)
+        # 发送"正在加载"提示
+        if is_callback:
+            await query.answer()  # 响应回调，避免超时
+            # 先编辑消息显示加载状态
+            try:
+                await query.edit_message_text("⏳ 正在加载您的偏好...")
+            except Exception as e:
+                logger.warning(f"编辑消息失败，尝试发送新消息: {e}")
+                # 如果编辑失败，发送新消息
+                try:
+                    loading_msg = await query.message.reply_text("⏳ 正在加载您的偏好...")
+                except:
+                    loading_msg = None
+            else:
+                loading_msg = None
         else:
-            # 没有画像，开始收集
-            await self.conversation_manager.start_preference_conversation(update, context)
+            loading_msg = await update.message.reply_text("⏳ 正在加载您的偏好...")
+        
+        try:
+            # 获取用户画像
+            profile = await self.profile_manager.get_profile(user_id)
+            
+            if profile:
+                # 获取结构化数据，补充显示
+                structured_data = await self.profile_manager.get_structured_profile(user_id)
+                if structured_data:
+                    # 添加结构化数据摘要
+                    stats = structured_data.get("stats", {})
+                    feedback_count = stats.get("total_feedbacks", 0)
+                    if feedback_count > 0:
+                        profile += f"\n\n📊 **反馈统计**\n"
+                        profile += f"• 总反馈次数: {feedback_count}\n"
+                        profile += f"• 正面反馈: {stats.get('positive_count', 0)}次\n"
+                        profile += f"• 负面反馈: {stats.get('negative_count', 0)}次\n"
+                        if stats.get("last_feedback_time"):
+                            from datetime import datetime
+                            last_time = datetime.fromisoformat(stats["last_feedback_time"]).strftime("%Y-%m-%d %H:%M")
+                            profile += f"• 最后反馈: {last_time}"
+                
+                # 准备键盘
+                keyboard = [
+                    [InlineKeyboardButton("✏️ 修改偏好", callback_data="profile_edit")],
+                    [InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                # 合并消息，一次性发送（更快）
+                full_text = f"📝 **您的当前偏好画像：**\n\n{profile}\n\n请选择操作："
+                
+                if is_callback:
+                    # 回调：编辑消息
+                    try:
+                        await query.edit_message_text(
+                            full_text,
+                            parse_mode=ParseMode.MARKDOWN,
+                            reply_markup=reply_markup
+                        )
+                    except Exception as e:
+                        logger.warning(f"编辑消息失败，发送新消息: {e}")
+                        # 如果编辑失败（比如内容相同），发送新消息
+                        await query.message.reply_text(
+                            full_text,
+                            parse_mode=ParseMode.MARKDOWN,
+                            reply_markup=reply_markup
+                        )
+                else:
+                    # 命令：删除加载提示并发送新消息
+                    if loading_msg:
+                        try:
+                            await loading_msg.delete()
+                        except:
+                            pass
+                    await update.message.reply_text(
+                        full_text,
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=reply_markup
+                    )
+            else:
+                # 没有画像，开始收集
+                if is_callback:
+                    try:
+                        await query.edit_message_text("⚠️ 您还没有设置偏好，正在开始设置...")
+                    except:
+                        await query.message.reply_text("⚠️ 您还没有设置偏好，正在开始设置...")
+                await self.conversation_manager.start_preference_conversation(update, context)
+        except Exception as e:
+            logger.error(f"获取用户画像失败: {e}", exc_info=True)
+            error_text = "❌ 加载失败，请稍后重试"
+            if is_callback:
+                try:
+                    await query.edit_message_text(error_text)
+                except:
+                    try:
+                        await query.message.reply_text(error_text)
+                    except:
+                        pass
+            else:
+                if loading_msg:
+                    try:
+                        await loading_msg.edit_text(error_text)
+                    except:
+                        await update.message.reply_text(error_text)
     
-    async def cmd_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """处理 /settings 命令 - 设置/修改偏好（TC-2.4）"""
+    async def _show_settings_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """显示设置菜单（供命令和回调使用）"""
         user_id = update.effective_user.id
         
         # 鉴权检查
         if not await self.auth_manager.check_user_access(user_id):
-            await update.message.reply_text("❌ 您没有访问权限，请联系管理员")
+            if update.message:
+                await update.message.reply_text("❌ 您没有访问权限，请联系管理员")
+            elif update.callback_query:
+                await update.callback_query.answer("❌ 您没有访问权限", show_alert=True)
             return
         
         # 显示设置菜单
@@ -182,11 +274,24 @@ class Web3DigestBot:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
-            "⚙️ **设置中心**\n\n请选择要修改的设置项：",
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN
-        )
+        menu_text = "⚙️ **设置中心**\n\n请选择要修改的设置项："
+        
+        if update.message:
+            await update.message.reply_text(
+                menu_text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(
+                menu_text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+    
+    async def cmd_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """处理 /settings 命令 - 设置/修改偏好（TC-2.4）"""
+        await self._show_settings_menu(update, context)
     
     async def cmd_sources(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /sources 命令 - 信息源管理"""
@@ -233,19 +338,72 @@ class Web3DigestBot:
         elif update.callback_query:
             await update.callback_query.edit_message_text(menu_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
     
+    async def _show_push_time_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
+        """显示推送时间设置界面"""
+        # 获取当前推送时间
+        current_time = await self.profile_manager.get_push_time(user_id)
+        
+        # 预设时间选项
+        preset_times = [
+            ["07:00", "08:00", "09:00"],
+            ["10:00", "12:00", "14:00"],
+            ["16:00", "18:00", "20:00"],
+            ["22:00", "自定义时间"]
+        ]
+        
+        keyboard = []
+        for row in preset_times:
+            button_row = []
+            for time_str in row:
+                if time_str == "自定义时间":
+                    button_row.append(InlineKeyboardButton("✏️ 自定义", callback_data="push_time_custom"))
+                else:
+                    # 标记当前选择的时间
+                    prefix = "✅ " if time_str == current_time else ""
+                    button_row.append(InlineKeyboardButton(f"{prefix}{time_str}", callback_data=f"push_time_{time_str}"))
+            keyboard.append(button_row)
+        
+        keyboard.append([InlineKeyboardButton("🔙 返回设置", callback_data="settings_menu")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        menu_text = f"""⏰ **推送时间设置**
+
+当前推送时间：**{current_time}**
+
+请选择您希望的每日推送时间：
+
+💡 提示：
+• 选择预设时间，或点击"自定义"输入特定时间
+• 使用 24 小时制，格式：HH:MM
+• 例如：09:00、14:30、20:00
+"""
+        
+        if update.message:
+            await update.message.reply_text(menu_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(menu_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+    
     async def _show_user_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
-        """显示用户使用统计"""
+        """显示用户使用统计（实时计算）"""
         import json
         from pathlib import Path
+        from datetime import date
         from core.custom_processes.web3digest.core.config import settings
         
-        # 统计数据
+        # 显示加载提示
+        if update.callback_query:
+            try:
+                await update.callback_query.edit_message_text("⏳ 正在计算统计数据...")
+            except:
+                pass
+        
+        # 统计数据（实时计算）
         total_digests = 0
         total_feedbacks = 0
         total_time_saved = 0.0
         
         try:
-            # 读取统计文件
+            # 1. 实时计算简报数量（包括今日）
             stats_dir = Path(settings.DATA_DIR) / "daily_stats"
             if stats_dir.exists():
                 for stats_file in stats_dir.glob("*.json"):
@@ -255,18 +413,21 @@ class Web3DigestBot:
                         user_stats = daily_stats.get("users", {}).get(str(user_id), {})
                         if user_stats:
                             total_digests += 1
-                            total_time_saved += user_stats.get("time_saved", 0)
                     except Exception:
                         continue
             
-            # 读取反馈数量
-            feedback_count = await self.feedback_manager.get_feedback_count(user_id)
-            total_feedbacks = feedback_count
+            # 2. 实时获取反馈数量（从反馈管理器）
+            total_feedbacks = await self.feedback_manager.get_feedback_count(user_id)
+            
+            # 3. 实时计算累计节省时间（使用 DigestGenerator 的方法，包括今日）
+            from core.custom_processes.web3digest.core.digest_generator import DigestGenerator
+            digest_generator = DigestGenerator()
+            total_time_saved = await digest_generator._get_total_time_saved(user_id, exclude_today=False)
             
         except Exception as e:
-            logger.warning(f"读取用户统计失败: {e}")
+            logger.warning(f"读取用户统计失败: {e}", exc_info=True)
         
-        # 获取信息源数量
+        # 4. 获取信息源数量（实时）
         sources_config = await self.source_manager.get_user_sources(user_id)
         total_sources = len(sources_config["preset_sources"]) + len(sources_config["custom_sources"])
         enabled_sources = sum(1 for s in sources_config["preset_sources"] if s.get("enabled", True))
@@ -283,7 +444,7 @@ class Web3DigestBot:
 """
         
         keyboard = [
-            [InlineKeyboardButton("🔙 返回设置", callback_data="main_menu")]
+            [InlineKeyboardButton("🔙 返回设置", callback_data="settings_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -332,22 +493,42 @@ class Web3DigestBot:
                 pass
             
         elif data.startswith("feedback_negative"):
-            # 负面反馈，发送新消息询问原因
-            await query.answer("请告诉我们哪里需要改进", show_alert=False)
-            # 移除反馈按钮
+            # 负面反馈：先不保存，等用户选择原因或跳过后再保存
+            # 立即响应，避免用户重复点击
+            try:
+                await query.answer()  # 立即响应
+            except:
+                pass
+            
+            # 立即移除反馈按钮，提升响应速度
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except:
                 pass
-            # 发送新消息询问原因
-            await self._show_feedback_reasons_new(query, user_id)
+            
+            # 如果已有反馈原因选择界面，先删除旧的
+            if user_id in self._active_feedback_reasons:
+                try:
+                    old_msg_id = self._active_feedback_reasons[user_id]
+                    await self.application.bot.delete_message(chat_id=user_id, message_id=old_msg_id)
+                except:
+                    pass
+            
+            # 发送可选的原因选择（不强制）
+            reason_msg = await self._show_feedback_reasons_optional(query, user_id)
+            if reason_msg:
+                self._active_feedback_reasons[user_id] = reason_msg.message_id
     
     async def _show_feedback_reasons(self, query):
         """显示反馈原因选择（旧方法，保留兼容）"""
         await self._show_feedback_reasons_new(query, query.from_user.id)
     
     async def _show_feedback_reasons_new(self, query, user_id: int):
-        """显示反馈原因选择（发送新消息）"""
+        """显示反馈原因选择（发送新消息）- 已废弃，保留兼容"""
+        await self._show_feedback_reasons_optional(query, user_id)
+    
+    async def _show_feedback_reasons_optional(self, query, user_id: int):
+        """显示可选的反馈原因选择（不强制）"""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         
         keyboard = [
@@ -355,16 +536,51 @@ class Web3DigestBot:
             [InlineKeyboardButton("漏掉重要信息", callback_data="feedback_reason_漏掉重要信息")],
             [InlineKeyboardButton("信息太多/太杂", callback_data="feedback_reason_信息太多/太杂")],
             [InlineKeyboardButton("信息太少", callback_data="feedback_reason_信息太少")],
-            [InlineKeyboardButton("跳过", callback_data="feedback_reason_skip")]
+            [InlineKeyboardButton("💡 跳过，直接保存", callback_data="feedback_reason_skip")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # 发送新消息
-        await self.application.bot.send_message(
+        # 发送新消息（可选，用户可以选择跳过）
+        msg = await self.application.bot.send_message(
             chat_id=user_id,
-            text="👎 请告诉我们哪里需要改进：",
+            text="💬 可选：告诉我们具体哪里需要改进？\n（可选择跳过直接保存反馈）",
             reply_markup=reply_markup
         )
+        return msg
+    
+    async def _show_item_feedback_reasons(self, user_id: int, item_id: str, source: str):
+        """显示单条信息的反馈原因选择"""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        
+        # 如果已有反馈原因选择界面，先删除旧的
+        if user_id in self._active_feedback_reasons:
+            try:
+                old_msg_id = self._active_feedback_reasons[user_id]
+                await self.application.bot.delete_message(chat_id=user_id, message_id=old_msg_id)
+            except:
+                pass
+        
+        # 清理 item_id 和 source 中的特殊字符，避免 callback_data 格式问题
+        safe_item_id = item_id.replace("_", "-")[:20]
+        safe_source = source.replace("_", "-")[:10]
+        
+        keyboard = [
+            [InlineKeyboardButton("内容不感兴趣", callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_内容不感兴趣")],
+            [InlineKeyboardButton("漏掉重要信息", callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_漏掉重要信息")],
+            [InlineKeyboardButton("信息太多/太杂", callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_信息太多/太杂")],
+            [InlineKeyboardButton("信息太少", callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_信息太少")],
+            [InlineKeyboardButton("💡 跳过，直接保存", callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_skip")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # 发送新消息（可选，用户可以选择跳过）
+        msg = await self.application.bot.send_message(
+            chat_id=user_id,
+            text="💬 可选：告诉我们具体哪里需要改进？\n（可选择跳过直接保存反馈）",
+            reply_markup=reply_markup
+        )
+        self._active_feedback_reasons[user_id] = msg.message_id
+        return msg
     
     async def handle_feedback_reason(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理反馈原因选择"""
@@ -372,28 +588,49 @@ class Web3DigestBot:
         user_id = update.effective_user.id
         data = query.data
         
+        # 立即响应，避免用户重复点击
+        try:
+            await query.answer()  # 立即响应
+        except:
+            pass
+        
+        # 立即更新界面，提升响应速度
+        try:
+            await query.edit_message_text("⏳ 正在保存反馈...")
+        except:
+            pass
+        
+        # 清除活跃的反馈原因选择界面记录
+        if user_id in self._active_feedback_reasons:
+            del self._active_feedback_reasons[user_id]
+        
         if data == "feedback_reason_skip":
-            # 跳过，只保存负面反馈
+            # 跳过，保存基本负面反馈（不带原因）
             await self.feedback_manager.save_feedback(user_id, "negative")
-            await query.answer("感谢您的反馈！", show_alert=False)
-            # 删除原因选择消息
+            # 编辑消息显示确认
             try:
-                await query.message.delete()
+                await query.edit_message_text(
+                    "✅ 反馈已记录，感谢！\n\n"
+                    "💬 如需补充说明，请直接发送文字消息。或回复 /start 返回主菜单。"
+                )
             except:
-                pass
+                # 如果编辑失败，删除消息
+                try:
+                    await query.message.delete()
+                except:
+                    pass
         else:
             # 提取原因
             reason = data.replace("feedback_reason_", "")
             
-            # 保存反馈
+            # 保存反馈（带原因）
             await self.feedback_manager.save_feedback(
                 user_id, 
                 "negative",
                 reason_selected=[reason]
             )
-            await query.answer(f"已记录：{reason}", show_alert=False)
             
-            # 编辑消息显示确认（不删除，改为编辑）
+            # 编辑消息显示确认
             try:
                 await query.edit_message_text(
                     f"✅ 已记录：{reason}\n\n"
@@ -401,18 +638,106 @@ class Web3DigestBot:
                 )
             except Exception as e:
                 logger.warning(f"编辑反馈消息失败: {e}")
-                # 如果编辑失败，发送新消息
-                await self.application.bot.send_message(
-                    chat_id=user_id,
-                    text=f"✅ 已记录：{reason}\n\n"
+                # 如果编辑失败，删除消息
+                try:
+                    await query.message.delete()
+                except:
+                    pass
+    
+    async def handle_item_feedback_reason(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """处理单条信息反馈原因选择"""
+        query = update.callback_query
+        user_id = update.effective_user.id
+        data = query.data
+        
+        # 立即响应，避免用户重复点击
+        try:
+            await query.answer()  # 立即响应
+        except:
+            pass
+        
+        # 立即更新界面，提升响应速度
+        try:
+            await query.edit_message_text("⏳ 正在保存反馈...")
+        except:
+            pass
+        
+        # 清除活跃的反馈原因选择界面记录
+        if user_id in self._active_feedback_reasons:
+            del self._active_feedback_reasons[user_id]
+        
+        # 解析 callback_data: item_feedback_reason_{item_id}_{source}_{reason}
+        parts = data.replace("item_feedback_reason_", "").split("_", 2)
+        if len(parts) < 3:
+            # 格式错误，尝试跳过处理
+            try:
+                await query.message.delete()
+            except:
+                pass
+            return
+        
+        # 恢复原始 item_id 和 source（将 - 替换回 _）
+        item_id = parts[0].replace("-", "_")
+        source = parts[1].replace("-", "_")
+        reason = parts[2]
+        
+        if reason == "skip":
+            # 跳过，直接保存反馈（不带原因）
+            await self.feedback_manager.add_item_feedback(user_id, item_id, source, "dislike")
+            # 编辑消息显示确认
+            try:
+                await query.edit_message_text(
+                    "✅ 反馈已记录，感谢！\n\n"
                     "💬 如需补充说明，请直接发送文字消息。或回复 /start 返回主菜单。"
                 )
+            except:
+                # 如果编辑失败，删除消息
+                try:
+                    await query.message.delete()
+                except:
+                    pass
+        else:
+            # 保存反馈（带原因）
+            await self.feedback_manager.add_item_feedback(user_id, item_id, source, "dislike")
+            
+            # 同时保存整体反馈（带原因），用于画像更新
+            await self.feedback_manager.save_feedback(
+                user_id,
+                "negative",
+                reason_selected=[reason]
+            )
+            
+            # 编辑消息显示确认
+            try:
+                await query.edit_message_text(
+                    f"✅ 已记录：{reason}\n\n"
+                    "💬 如需补充说明，请直接发送文字消息。或回复 /start 返回主菜单。"
+                )
+            except Exception as e:
+                logger.warning(f"编辑反馈消息失败: {e}")
+                # 如果编辑失败，删除消息
+                try:
+                    await query.message.delete()
+                except:
+                    pass
     
     async def handle_item_feedback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理单条信息反馈"""
         query = update.callback_query
         user_id = update.effective_user.id
         data = query.data
+        
+        # 先立即响应，避免用户重复点击
+        try:
+            await query.answer()  # 立即响应，避免超时
+        except:
+            pass
+        
+        # 立即移除按钮，提升响应速度
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except:
+            pass
         
         # 解析多种格式：
         # - item_like_{item_id}_{source}
@@ -438,23 +763,23 @@ class Web3DigestBot:
             item_id = parts[3] if len(parts) > 3 else ""
             source = parts[4] if len(parts) > 4 else ""
         
-        # 保存反馈
-        await self.feedback_manager.add_item_feedback(user_id, item_id, source, rating)
-        
         if rating == "like":
+            # 正面反馈：直接保存并显示确认
+            await self.feedback_manager.add_item_feedback(user_id, item_id, source, rating)
             await query.answer("⭐ 已标记为有用！感谢反馈", show_alert=False)
-            # 移除按钮，保留消息
-            try:
-                await query.edit_message_reply_markup(reply_markup=None)
-            except:
-                pass
         else:
-            await query.answer("👎 已标记为不感兴趣，下次会减少类似内容", show_alert=False)
-            # 移除按钮，保留消息
-            try:
-                await query.edit_message_reply_markup(reply_markup=None)
-            except:
-                pass
+            # 负面反馈：先显示原因选择界面，等用户选择后再保存
+            # 保存 item_id 和 source，用于后续保存反馈
+            if not hasattr(self, '_pending_item_feedback'):
+                self._pending_item_feedback = {}
+            self._pending_item_feedback[user_id] = {
+                "item_id": item_id,
+                "source": source,
+                "message_id": query.message.message_id
+            }
+            
+            # 显示反馈原因选择界面
+            await self._show_item_feedback_reasons(user_id, item_id, source)
     
     async def cmd_test(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /test 命令 - 完整流程测试（支持命令和按钮点击）"""
@@ -515,10 +840,12 @@ class Web3DigestBot:
     async def show_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示主菜单"""
         keyboard = [
-            [InlineKeyboardButton("📝 查看我的偏好", callback_data="profile_view")],
-            [InlineKeyboardButton("📡 管理信息源", callback_data="sources_manage")],
-            [InlineKeyboardButton("💬 意见反馈", callback_data="feedback")],
-            [InlineKeyboardButton("🧪 测试简报", callback_data="test_digest")]
+            [InlineKeyboardButton("📝 修改偏好画像", callback_data="settings_profile")],
+            [InlineKeyboardButton("📡 管理信息源", callback_data="settings_sources")],
+            [InlineKeyboardButton("⏰ 推送时间设置", callback_data="settings_push_time")],
+            [InlineKeyboardButton("📊 查看使用统计", callback_data="settings_stats")],
+            [InlineKeyboardButton("🧪 测试简报", callback_data="test_digest")],
+            [InlineKeyboardButton("🔙 返回", callback_data="main_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -551,6 +878,40 @@ class Web3DigestBot:
         elif user_id in self._adding_source_state:
             from core.custom_processes.web3digest.bot.source_handlers import handle_add_source_input
             await handle_add_source_input(self, update, context)
+        # 检查是否在输入自定义推送时间
+        elif user_id in self._custom_push_time_state:
+            time_str = update.message.text.strip()
+            # 验证时间格式
+            try:
+                hour, minute = time_str.split(":")
+                hour = int(hour)
+                minute = int(minute)
+                if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                    await update.message.reply_text(
+                        "❌ 时间格式错误！\n\n"
+                        "请输入正确的时间格式：HH:MM\n"
+                        "例如：09:00、14:30、20:00\n"
+                        "时间范围：00:00 - 23:59"
+                    )
+                    return
+                
+                # 更新推送时间
+                success = await self.profile_manager.update_push_time(user_id, time_str)
+                if success:
+                    del self._custom_push_time_state[user_id]
+                    await update.message.reply_text(
+                        f"✅ 推送时间已设置为 **{time_str}**\n\n"
+                        "您的每日简报将在该时间推送。",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                else:
+                    await update.message.reply_text("❌ 设置失败，请重试")
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ 时间格式错误！\n\n"
+                    "请输入正确的时间格式：HH:MM\n"
+                    "例如：09:00、14:30、20:00"
+                )
         else:
             # 不在对话中，提示使用命令
             await update.message.reply_text("请使用 /start 开始，或使用 /help 查看帮助")
@@ -559,13 +920,18 @@ class Web3DigestBot:
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理按钮点击"""
         query = update.callback_query
-        await query.answer()
-        
         data = query.data
+        
+        # 先响应回调，避免超时
+        try:
+            await query.answer()
+        except:
+            pass
         
         if data == "main_menu":
             await self.show_main_menu(update, context)
         elif data == "profile_edit":
+            # 修改偏好：开始偏好收集对话
             await self.conversation_manager.start_preference_conversation(update, context)
         elif data == "profile_view":
             await self.cmd_profile(update, context)
@@ -581,8 +947,14 @@ class Web3DigestBot:
         elif data.startswith("feedback_"):
             # 反馈相关回调
             await self.handle_feedback_callback(update, context)
-        elif data.startswith("item_feedback_") or data.startswith("item_like_") or data.startswith("item_dislike_"):
-            # 单条信息反馈
+        elif data.startswith("item_feedback_reason_"):
+            # 单条信息反馈原因选择（必须在 item_feedback_ 之前判断）
+            await self.handle_item_feedback_reason(update, context)
+        elif data.startswith("item_like_") or data.startswith("item_dislike_"):
+            # 单条信息反馈（like/dislike）
+            await self.handle_item_feedback(update, context)
+        elif data.startswith("item_feedback_"):
+            # 单条信息反馈（旧格式兼容）
             await self.handle_item_feedback(update, context)
         elif data == "sources_manage":
             # 信息源管理菜单
@@ -627,6 +999,9 @@ class Web3DigestBot:
             # 返回信息源菜单
             await self._show_sources_menu(update, context)
         # ===== 设置相关回调 =====
+        elif data == "settings_menu":
+            # 返回设置菜单
+            await self._show_settings_menu(update, context)
         elif data == "settings_profile":
             # 修改偏好画像
             await self.conversation_manager.start_preference_conversation(update, context)
@@ -635,13 +1010,33 @@ class Web3DigestBot:
             user_id = update.effective_user.id
             await self._show_sources_menu(update, context, user_id)
         elif data == "settings_push_time":
-            # 推送时间设置（暂时显示提示）
-            await query.edit_message_text(
-                "⏰ **推送时间设置**\n\n"
-                "当前推送时间：每天 09:00\n\n"
-                "💡 提示：推送时间目前为系统默认设置，后续版本将支持自定义。",
-                parse_mode=ParseMode.MARKDOWN
-            )
+            # 推送时间设置
+            user_id = update.effective_user.id
+            await self._show_push_time_settings(update, context, user_id)
+        elif data.startswith("push_time_"):
+            # 处理推送时间选择
+            user_id = update.effective_user.id
+            time_str = data.replace("push_time_", "")
+            if time_str == "custom":
+                # 自定义时间输入
+                await query.edit_message_text(
+                    "⏰ **自定义推送时间**\n\n"
+                    "请输入推送时间，格式：HH:MM\n"
+                    "例如：09:00、14:30、20:00\n\n"
+                    "💡 提示：使用 24 小时制，范围 00:00 - 23:59",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                # 标记用户正在输入自定义时间
+                self._custom_push_time_state = getattr(self, '_custom_push_time_state', {})
+                self._custom_push_time_state[user_id] = True
+            else:
+                # 选择预设时间
+                success = await self.profile_manager.update_push_time(user_id, time_str)
+                if success:
+                    await query.answer(f"✅ 推送时间已设置为 {time_str}", show_alert=False)
+                    await self._show_push_time_settings(update, context, user_id)
+                else:
+                    await query.answer("❌ 设置失败，请重试", show_alert=True)
         elif data == "settings_stats":
             # 查看使用统计
             user_id = update.effective_user.id
