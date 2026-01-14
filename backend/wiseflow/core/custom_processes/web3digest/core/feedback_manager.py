@@ -2,6 +2,7 @@
 反馈管理模块
 """
 import json
+import asyncio
 from pathlib import Path
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Optional
@@ -13,16 +14,25 @@ logger = setup_logger(__name__)
 
 class FeedbackManager:
     """反馈管理器"""
-    
+
     def __init__(self):
         self.data_dir = Path(settings.DATA_DIR) / "feedback"
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        # 文件锁字典，每个文件一个锁
+        self._file_locks: Dict[str, asyncio.Lock] = {}
     
     def _get_feedback_file(self, feedback_date: date = None) -> Path:
         """获取反馈文件路径"""
         if feedback_date is None:
             feedback_date = date.today()
         return self.data_dir / f"{feedback_date.isoformat()}.json"
+
+    def _get_file_lock(self, file_path: Path) -> asyncio.Lock:
+        """获取文件锁（延迟创建）"""
+        file_key = str(file_path)
+        if file_key not in self._file_locks:
+            self._file_locks[file_key] = asyncio.Lock()
+        return self._file_locks[file_key]
     
     async def save_feedback(self, user_id: int, overall: str, reason_selected: List[str] = None, 
                            reason_text: str = None, item_feedbacks: List[Dict] = None) -> bool:
