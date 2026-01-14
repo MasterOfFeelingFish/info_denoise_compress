@@ -160,26 +160,35 @@ class FeedbackAnalyzer:
                         likes.append(feedback_entry["source"])
                 preferences["likes"] = likes
             
-            # 保存结构化数据
-            await self.profile_manager.update_structured_profile(user_id, {
+            # 先更新文本格式（用于显示），如果失败则不更新结构化数据
+            try:
+                await self._update_text_profile_with_feedback(user_id, feedback_entry)
+            except Exception as text_error:
+                logger.error(f"更新文本画像失败 {user_id}: {text_error}", exc_info=True)
+                # 文本更新失败，不继续更新结构化数据，保持一致性
+                return False
+
+            # 文本更新成功后，再保存结构化数据
+            success = await self.profile_manager.update_structured_profile(user_id, {
                 "feedback_history": feedback_history,
                 "stats": stats,
                 "preferences": preferences
             })
-            
-            # 同时更新文本格式（用于显示）
-            await self._update_text_profile_with_feedback(user_id, feedback_entry)
-            
-            logger.info(f"✅ 用户 {user_id} 画像已实时更新（结构化数据）")
-            
+
+            if not success:
+                logger.error(f"更新结构化画像失败 {user_id}")
+                return False
+
+            logger.info(f"✅ 用户 {user_id} 画像已实时更新（结构化和文本数据）")
+
             # 如果反馈数量达到阈值，触发深度分析
             feedback_count = await self.feedback_manager.get_feedback_count(user_id)
             if feedback_count >= self.threshold and feedback_count % self.threshold == 0:
                 logger.info(f"用户 {user_id} 反馈达到阈值倍数，触发深度分析")
                 await self.analyze_user_feedback(user_id)
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"实时更新画像失败 {user_id}: {e}", exc_info=True)
             return False

@@ -83,75 +83,130 @@ class LLMClient:
     
     async def batch_filter_info(self, info_list: List[Dict], user_profile: str, max_select: int = 10) -> List[int]:
         """
-        批量筛选信息（一次 LLM 调用完成所有筛选，大幅提升速度）
-        
+        批量筛选信息（一次 LLM 调用完成所有筛选，大幅提升速度）- 优化版
+
+        优化点：
+        1. 改进信息摘要（包含content内容，不仅仅是title）
+        2. 增强Prompt，明确多维度评分策略
+        3. 智能兜底机制（基于关键词匹配）
+        4. 更精准的用户画像提取
+
         Args:
             info_list: 信息列表，每条包含 index, title, content, source
-            user_profile: 用户画像
+            user_profile: 用户画像（增强版，包含结构化数据）
             max_select: 最多选择几条
-        
+
         Returns:
             选中的信息索引列表
         """
         if not info_list:
             return []
-        
-        # 构建信息摘要列表（包含更多内容信息）
-        info_summary = "\n".join([
-            f"[{item['index']}] {item['source']}: {item['title'][:80]}"
-            for item in info_list
-        ])
-        
-        # 从用户画像中提取关键偏好（结构化数据）
+
+        # 1. 构建更详细的信息摘要列表（包含content预览）
+        info_summary = []
+        for item in info_list:
+            title = item.get('title', '')[:60]  # 限制标题长度
+            content_preview = item.get('content', '')[:100]  # 添加内容预览
+            source = item.get('source', '')
+
+            # 格式化：[索引] 来源: 标题 - 内容预览
+            summary_line = f"[{item['index']}] {source}: {title}"
+            if content_preview:
+                summary_line += f"\n    内容预览: {content_preview}..."
+
+            info_summary.append(summary_line)
+
+        info_summary_text = "\n\n".join(info_summary)
+
+        # 2. 从用户画像中提取结构化偏好数据
         interests_keywords = []
         dislikes_keywords = []
-        
-        if "关注领域" in user_profile:
-            interests_match = re.search(r'关注领域[：:]\s*([^\n]+)', user_profile)
+        likes_keywords = []
+        feedback_patterns = []
+
+        # 提取关注领域
+        if "【关注领域】" in user_profile:
+            interests_match = re.search(r'【关注领域】([^\n【]+)', user_profile)
             if interests_match:
                 interests_text = interests_match.group(1)
-                interests_keywords = [x.strip() for x in interests_text.replace("•", "").split(",") if x.strip()]
-        
-        if "不感兴趣" in user_profile or "不感兴趣的内容" in user_profile:
-            dislikes_match = re.search(r'不感兴趣[：:]\s*([^\n]+)', user_profile)
+                interests_keywords = [x.strip() for x in interests_text.split(",") if x.strip()]
+
+        # 提取不感兴趣内容
+        if "【不感兴趣】" in user_profile:
+            dislikes_match = re.search(r'【不感兴趣】([^\n【]+)', user_profile)
             if dislikes_match:
                 dislikes_text = dislikes_match.group(1)
-                dislikes_keywords = [x.strip() for x in dislikes_text.replace("•", "").split(",") if x.strip()]
-        
-        # 构建更精确的 prompt
-        prompt = f"""你是 Web3 资讯筛选专家。请根据用户画像，从以下信息中选出最相关、最有价值的 {max_select} 条。
+                dislikes_keywords = [x.strip() for x in dislikes_text.replace("（避免选择此类内容）", "").split(",") if x.strip()]
 
-## 用户画像（结构化数据）
+        # 提取喜欢的内容
+        if "【喜欢的内容】" in user_profile:
+            likes_match = re.search(r'【喜欢的内容】([^\n【]+)', user_profile)
+            if likes_match:
+                likes_text = likes_match.group(1)
+                likes_keywords = [x.strip() for x in likes_text.split(",") if x.strip()]
+
+        # 提取最近反馈问题
+        if "【最近反馈问题】" in user_profile:
+            feedback_match = re.search(r'【最近反馈问题】([^\n【]+)', user_profile)
+            if feedback_match:
+                feedback_text = feedback_match.group(1)
+                feedback_patterns = [x.strip() for x in feedback_text.replace("（避免类似问题）", "").split(",") if x.strip()]
+
+        # 3. 构建增强的筛选 Prompt（多维度评分策略）
+        prompt = f"""你是 Web3 资讯智能筛选专家。请使用**多维度评分策略**，从以下信息中选出最适合用户的 {max_select} 条。
+
+## 用户画像（详细版）
 {user_profile}
 
-## 关键偏好提取
-- 关注领域关键词: {', '.join(interests_keywords) if interests_keywords else '未明确指定'}
-- 不感兴趣内容: {', '.join(dislikes_keywords) if dislikes_keywords else '无'}
+## 关键偏好总结
+- ✅ 关注领域: {', '.join(interests_keywords[:5]) if interests_keywords else '未明确'}
+- ✅ 喜欢的内容: {', '.join(likes_keywords[:5]) if likes_keywords else '未明确'}
+- ❌ 不感兴趣: {', '.join(dislikes_keywords[:5]) if dislikes_keywords else '无'}
+- ⚠️ 最近反馈问题: {', '.join(feedback_patterns[:3]) if feedback_patterns else '无'}
 
 ## 待筛选信息（共 {len(info_list)} 条）
-{info_summary}
+{info_summary_text}
 
-## 筛选任务
-**必须**从上述信息中选出 {max_select} 条，返回它们的索引号。
+## 筛选策略（多维度评分）
 
-筛选策略：
-1. **优先选择**：与用户关注领域直接相关的（{', '.join(interests_keywords[:3]) if interests_keywords else 'Web3相关'}）
-2. **必须包含**：重大事件、突发新闻、重要公告
-3. **如果用户关注**：链上数据、空投信息、Meme币、技术进展
-4. **避免选择**：用户明确不感兴趣的内容（{', '.join(dislikes_keywords) if dislikes_keywords else '无'}）
+### 评分维度（总分10分 = 相关度5分 + 重要性3分 + 新鲜度2分）
 
-**重要**：
-- 即使信息不完全匹配用户偏好，也要选出 {max_select} 条最有价值的信息
-- 优先选择重要新闻和重大事件
-- 确保返回 {max_select} 个索引号，不要返回空列表
+1. **相关度评分（0-5分）**
+   - 完全匹配用户关注领域：5分
+   - 部分匹配用户兴趣：3-4分
+   - 行业重要事件（即使不完全匹配）：3分
+   - 与用户偏好无关：0-2分
 
-## 输出格式
-只返回选中的索引号，用逗号分隔，例如：0,3,5,7,12,15,18,20
-必须返回 {max_select} 个索引号，不要返回其他任何内容。"""
-        
+2. **重要性评分（0-3分）**
+   - 行业重大事件、突发新闻：3分
+   - 重要公告、融资消息：2分
+   - 普通资讯：1分
+   - 低价值信息（推广、水文）：0分
+
+3. **新鲜度评分（0-2分）**
+   - 突发事件、实时动态：2分
+   - 当日新闻：1分
+   - 旧闻：0分
+
+### 筛选规则
+1. **优先选择**：总分 >= 7分 的信息（高度相关 + 重要）
+2. **必须包含**：重大事件（重要性=3分），即使相关度不高也要选择
+3. **严格排除**：包含用户明确不感兴趣内容的信息（❌ {', '.join(dislikes_keywords[:3]) if dislikes_keywords else '无'}）
+4. **避免重复**：主题相似的信息只选一条
+
+### 特别注意
+- 最近反馈问题（{', '.join(feedback_patterns[:2]) if feedback_patterns else '无'}）：避免选择类似问题的信息
+- 如果用户喜欢某类内容（{', '.join(likes_keywords[:2]) if likes_keywords else '无'}），优先选择
+
+## 输出要求
+只返回选中的 {max_select} 个索引号，用逗号分隔。
+格式：0,3,5,7,12,15,18,20,25,30
+不要返回其他任何说明文字，只返回索引号。"""
+
         try:
-            response = await self.complete(prompt, max_tokens=150, temperature=0.1)
-            
+            # 使用更低温度，确保稳定输出
+            response = await self.complete(prompt, max_tokens=100, temperature=0.1)
+
             # 解析返回的索引
             indices = []
             for part in response.replace(" ", "").split(","):
@@ -161,36 +216,136 @@ class LLMClient:
                         indices.append(idx)
                 except ValueError:
                     continue
-            
-            # 如果解析出的索引不足，补充到 max_select 条
+
+            # 如果解析出的索引不足，使用智能兜底机制
             if len(indices) < max_select:
-                logger.warning(f"AI 只选出 {len(indices)} 条，少于要求的 {max_select} 条，补充信息")
-                # 补充未选中的信息
-                for i in range(len(info_list)):
-                    if len(indices) >= max_select:
-                        break
-                    if i not in indices:
-                        indices.append(i)
-            
-            logger.info(f"AI 批量筛选完成，选出 {len(indices)} 条")
+                logger.warning(f"AI 只选出 {len(indices)} 条，少于要求的 {max_select} 条，启用智能兜底")
+                indices = await self._smart_fallback(info_list, indices, interests_keywords, dislikes_keywords, max_select)
+
+            logger.info(f"AI 批量筛选完成，选出 {len(indices)} 条（优化版）")
             return indices[:max_select]
-            
+
         except Exception as e:
-            logger.error(f"批量筛选失败: {e}")
-            # 失败时返回前 N 条（确保不返回空）
-            fallback = list(range(min(max_select, len(info_list))))
-            logger.warning(f"使用兜底逻辑，返回前 {len(fallback)} 条")
-            return fallback
+            logger.error(f"批量筛选失败: {e}，启用智能兜底机制")
+            # 失败时使用智能兜底（不只是返回前N条）
+            return await self._smart_fallback(info_list, [], interests_keywords, dislikes_keywords, max_select)
+
+    async def _smart_fallback(self, info_list: List[Dict], existing_indices: List[int],
+                              interests: List[str], dislikes: List[str], max_select: int) -> List[int]:
+        """
+        智能兜底机制 - 基于关键词匹配和来源权威性
+
+        不再简单返回前N条，而是根据用户偏好智能选择
+        """
+        import re as regex_module
+
+        # 计算每条信息的简单评分
+        scored_items = []
+        for i, item in enumerate(info_list):
+            if i in existing_indices:
+                continue  # 跳过已选中的
+
+            score = 0
+            title = item.get('title', '').lower()
+            content = item.get('content', '').lower()
+            source = item.get('source', '').lower()
+            combined_text = f"{title} {content} {source}"
+
+            # 1. 关注领域匹配（+3分）
+            for interest in interests:
+                if interest.lower() in combined_text:
+                    score += 3
+                    break
+
+            # 2. 不感兴趣内容（-5分，严格排除）
+            for dislike in dislikes:
+                if dislike.lower() in combined_text:
+                    score -= 5
+                    break
+
+            # 3. 权威来源加分（+2分）
+            authority_sources = ['vitalik', 'ethereum', 'coinbase', 'binance', 'uniswap',
+                               'arbitrum', 'optimism', 'polygon', 'solana']
+            for auth_source in authority_sources:
+                if auth_source in source:
+                    score += 2
+                    break
+
+            # 4. 重要关键词（+1分）
+            important_keywords = ['融资', 'funding', '空投', 'airdrop', '升级', 'upgrade',
+                                 '漏洞', 'vulnerability', '公告', 'announcement']
+            for keyword in important_keywords:
+                if keyword in combined_text:
+                    score += 1
+                    break
+
+            scored_items.append((i, score))
+
+        # 按评分排序，选择高分项
+        scored_items.sort(key=lambda x: x[1], reverse=True)
+
+        # 组合已选中的和新选择的
+        result_indices = list(existing_indices)
+        for idx, score in scored_items:
+            if len(result_indices) >= max_select:
+                break
+            result_indices.append(idx)
+
+        # 如果还不够，再从剩余的随机补充
+        if len(result_indices) < max_select:
+            for i in range(len(info_list)):
+                if len(result_indices) >= max_select:
+                    break
+                if i not in result_indices:
+                    result_indices.append(i)
+
+        logger.info(f"智能兜底完成，最终选择 {len(result_indices)} 条（评分排序）")
+        return result_indices[:max_select]
     
+    def _format_filter_stats(self, filter_stats: Dict) -> str:
+        """格式化过滤统计信息（Phase 4优化）"""
+        if not filter_stats:
+            return "• 暂无详细过滤统计"
+        
+        lines = []
+        total_filtered = sum(filter_stats.values())
+        
+        if total_filtered == 0:
+            return "• 暂无详细过滤统计"
+        
+        # 定义显示顺序和标签
+        stat_labels = {
+            "meme_promotion": "Meme币推广",
+            "price_predictions": "价格预测",
+            "ads": "广告推广",
+            "irrelevant": "不相关内容"
+        }
+        
+        # 只显示有统计的类别
+        for key, label in stat_labels.items():
+            count = filter_stats.get(key, 0)
+            if count > 0:
+                lines.append(f"• {label}: {count}条")
+        
+        return "\n".join(lines) if lines else "• 暂无详细过滤统计"
+
     async def generate_digest(self, user_profile: str, info_list: List[Dict], stats: Dict) -> str:
         """生成美化的简报（Telegram 兼容格式）"""
         from datetime import datetime
         import re
         
         def escape_md(text: str) -> str:
-            """转义 Markdown 特殊字符"""
-            # 只转义可能导致问题的字符
-            text = text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+            """转义 Markdown 特殊字符（完整版）"""
+            # 按顺序转义，反斜杠必须先转义
+            text = text.replace('\\', '\\\\')  # 反斜杠
+            text = text.replace('_', '\\_')    # 下划线
+            text = text.replace('*', '\\*')    # 星号
+            text = text.replace('[', '\\[')    # 左方括号
+            text = text.replace(']', '\\]')    # 右方括号
+            text = text.replace('(', '\\(')    # 左圆括号
+            text = text.replace(')', '\\)')    # 右圆括号
+            text = text.replace('`', '\\`')    # 反引号
+            text = text.replace('~', '\\~')    # 波浪号
             return text
         
         def safe_title(text: str, max_len: int = 50) -> str:
@@ -271,6 +426,13 @@ class LLMClient:
 
 {'━' * 25}
 
+🛡️ 为您过滤的噪音
+{'─' * 25}
+
+{self._format_filter_stats(stats.get('filtered_stats', {}))}
+
+{'━' * 25}
+
 💬 这份简报对您有帮助吗？
 点击下方按钮反馈 👇
 """
@@ -278,31 +440,41 @@ class LLMClient:
         return digest.strip()
     
     def _deduplicate_info(self, info_list: List[Dict]) -> List[Dict]:
-        """去重：避免语义重复的信息"""
+        """去重：避免语义重复的信息（优化版，O(n)复杂度）"""
         if len(info_list) <= 1:
             return info_list
-        
-        # 简单的去重：基于标题相似度
+
+        # 优化的去重：基于标题相似度
         unique_list = []
-        seen_titles = set()
-        
+        seen_exact_titles = set()  # 完全匹配的标题（快速查找）
+        seen_normalized_titles = []  # 规范化后的标题（用于包含关系检查）
+
         for info in info_list:
             title = info.get('title', '').lower().strip()
             # 移除常见标点符号
-            title_clean = ''.join(c for c in title if c.isalnum() or c.isspace())
-            
-            # 检查是否与已有标题高度相似（简单检查：标题长度和关键词）
+            title_clean = ''.join(c for c in title if c.isalnum() or c.isspace()).strip()
+
+            if not title_clean:
+                continue
+
+            # 快速检查：完全匹配（O(1)）
+            if title_clean in seen_exact_titles:
+                continue
+
+            # 检查包含关系（仅对长标题，避免误判）
             is_duplicate = False
-            for seen_title in seen_titles:
-                # 如果标题完全相同或一个包含另一个，认为是重复
-                if title_clean == seen_title or (len(title_clean) > 10 and (title_clean in seen_title or seen_title in title_clean)):
-                    is_duplicate = True
-                    break
-            
+            if len(title_clean) > 10:
+                # 只检查前5个标题，避免O(n²)
+                for seen_title in seen_normalized_titles[-5:]:
+                    if title_clean in seen_title or seen_title in title_clean:
+                        is_duplicate = True
+                        break
+
             if not is_duplicate:
                 unique_list.append(info)
-                seen_titles.add(title_clean)
-        
+                seen_exact_titles.add(title_clean)
+                seen_normalized_titles.append(title_clean)
+
         return unique_list
     
     async def analyze_feedback(self, current_profile: str, feedbacks: List[Dict]) -> str:

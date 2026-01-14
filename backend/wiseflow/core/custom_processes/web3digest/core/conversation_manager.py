@@ -2,7 +2,7 @@
 对话管理模块 - 处理 3 轮对话式偏好收集
 """
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -16,21 +16,47 @@ logger = setup_logger(__name__)
 
 class ConversationManager:
     """对话管理器"""
-    
+
+    # 对话超时时间（分钟）
+    CONVERSATION_TIMEOUT_MINUTES = 30
+
     def __init__(self, bot=None):
         self.profile_manager = ProfileManager()
         self.llm_client = LLMClient()
         self._conversations: Dict[int, Dict] = {}  # user_id -> conversation_state
         self.bot = bot  # 保存 bot 引用，用于显示主菜单
-    
+
+    def _cleanup_expired_conversations(self):
+        """清理超时的对话（防止内存泄漏）"""
+        now = datetime.now()
+        expired_users = []
+
+        for user_id, conv in self._conversations.items():
+            start_time = conv.get("start_time")
+            if start_time:
+                elapsed = now - start_time
+                if elapsed > timedelta(minutes=self.CONVERSATION_TIMEOUT_MINUTES):
+                    expired_users.append(user_id)
+
+        # 清理过期对话
+        for user_id in expired_users:
+            del self._conversations[user_id]
+            logger.info(f"清理超时对话: 用户 {user_id}")
+
+        if expired_users:
+            logger.info(f"清理了 {len(expired_users)} 个超时对话")
+
     async def start_preference_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """开始偏好收集对话"""
         user_id = update.effective_user.id
-        
+
+        # 清理过期对话（防止内存泄漏）
+        self._cleanup_expired_conversations()
+
         # 判断是回调还是命令
         is_callback = update.callback_query is not None
         query = update.callback_query if is_callback else None
-        
+
         # 如果是回调，先响应并编辑消息
         if is_callback:
             await query.answer("开始设置偏好...")
@@ -38,7 +64,7 @@ class ConversationManager:
                 await query.edit_message_text("⏳ 正在开始偏好设置...")
             except:
                 pass
-        
+
         # 初始化对话状态
         self._conversations[user_id] = {
             "stage": 1,  # 当前轮次
@@ -57,10 +83,13 @@ class ConversationManager:
         """处理用户回复"""
         user_id = update.effective_user.id
         message_text = update.message.text
-        
+
+        # 清理过期对话（防止内存泄漏）
+        self._cleanup_expired_conversations()
+
         if user_id not in self._conversations:
             return
-        
+
         conversation = self._conversations[user_id]
         stage = conversation["stage"]
         
@@ -94,21 +123,86 @@ class ConversationManager:
             await self._handle_selection(update, context, selected)
     
     async def _handle_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, selected: str):
-        """处理选择类问题（占位）"""
-        pass
+        """处理选择类问题（Phase 3优化：快速选择）"""
+        user_id = update.effective_user.id
+        
+        if user_id not in self._conversations:
+            return
+        
+        # 处理领域选择
+        if selected.startswith("domain"):
+            domain = selected.replace("domain_", "")
+            if domain == "其他（自定义输入）":
+                # 提示用户自定义输入
+                text = "请直接发送消息，告诉我您关注的其他领域："
+                await context.bot.edit_message_text(
+                    chat_id=user_id,
+                    message_id=update.callback_query.message.message_id,
+                    text=text,
+                    reply_markup=None
+                )
+            else:
+                # 使用选择的领域
+                response = f"我主要关注 {domain}"
+                
+                # 发送"正在处理"提示
+                processing_msg = await context.bot.send_message(
+                    chat_id=user_id,
+                    text="⏳ 正在分析您的偏好...",
+                    reply_to_message_id=update.callback_query.message.message_id
+                )
+                
+                try:
+                    # 使用 LLM 提取关注领域
+                    interests = await self._extract_interests(response)
+                    
+                    # 保存数据
+                    self._conversations[user_id]["data"]["interests_response"] = response
+                    self._conversations[user_id]["data"]["interests"] = interests
+                    
+                    # 删除处理提示
+                    try:
+                        await processing_msg.delete()
+                    except:
+                        pass
+                    
+                    # 发送第二轮问题
+                    await self._send_stage2_question(update, context)
+                except Exception as e:
+                    logger.error(f"处理选择失败: {e}")
+                    try:
+                        await processing_msg.edit_text("❌ 处理失败，请重试")
+                    except:
+                        pass
     
     async def _send_stage1_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """发送第一轮问题 - 关注领域"""
+        """发送第一轮问题 - 关注领域（Phase 3优化：添加快速选择选项）"""
         text = """
-🎯 **第一步：告诉我您关注哪些 Web3 领域？**
+🎯 **步骤 1/3：关注领域**
 
-请用自然语言描述，例如：
-• "我主要玩 DeFi 和 Layer2"
-• "我比较关注比特币生态和 NFT"
-• "我是开发者，关注技术进展"
+告诉我您主要关注哪些 Web3 领域：
 
-您可以说得具体一些，这样我能更好地为您筛选信息。
+您可以说得具体一些（例如："我主要玩 DeFi 和 Layer2"），或者点击下方快速选择：
         """
+        
+        # 快速选择按钮 - 常见 Web3 领域
+        keyboard = [
+            ["DeFi", "Layer2", "NFT"],
+            ["比特币生态", "AI+Web3", "GameFi"],
+            ["基础设施", "投资/研究", "开发者"],
+            ["其他（自定义输入）"]
+        ]
+        
+        # 创建键盘布局
+        buttons_text = ["DeFi", "Layer2", "NFT", "比特币", "AI", "GameFi", "基础设施", "投资研究"]
+        button_rows = []
+        for i in range(0, len(buttons_text), 4):
+            row = buttons_text[i:i+4]
+            button_row = [InlineKeyboardButton(text, callback_data=f"domain_{text}") for text in row]
+            button_rows.append(button_row)
+        button_rows.append([InlineKeyboardButton("✏️ 其他（自定义输入）", callback_data="domain_其他（自定义输入）")])
+        
+        reply_markup = InlineKeyboardMarkup(button_rows)
         
         # 判断是回调还是命令
         is_callback = update.callback_query is not None
@@ -116,13 +210,13 @@ class ConversationManager:
             query = update.callback_query
             # 回调：编辑消息或发送新消息
             try:
-                await query.edit_message_text(text, parse_mode="Markdown")
+                await query.edit_message_text(text, parse_mode="Markdown", reply_markup=reply_markup)
             except:
                 # 如果编辑失败，发送新消息
-                await query.message.reply_text(text, parse_mode="Markdown")
+                await query.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
         else:
             # 命令：直接回复
-            await update.message.reply_text(text, parse_mode="Markdown")
+            await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
     
     async def _handle_stage1_response(self, update: Update, context: ContextTypes.DEFAULT_TYPE, response: str):
         """处理第一轮回复"""
@@ -487,7 +581,8 @@ class ConversationManager:
 """
         
         try:
-            response = await self.llm_client.complete(prompt, max_tokens=300, temperature=0.7)
+            # Phase 3优化：降低temperature和max_tokens，加快响应速度
+            response = await self.llm_client.complete(prompt, max_tokens=200, temperature=0.3)
             return response.strip()
         except Exception as e:
             logger.warning(f"生成第二步问题失败: {e}")

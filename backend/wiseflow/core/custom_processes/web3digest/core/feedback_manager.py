@@ -34,11 +34,11 @@ class FeedbackManager:
             self._file_locks[file_key] = asyncio.Lock()
         return self._file_locks[file_key]
     
-    async def save_feedback(self, user_id: int, overall: str, reason_selected: List[str] = None, 
+    async def save_feedback(self, user_id: int, overall: str, reason_selected: List[str] = None,
                            reason_text: str = None, item_feedbacks: List[Dict] = None) -> bool:
         """
         保存用户反馈
-        
+
         Args:
             user_id: 用户ID
             overall: 整体评价 ("positive" 或 "negative")
@@ -49,13 +49,8 @@ class FeedbackManager:
         try:
             feedback_date = date.today()
             feedback_file = self._get_feedback_file(feedback_date)
-            
-            # 读取现有反馈
-            feedbacks_data = {"date": feedback_date.isoformat(), "feedbacks": []}
-            if feedback_file.exists():
-                with open(feedback_file, 'r', encoding='utf-8') as f:
-                    feedbacks_data = json.load(f)
-            
+            file_lock = self._get_file_lock(feedback_file)
+
             # 创建新反馈记录
             feedback_record = {
                 "user_id": str(user_id),
@@ -65,16 +60,24 @@ class FeedbackManager:
                 "reason_text": reason_text or "",
                 "item_feedbacks": item_feedbacks or []
             }
-            
-            # 添加到列表
-            feedbacks_data["feedbacks"].append(feedback_record)
-            
-            # 保存
-            with open(feedback_file, 'w', encoding='utf-8') as f:
-                json.dump(feedbacks_data, f, ensure_ascii=False, indent=2)
-            
+
+            # 使用文件锁保护读写操作
+            async with file_lock:
+                # 读取现有反馈
+                feedbacks_data = {"date": feedback_date.isoformat(), "feedbacks": []}
+                if feedback_file.exists():
+                    with open(feedback_file, 'r', encoding='utf-8') as f:
+                        feedbacks_data = json.load(f)
+
+                # 添加到列表
+                feedbacks_data["feedbacks"].append(feedback_record)
+
+                # 保存
+                with open(feedback_file, 'w', encoding='utf-8') as f:
+                    json.dump(feedbacks_data, f, ensure_ascii=False, indent=2)
+
             logger.info(f"保存用户 {user_id} 的反馈: {overall}")
-            
+
             # 每次反馈都实时更新画像
             from core.custom_processes.web3digest.core.feedback_analyzer import FeedbackAnalyzer
             analyzer = FeedbackAnalyzer()
@@ -82,9 +85,9 @@ class FeedbackManager:
             await analyzer.update_profile_with_feedback(user_id, feedback_record)
             # 如果达到阈值，触发深度分析
             await analyzer.analyze_if_threshold_reached(user_id)
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"保存反馈失败: {e}", exc_info=True)
             return False
@@ -127,7 +130,7 @@ class FeedbackManager:
     async def add_item_feedback(self, user_id: int, item_id: str, source: str, rating: str) -> bool:
         """
         添加单条信息的反馈
-        
+
         Args:
             user_id: 用户ID
             item_id: 信息ID
@@ -137,46 +140,50 @@ class FeedbackManager:
         try:
             feedback_date = date.today()
             feedback_file = self._get_feedback_file(feedback_date)
-            
-            # 读取现有反馈
-            feedbacks_data = {"date": feedback_date.isoformat(), "feedbacks": []}
-            if feedback_file.exists():
-                with open(feedback_file, 'r', encoding='utf-8') as f:
-                    feedbacks_data = json.load(f)
-            
-            # 查找或创建今天的反馈记录
-            today_feedback = None
-            for fb in feedbacks_data.get("feedbacks", []):
-                if fb.get("user_id") == str(user_id) and fb.get("date", feedback_date.isoformat()) == feedback_date.isoformat():
-                    today_feedback = fb
-                    break
-            
-            if not today_feedback:
-                # 创建新记录
-                today_feedback = {
-                    "user_id": str(user_id),
-                    "time": datetime.now().strftime("%H:%M"),
-                    "overall": "",
-                    "reason_selected": [],
-                    "reason_text": "",
-                    "item_feedbacks": []
+            file_lock = self._get_file_lock(feedback_file)
+
+            # 使用文件锁保护读写操作
+            async with file_lock:
+                # 读取现有反馈
+                feedbacks_data = {"date": feedback_date.isoformat(), "feedbacks": []}
+                if feedback_file.exists():
+                    with open(feedback_file, 'r', encoding='utf-8') as f:
+                        feedbacks_data = json.load(f)
+
+                # 查找或创建今天的反馈记录
+                today_feedback = None
+                for fb in feedbacks_data.get("feedbacks", []):
+                    if fb.get("user_id") == str(user_id):
+                        today_feedback = fb
+                        break
+
+                if not today_feedback:
+                    # 创建新记录
+                    today_feedback = {
+                        "user_id": str(user_id),
+                        "time": datetime.now().strftime("%H:%M"),
+                        "overall": "",
+                        "reason_selected": [],
+                        "reason_text": "",
+                        "item_feedbacks": []
+                    }
+                    feedbacks_data["feedbacks"].append(today_feedback)
+
+                # 添加单条反馈
+                item_feedback = {
+                    "item_id": item_id,
+                    "source": source,
+                    "rating": rating,
+                    "time": datetime.now().strftime("%H:%M")
                 }
-                feedbacks_data["feedbacks"].append(today_feedback)
-            
-            # 添加单条反馈
-            item_feedback = {
-                "item_id": item_id,
-                "source": source,
-                "rating": rating
-            }
-            today_feedback["item_feedbacks"].append(item_feedback)
-            
-            # 保存
-            with open(feedback_file, 'w', encoding='utf-8') as f:
-                json.dump(feedbacks_data, f, ensure_ascii=False, indent=2)
-            
+                today_feedback["item_feedbacks"].append(item_feedback)
+
+                # 保存
+                with open(feedback_file, 'w', encoding='utf-8') as f:
+                    json.dump(feedbacks_data, f, ensure_ascii=False, indent=2)
+
             logger.info(f"保存用户 {user_id} 的单条反馈: {item_id} - {rating}")
-            
+
             # 单条反馈也实时更新画像
             from core.custom_processes.web3digest.core.feedback_analyzer import FeedbackAnalyzer
             analyzer = FeedbackAnalyzer()
@@ -184,12 +191,13 @@ class FeedbackManager:
             feedback_record = {
                 "overall": "positive" if rating == "like" else "negative",
                 "reason_selected": [f"单条信息{'喜欢' if rating == 'like' else '不感兴趣'}"],
-                "reason_text": f"信息ID: {item_id}, 来源: {source}"
+                "reason_text": f"信息ID: {item_id}, 来源: {source}",
+                "item_feedbacks": [item_feedback]
             }
             await analyzer.update_profile_with_feedback(user_id, feedback_record)
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"保存单条反馈失败: {e}", exc_info=True)
             return False

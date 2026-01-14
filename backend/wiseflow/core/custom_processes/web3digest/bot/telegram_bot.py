@@ -408,8 +408,13 @@ class Web3DigestBot:
             if stats_dir.exists():
                 for stats_file in stats_dir.glob("*.json"):
                     try:
-                        with open(stats_file, 'r', encoding='utf-8') as f:
-                            daily_stats = json.load(f)
+                        # 使用异步文件读取，避免阻塞事件循环
+                        def _read_stats_file():
+                            with open(stats_file, 'r', encoding='utf-8') as f:
+                                return json.load(f)
+
+                        loop = asyncio.get_event_loop()
+                        daily_stats = await loop.run_in_executor(None, _read_stats_file)
                         user_stats = daily_stats.get("users", {}).get(str(user_id), {})
                         if user_stats:
                             total_digests += 1
@@ -475,37 +480,103 @@ class Web3DigestBot:
             reply_markup=reply_markup
         )
     
+    async def _generate_personalized_feedback_message(self, user_id: int, feedback_type: str) -> str:
+        """
+        生成个性化的反馈确认消息（Phase 2优化）
+
+        Args:
+            user_id: 用户ID
+            feedback_type: "positive" 或 "negative"
+
+        Returns:
+            个性化的确认消息
+        """
+        try:
+            # 获取用户画像
+            profile = await self.profile_manager.get_structured_profile(user_id)
+            if not profile:
+                # 如果没有画像，返回通用消息
+                if feedback_type == "positive":
+                    return "✅ 感谢反馈！我们会继续为您提供优质内容"
+                else:
+                    return "📝 已记录，我们将改进内容推荐"
+
+            # 提取用户兴趣
+            interests = profile.get("interests", [])
+            preferences = profile.get("preferences", {})
+            content_types = preferences.get("content_types", [])
+
+            # 构建兴趣描述
+            interest_desc = ""
+            if interests:
+                interest_desc = "、".join(interests[:2])  # 最多显示2个
+            elif content_types:
+                interest_desc = "、".join(content_types[:2])
+
+            # 生成个性化消息
+            if feedback_type == "positive":
+                if interest_desc:
+                    return f"✅ 感谢反馈！我们会继续为您推荐 {interest_desc} 等相关内容"
+                else:
+                    return "✅ 感谢反馈！我们会继续为您提供优质内容"
+            else:  # negative
+                if interest_desc:
+                    return f"📝 已记录！我们将优化 {interest_desc} 相关内容的推荐"
+                else:
+                    return "📝 已记录！我们将改进内容推荐"
+
+        except Exception as e:
+            logger.error(f"生成个性化反馈消息失败: {e}")
+            # 失败时返回通用消息
+            if feedback_type == "positive":
+                return "✅ 感谢反馈！"
+            else:
+                return "📝 已记录！"
+
     async def handle_feedback_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """处理反馈回调"""
+        """处理反馈回调（Phase 2优化：添加个性化确认消息）"""
         query = update.callback_query
         user_id = update.effective_user.id
         data = query.data
-        
+
         if data.startswith("feedback_positive"):
             # 正面反馈
             await self.feedback_manager.save_feedback(user_id, "positive")
-            # 使用弹窗通知，不替换简报内容
-            await query.answer("✅ 感谢您的反馈！", show_alert=False)
+
+            # 生成个性化确认消息
+            message = await self._generate_personalized_feedback_message(user_id, "positive")
+            await query.answer(message, show_alert=False)
+
+            # 发送一条新消息，让用户看到AI在学习
+            try:
+                await self.application.bot.send_message(
+                    chat_id=user_id,
+                    text=f"{message}\n\n💡 AI正在学习您的偏好，未来的推荐会更加精准！"
+                )
+            except:
+                pass
+
             # 移除反馈按钮，保留简报内容
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except:
                 pass
-            
+
         elif data.startswith("feedback_negative"):
             # 负面反馈：先不保存，等用户选择原因或跳过后再保存
             # 立即响应，避免用户重复点击
             try:
-                await query.answer()  # 立即响应
+                message = await self._generate_personalized_feedback_message(user_id, "negative")
+                await query.answer(message, show_alert=False)
             except:
                 pass
-            
+
             # 立即移除反馈按钮，提升响应速度
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except:
                 pass
-            
+
             # 如果已有反馈原因选择界面，先删除旧的
             if user_id in self._active_feedback_reasons:
                 try:
@@ -513,7 +584,7 @@ class Web3DigestBot:
                     await self.application.bot.delete_message(chat_id=user_id, message_id=old_msg_id)
                 except:
                     pass
-            
+
             # 发送可选的原因选择（不强制）
             reason_msg = await self._show_feedback_reasons_optional(query, user_id)
             if reason_msg:

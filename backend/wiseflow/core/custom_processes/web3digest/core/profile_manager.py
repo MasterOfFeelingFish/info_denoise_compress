@@ -19,15 +19,23 @@ logger = setup_logger(__name__)
 
 class ProfileManager:
     """用户画像管理器"""
-    
+
     def __init__(self):
         self.data_dir = Path(settings.DATA_DIR)
         self.profiles_dir = self.data_dir / "profiles"
-        self._lock = asyncio.Lock()
-    
+        # 为每个用户创建独立的锁，避免不同用户之间的锁竞争
+        self._user_locks: Dict[int, asyncio.Lock] = {}
+
+    def _get_user_lock(self, user_id: int) -> asyncio.Lock:
+        """获取用户锁（延迟创建）"""
+        if user_id not in self._user_locks:
+            self._user_locks[user_id] = asyncio.Lock()
+        return self._user_locks[user_id]
+
     async def create_profile(self, user_id: int, profile_data: Dict) -> bool:
         """创建用户画像"""
-        async with self._lock:
+        user_lock = self._get_user_lock(user_id)
+        async with user_lock:
             # 保存结构化数据（JSON格式，供AI使用）
             json_file = self.profiles_dir / f"{user_id}.json"
             # 保存文本格式（用于显示）
@@ -66,28 +74,30 @@ class ProfileManager:
     
     async def get_profile(self, user_id: int) -> Optional[str]:
         """获取用户画像（自然语言文本，用于显示）"""
-        profile_file = self.profiles_dir / f"{user_id}.txt"
-        
-        if profile_file.exists():
-            # 使用异步文件读取，避免阻塞
-            if HAS_AIOFILES:
-                async with aiofiles.open(profile_file, 'r', encoding='utf-8') as f:
-                    return await f.read()
-            else:
-                # 如果没有 aiofiles，使用同步读取（在线程池中执行，避免阻塞事件循环）
-                def _read_file():
-                    with open(profile_file, 'r', encoding='utf-8') as f:
-                        return f.read()
-                
-                loop = asyncio.get_event_loop()
-                return await loop.run_in_executor(None, _read_file)
-        
-        return None
+        user_lock = self._get_user_lock(user_id)
+        async with user_lock:
+            profile_file = self.profiles_dir / f"{user_id}.txt"
+
+            if profile_file.exists():
+                # 使用异步文件读取，避免阻塞
+                if HAS_AIOFILES:
+                    async with aiofiles.open(profile_file, 'r', encoding='utf-8') as f:
+                        return await f.read()
+                else:
+                    # 如果没有 aiofiles，使用同步读取（在线程池中执行，避免阻塞事件循环）
+                    def _read_file():
+                        with open(profile_file, 'r', encoding='utf-8') as f:
+                            return f.read()
+
+                    loop = asyncio.get_event_loop()
+                    return await loop.run_in_executor(None, _read_file)
+
+            return None
     
-    async def get_structured_profile(self, user_id: int) -> Optional[Dict]:
-        """获取用户画像（结构化数据，供AI使用）"""
+    async def _read_structured_profile_unlocked(self, user_id: int) -> Optional[Dict]:
+        """读取结构化画像（内部方法，不加锁）"""
         json_file = self.profiles_dir / f"{user_id}.json"
-        
+
         if json_file.exists():
             if HAS_AIOFILES:
                 async with aiofiles.open(json_file, 'r', encoding='utf-8') as f:
@@ -97,19 +107,31 @@ class ProfileManager:
                 def _read_file():
                     with open(json_file, 'r', encoding='utf-8') as f:
                         return json.load(f)
-                
+
                 loop = asyncio.get_event_loop()
                 return await loop.run_in_executor(None, _read_file)
-        else:
-            # 如果JSON不存在但TXT存在，尝试从TXT创建JSON（迁移）
-            txt_file = self.profiles_dir / f"{user_id}.txt"
-            if txt_file.exists():
-                logger.info(f"用户 {user_id} 的画像需要迁移到结构化格式")
-                await self._migrate_text_to_structured(user_id)
-                # 重新读取
-                return await self.get_structured_profile(user_id)
-        
+
         return None
+
+    async def get_structured_profile(self, user_id: int) -> Optional[Dict]:
+        """获取用户画像（结构化数据，供AI使用）"""
+        user_lock = self._get_user_lock(user_id)
+        async with user_lock:
+            json_file = self.profiles_dir / f"{user_id}.json"
+
+            if json_file.exists():
+                return await self._read_structured_profile_unlocked(user_id)
+            else:
+                # 如果JSON不存在但TXT存在，尝试从TXT创建JSON（迁移）
+                txt_file = self.profiles_dir / f"{user_id}.txt"
+                if txt_file.exists():
+                    logger.info(f"用户 {user_id} 的画像需要迁移到结构化格式")
+                    # 在锁内执行迁移，迁移后直接读取（避免递归调用）
+                    success = await self._migrate_text_to_structured(user_id)
+                    if success:
+                        return await self._read_structured_profile_unlocked(user_id)
+
+            return None
     
     async def _migrate_text_to_structured(self, user_id: int) -> bool:
         """从文本格式迁移到结构化格式"""
@@ -221,18 +243,19 @@ class ProfileManager:
     
     async def update_structured_profile(self, user_id: int, updates: Dict) -> bool:
         """更新结构化画像数据"""
-        async with self._lock:
+        user_lock = self._get_user_lock(user_id)
+        async with user_lock:
             json_file = self.profiles_dir / f"{user_id}.json"
-            
-            # 读取现有数据
-            structured_data = await self.get_structured_profile(user_id)
+
+            # 读取现有数据（使用无锁版本，因为已经在锁内）
+            structured_data = await self._read_structured_profile_unlocked(user_id)
             if not structured_data:
                 logger.warning(f"用户 {user_id} 没有结构化画像，无法更新")
                 return False
-            
+
             # 更新数据
             structured_data["updated_at"] = datetime.now().isoformat()
-            
+
             # 合并更新
             if "interests" in updates:
                 structured_data["interests"] = updates["interests"]
@@ -246,7 +269,7 @@ class ProfileManager:
                 structured_data["ai_understanding"] = updates["ai_understanding"]
             if "stats" in updates:
                 structured_data["stats"].update(updates["stats"])
-            
+
             # 保存
             self.profiles_dir.mkdir(parents=True, exist_ok=True)
             if HAS_AIOFILES:
@@ -255,7 +278,7 @@ class ProfileManager:
             else:
                 with open(json_file, 'w', encoding='utf-8') as f:
                     json.dump(structured_data, f, ensure_ascii=False, indent=2)
-            
+
             logger.debug(f"更新用户 {user_id} 的结构化画像")
             return True
     

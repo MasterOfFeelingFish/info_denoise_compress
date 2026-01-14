@@ -91,7 +91,7 @@ class DigestGenerator:
                 }
             
             # 3. AI 筛选个性化内容（使用增强的画像）
-            selected_info = await self._filter_info(raw_info, enhanced_profile)
+            selected_info, filter_stats = await self._filter_info(raw_info, enhanced_profile)
             
             # 确保筛选结果不为空（_filter_info 已有兜底逻辑，但这里再检查一次）
             if not selected_info:
@@ -152,6 +152,7 @@ class DigestGenerator:
             
             # 4. 生成简报
             stats = await self._calculate_stats(len(raw_info), len(selected_info), user_id)
+            stats["filtered_stats"] = filter_stats  # 添加过滤统计
             digest_text = await self.llm_client.generate_digest(user_profile, selected_info, stats)
             
             # 4. 保存统计信息
@@ -238,6 +239,45 @@ class DigestGenerator:
         # 如果指定了 user_id，可以按用户筛选（未来扩展）
         return await self.wiseflow_client.get_today_info()
     
+    def _analyze_filtered_content(self, raw_info: List[Dict], selected_indices: List[int]) -> Dict:
+        """分析被过滤的内容类型（Phase 4优化：展示过滤噪音）"""
+        filtered_info = []
+        selected_set = set(selected_indices)
+        
+        for i, info in enumerate(raw_info):
+            if i not in selected_set:
+                filtered_info.append(info)
+        
+        # 分类统计
+        category_stats = {
+            "meme_promotion": 0,  # Meme币推广
+            "price_predictions": 0,  # 价格预测
+            "duplicates": 0,  # 重复信息
+            "ads": 0,  # 广告/推广
+            "irrelevant": 0,  # 不相关内容
+            "low_quality": 0  # 低质量内容
+        }
+        
+        for info in filtered_info:
+            title = info.get("title", "").lower()
+            content = info.get("content", "").lower()
+            text = f"{title} {content}"
+            
+            # Meme币推广
+            if any(keyword in text for keyword in ["meme", "土狗", "拉盘", "空投", "白送", "免费"]):
+                category_stats["meme_promotion"] += 1
+            # 价格预测
+            elif any(keyword in text for keyword in ["预测", "行情", "价格", "突破", "跌破", "将要"]):
+                category_stats["price_predictions"] += 1
+            # 广告推广
+            elif any(keyword in text for keyword in ["广告", "推广", "合作", "联系", "vx", "qq", "微信"]):
+                category_stats["ads"] += 1
+            # 低质量/不相关
+            else:
+                category_stats["irrelevant"] += 1
+        
+        return category_stats
+
     async def _filter_info(self, raw_info: List[Dict], user_profile: str) -> List[Dict]:
         """使用 AI 批量筛选信息（优化版：一次筛选多条）"""
         

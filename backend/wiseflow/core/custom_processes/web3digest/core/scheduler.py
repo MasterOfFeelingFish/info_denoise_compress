@@ -37,13 +37,13 @@ class DigestScheduler:
         # 启动抓取调度器（每小时抓取一次）
         await self.crawler_scheduler.start()
         
-        # 添加每小时检查推送任务（支持用户自定义推送时间）
-        # 每小时的第0分钟执行，检查哪些用户需要推送
+        # 添加每分钟检查推送任务（支持用户自定义推送时间，精确到分钟）
+        # 每分钟执行一次，检查哪些用户需要推送
         self.scheduler.add_job(
             func=self._check_and_push_digest,
-            trigger=CronTrigger(minute=0),  # 每小时执行一次
-            id="hourly_digest_check",
-            name="每小时检查推送任务",
+            trigger=CronTrigger(second=0),  # 每分钟的第0秒执行
+            id="minutely_digest_check",
+            name="每分钟检查推送任务",
             replace_existing=True
         )
         
@@ -60,7 +60,7 @@ class DigestScheduler:
         self.scheduler.start()
         self._running = True
         
-        logger.info("调度器已启动，每小时检查用户推送时间并推送简报")
+        logger.info("调度器已启动，每分钟检查用户推送时间并推送简报（支持分钟级精度）")
     
     async def stop(self):
         """停止调度器"""
@@ -107,15 +107,12 @@ class DigestScheduler:
                     # 获取用户推送时间
                     user_push_time = await self.bot.profile_manager.get_push_time(user_id)
                     push_hour, push_minute = map(int, user_push_time.split(":"))
-                    
-                    # 检查是否到了该用户的推送时间
-                    # 由于调度器每小时执行一次（在整点），所以只检查小时是否匹配
-                    # 如果用户设置了非整点时间（如 09:30），会在该小时的整点（09:00）推送
-                    if current_hour != push_hour:
+
+                    # 检查是否到了该用户的推送时间（精确到分钟）
+                    # 调度器每分钟执行一次，检查小时和分钟是否都匹配
+                    if current_hour != push_hour or current_minute != push_minute:
                         # 不是这个用户的推送时间，跳过
                         continue
-                    
-                    # 当前是整点（current_minute == 0），且小时匹配，执行推送
                     
                     logger.info(f"用户 {user_id} 的推送时间到了 ({user_push_time})，开始推送")
                     
