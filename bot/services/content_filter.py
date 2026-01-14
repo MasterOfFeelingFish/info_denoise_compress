@@ -13,6 +13,7 @@ from typing import List, Dict, Any, Optional
 from services.gemini import call_gemini_json, call_gemini
 from utils.json_storage import get_user_profile, get_user_feedbacks
 from utils.prompt_loader import get_prompt
+from config import MIN_DIGEST_ITEMS, MAX_DIGEST_ITEMS
 
 logger = logging.getLogger(__name__)
 
@@ -108,40 +109,65 @@ async def filter_content_for_user(
     system_instruction = get_prompt(
         "filtering.txt",
         user_profile=profile,
-        feedback_summary=feedback_summary
+        feedback_summary=feedback_summary,
+        min_items=MIN_DIGEST_ITEMS,
+        max_items=MAX_DIGEST_ITEMS
     )
 
     prompt = f"""## Today's Content to Filter (Total: {len(content_for_ai)} items)
 
 {json.dumps(content_for_ai, ensure_ascii=False, indent=2)}
 
-Please select the most relevant items for this user (max {max_items} items)."""
+Please categorize into must_read, recommended, and other sections ({MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} total items)."""
 
     try:
         # Call Gemini for filtering
-        filtered_items = await call_gemini_json(
+        filtered_result = await call_gemini_json(
             prompt=prompt,
             system_instruction=system_instruction
         )
 
-        if not isinstance(filtered_items, list):
-            logger.error(f"Unexpected response format: {type(filtered_items)}")
-            # Return fallback with consistent structure
-            return [
-                {
-                    "id": item.get("id"),
-                    "title": item.get("title"),
-                    "summary": item.get("summary", "")[:100],
-                    "source": item.get("source"),
-                    "link": item.get("link"),
-                    "importance": "medium",
-                    "reason": "Fallback: invalid AI response"
-                }
-                for item in raw_content[:max_items]
-            ]
+        # Handle new format: {must_read: [], recommended: [], other: []}
+        if isinstance(filtered_result, dict):
+            must_read = filtered_result.get("must_read", [])
+            recommended = filtered_result.get("recommended", [])
+            other = filtered_result.get("other", [])
 
-        logger.info(f"AI selected {len(filtered_items)} items for user {telegram_id}")
-        return filtered_items[:max_items]
+            # Add section marker to each item
+            for item in must_read:
+                item["section"] = "must_read"
+            for item in recommended:
+                item["section"] = "recommended"
+            for item in other:
+                item["section"] = "other"
+
+            # Combine all items
+            all_items = must_read + recommended + other
+            total_count = len(all_items)
+
+            logger.info(f"AI selected {total_count} items for user {telegram_id} "
+                       f"(must_read: {len(must_read)}, recommended: {len(recommended)}, other: {len(other)})")
+            return all_items[:max_items]
+
+        # Legacy format: flat list (backward compatibility)
+        if isinstance(filtered_result, list):
+            logger.info(f"AI selected {len(filtered_result)} items for user {telegram_id}")
+            return filtered_result[:max_items]
+
+        logger.error(f"Unexpected response format: {type(filtered_result)}")
+        # Return fallback with consistent structure
+        return [
+            {
+                "id": item.get("id"),
+                "title": item.get("title"),
+                "summary": item.get("summary", "")[:100],
+                "source": item.get("source"),
+                "link": item.get("link"),
+                "section": "other",
+                "reason": "Fallback: invalid AI response"
+            }
+            for item in raw_content[:max_items]
+        ]
 
     except Exception as e:
         logger.error(f"AI filtering failed for {telegram_id}: {e}")
@@ -153,7 +179,7 @@ Please select the most relevant items for this user (max {max_items} items)."""
                 "summary": item.get("summary", "")[:100],
                 "source": item.get("source"),
                 "link": item.get("link"),
-                "importance": "medium",
+                "section": "other",
                 "reason": "Fallback selection"
             }
             for item in raw_content[:max_items]

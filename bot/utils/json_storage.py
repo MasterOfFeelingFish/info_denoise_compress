@@ -23,6 +23,11 @@ from config import (
     FEEDBACK_DIR,
     DAILY_STATS_DIR,
     RAW_CONTENT_DIR,
+    USER_SOURCES_DIR,
+    DEFAULT_USER_SOURCES,
+    RAW_CONTENT_RETENTION_DAYS,
+    DAILY_STATS_RETENTION_DAYS,
+    FEEDBACK_RETENTION_DAYS,
 )
 
 logger = logging.getLogger(__name__)
@@ -133,6 +138,26 @@ def update_user_activity(telegram_id: str) -> None:
             user["last_active"] = datetime.now().isoformat()
             _write_json(USERS_FILE, data)
             break
+
+
+def get_user_setting(telegram_id: str, key: str, default: Any = None) -> Any:
+    """Get a user setting value."""
+    user = get_user(telegram_id)
+    if not user:
+        return default
+    return user.get("settings", {}).get(key, default)
+
+
+def set_user_setting(telegram_id: str, key: str, value: Any) -> bool:
+    """Set a user setting value."""
+    data = _read_json(USERS_FILE)
+    for user in data.get("users", []):
+        if user.get("telegram_id") == telegram_id:
+            if "settings" not in user:
+                user["settings"] = {}
+            user["settings"][key] = value
+            return _write_json(USERS_FILE, data)
+    return False
 
 
 # ============ User Profile Management ============
@@ -286,3 +311,261 @@ def get_raw_content(date: Optional[str] = None) -> Dict[str, Any]:
 
     content_path = os.path.join(RAW_CONTENT_DIR, f"{date}.json")
     return _read_json(content_path)
+
+
+# ============ User Sources Management ============
+
+
+def get_user_sources(telegram_id: str) -> Dict[str, Dict[str, str]]:
+    """Get user's RSS source configuration."""
+    user = get_user(telegram_id)
+    if not user:
+        return DEFAULT_USER_SOURCES.copy()
+
+    _ensure_dir(USER_SOURCES_DIR)
+    sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
+
+    if not os.path.exists(sources_path):
+        # Initialize with default sources
+        save_user_sources(telegram_id, DEFAULT_USER_SOURCES)
+        return DEFAULT_USER_SOURCES.copy()
+
+    data = _read_json(sources_path)
+    return data.get("sources", DEFAULT_USER_SOURCES.copy())
+
+
+def save_user_sources(telegram_id: str, sources: Dict[str, Dict[str, str]]) -> bool:
+    """Save user's RSS source configuration."""
+    user = get_user(telegram_id)
+    if not user:
+        logger.error(f"Cannot save sources: user {telegram_id} not found")
+        return False
+
+    _ensure_dir(USER_SOURCES_DIR)
+    sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
+
+    data = {
+        "user_id": user["id"],
+        "telegram_id": telegram_id,
+        "updated": datetime.now().isoformat(),
+        "sources": sources,
+    }
+
+    result = _write_json(sources_path, data)
+    if result:
+        logger.info(f"Saved sources for user {user['id']}")
+    return result
+
+
+def add_user_source(telegram_id: str, category: str, name: str, url: str) -> bool:
+    """Add a source to user's configuration."""
+    sources = get_user_sources(telegram_id)
+
+    if category not in sources:
+        sources[category] = {}
+
+    sources[category][name] = url
+    return save_user_sources(telegram_id, sources)
+
+
+def remove_user_source(telegram_id: str, category: str, name: str) -> bool:
+    """Remove a source from user's configuration."""
+    sources = get_user_sources(telegram_id)
+
+    if category in sources and name in sources[category]:
+        del sources[category][name]
+        return save_user_sources(telegram_id, sources)
+    return False
+
+
+# ============ Per-User Raw Content ============
+
+def save_user_raw_content(telegram_id: str, date: str, items: List[Dict[str, Any]]) -> bool:
+    """Save raw fetched content for a user on a specific day."""
+    user = get_user(telegram_id)
+    if not user:
+        return False
+
+    user_content_dir = os.path.join(RAW_CONTENT_DIR, user["id"])
+    _ensure_dir(user_content_dir)
+    content_path = os.path.join(user_content_dir, f"{date}.json")
+
+    data = {
+        "date": date,
+        "user_id": user["id"],
+        "fetched_at": datetime.now().isoformat(),
+        "count": len(items),
+        "items": items,
+    }
+
+    return _write_json(content_path, data)
+
+
+def get_user_raw_content(telegram_id: str, date: Optional[str] = None) -> Dict[str, Any]:
+    """Get raw content for a user on a specific day."""
+    user = get_user(telegram_id)
+    if not user:
+        return {}
+
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    user_content_dir = os.path.join(RAW_CONTENT_DIR, user["id"])
+    content_path = os.path.join(user_content_dir, f"{date}.json")
+    return _read_json(content_path)
+
+
+# ============ Per-User Daily Stats ============
+
+def save_user_daily_stats(
+    telegram_id: str,
+    date: str,
+    sources_monitored: int,
+    raw_items_scanned: int,
+    items_sent: int,
+    status: str = "success"
+) -> bool:
+    """Save daily statistics for a specific user."""
+    user = get_user(telegram_id)
+    if not user:
+        return False
+
+    user_stats_dir = os.path.join(DAILY_STATS_DIR, user["id"])
+    _ensure_dir(user_stats_dir)
+    stats_path = os.path.join(user_stats_dir, f"{date}.json")
+
+    data = {
+        "date": date,
+        "user_id": user["id"],
+        "sources_monitored": sources_monitored,
+        "raw_items_scanned": raw_items_scanned,
+        "items_sent": items_sent,
+        "status": status,
+    }
+
+    return _write_json(stats_path, data)
+
+
+def get_user_daily_stats(telegram_id: str, date: Optional[str] = None) -> Dict[str, Any]:
+    """Get daily statistics for a specific user."""
+    user = get_user(telegram_id)
+    if not user:
+        return {}
+
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    user_stats_dir = os.path.join(DAILY_STATS_DIR, user["id"])
+    stats_path = os.path.join(user_stats_dir, f"{date}.json")
+    return _read_json(stats_path)
+
+
+# ============ Data Cleanup ============
+
+def _cleanup_old_files_in_dir(directory: str, retention_days: int) -> int:
+    """
+    Delete files older than retention_days in a directory.
+
+    清理指定目录中超过保留天数的文件。
+    支持 {date}.json 格式的文件名。
+
+    Returns:
+        Number of files deleted
+    """
+    if not os.path.exists(directory):
+        return 0
+
+    deleted_count = 0
+    cutoff_date = datetime.now() - timedelta(days=retention_days)
+    cutoff_str = cutoff_date.strftime("%Y-%m-%d")
+
+    try:
+        for filename in os.listdir(directory):
+            filepath = os.path.join(directory, filename)
+
+            # Skip directories (handle user subdirectories separately)
+            if os.path.isdir(filepath):
+                continue
+
+            # Extract date from filename (format: {date}.json)
+            if filename.endswith(".json"):
+                date_part = filename.replace(".json", "")
+                try:
+                    # Validate date format
+                    datetime.strptime(date_part, "%Y-%m-%d")
+                    if date_part < cutoff_str:
+                        os.remove(filepath)
+                        deleted_count += 1
+                        logger.debug(f"Deleted old file: {filepath}")
+                except ValueError:
+                    # Not a date-formatted file, skip
+                    continue
+    except Exception as e:
+        logger.error(f"Error cleaning up {directory}: {e}")
+
+    return deleted_count
+
+
+def cleanup_old_data() -> Dict[str, int]:
+    """
+    Clean up old data files based on retention settings.
+
+    根据配置的保留天数清理过期数据：
+    - raw_content: RAW_CONTENT_RETENTION_DAYS (默认7天)
+    - daily_stats: DAILY_STATS_RETENTION_DAYS (默认30天)
+    - feedback: FEEDBACK_RETENTION_DAYS (默认30天)
+
+    Returns:
+        Dict with cleanup counts for each category
+    """
+    results = {
+        "raw_content": 0,
+        "daily_stats": 0,
+        "feedback": 0,
+    }
+
+    # Clean feedback directory
+    results["feedback"] = _cleanup_old_files_in_dir(
+        FEEDBACK_DIR, FEEDBACK_RETENTION_DAYS
+    )
+
+    # Clean raw_content - handle per-user subdirectories
+    if os.path.exists(RAW_CONTENT_DIR):
+        for item in os.listdir(RAW_CONTENT_DIR):
+            item_path = os.path.join(RAW_CONTENT_DIR, item)
+            if os.path.isdir(item_path):
+                # User subdirectory
+                results["raw_content"] += _cleanup_old_files_in_dir(
+                    item_path, RAW_CONTENT_RETENTION_DAYS
+                )
+            elif item.endswith(".json"):
+                # Legacy global files
+                results["raw_content"] += _cleanup_old_files_in_dir(
+                    RAW_CONTENT_DIR, RAW_CONTENT_RETENTION_DAYS
+                )
+                break  # Only need to run once for root level
+
+    # Clean daily_stats - handle per-user subdirectories
+    if os.path.exists(DAILY_STATS_DIR):
+        for item in os.listdir(DAILY_STATS_DIR):
+            item_path = os.path.join(DAILY_STATS_DIR, item)
+            if os.path.isdir(item_path):
+                # User subdirectory
+                results["daily_stats"] += _cleanup_old_files_in_dir(
+                    item_path, DAILY_STATS_RETENTION_DAYS
+                )
+            elif item.endswith(".json"):
+                # Legacy global files
+                results["daily_stats"] += _cleanup_old_files_in_dir(
+                    DAILY_STATS_DIR, DAILY_STATS_RETENTION_DAYS
+                )
+                break
+
+    total = sum(results.values())
+    if total > 0:
+        logger.info(
+            f"Data cleanup complete: {results['raw_content']} raw_content, "
+            f"{results['daily_stats']} daily_stats, {results['feedback']} feedback files deleted"
+        )
+
+    return results

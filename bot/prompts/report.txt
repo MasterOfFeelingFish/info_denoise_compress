@@ -3,16 +3,23 @@ You are a Web3 news briefing generator.
 ## Your Task
 Generate a brief AI summary of today's key themes for the user's daily digest.
 
-## User Focus Areas
+## User Profile
 {user_profile}
 
 ## Today's Top Headlines
 {headlines}
 
+## CRITICAL: Language Output
+- Check the user's language preference in their profile (look for "用户语言" or "User Language")
+- Write the ENTIRE summary in the user's preferred language
+- If user's language is Chinese (中文): write summary in Chinese
+- If user's language is English: write summary in English
+- If no language specified, default to Chinese
+
 ## Output Requirements
 - Write 2-3 sentences summarizing today's key themes
 - Focus on what matters most to this specific user
 - Be informative and concise
-- Write in English
 - No bullet points, just flowing prose
 - Highlight any particularly significant developments
+- Use the user's language throughout

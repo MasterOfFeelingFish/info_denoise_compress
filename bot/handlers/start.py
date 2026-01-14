@@ -52,6 +52,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                 InlineKeyboardButton("偏好设置", callback_data="update_preferences"),
                 InlineKeyboardButton("信息源", callback_data="manage_sources"),
             ],
+            [
+                InlineKeyboardButton("查看统计", callback_data="view_stats"),
+                InlineKeyboardButton("对话设置", callback_data="chat_context_settings"),
+            ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -60,7 +64,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             f"{'─' * 24}\n\n"
             "你的个性化 Web3 情报简报。\n"
             "每日精选，智能推送。\n\n"
-            "请选择操作：",
+            "请选择操作，或直接发消息与 AI 对话：",
             reply_markup=reply_markup
         )
         return ConversationHandler.END
@@ -102,11 +106,23 @@ async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Load prompt from file
     system_instruction = get_prompt("onboarding_round1.txt")
 
-    ai_response = await call_gemini(
-        prompt="Start the conversation by asking the user about their Web3 interests.",
-        system_instruction=system_instruction,
-        temperature=0.9
-    )
+    try:
+        ai_response = await call_gemini(
+            prompt="Start the conversation by asking the user about their Web3 interests.",
+            system_instruction=system_instruction,
+            temperature=0.9
+        )
+    except Exception as e:
+        logger.error(f"Onboarding round 1 failed: {e}")
+        keyboard = [
+            [InlineKeyboardButton("重试", callback_data="start_onboarding")],
+            [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+        ]
+        await query.edit_message_text(
+            "AI 服务暂时不可用，请稍后重试。",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return ConversationHandler.END
 
     await query.edit_message_text(
         "[第 1 步 / 共 3 步] 设置你的偏好\n\n" + ai_response
@@ -130,11 +146,23 @@ async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Load prompt from file with user input
     system_instruction = get_prompt("onboarding_round2.txt", user_input=user_message)
 
-    ai_response = await call_gemini(
-        prompt=f"The user said: '{user_message}'. Ask follow-up questions about content preferences.",
-        system_instruction=system_instruction,
-        temperature=0.9
-    )
+    try:
+        ai_response = await call_gemini(
+            prompt=f"The user said: '{user_message}'. Ask follow-up questions about content preferences.",
+            system_instruction=system_instruction,
+            temperature=0.9
+        )
+    except Exception as e:
+        logger.error(f"Onboarding round 2 failed: {e}")
+        keyboard = [
+            [InlineKeyboardButton("重试", callback_data="start_onboarding")],
+            [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+        ]
+        await update.message.reply_text(
+            "AI 服务暂时不可用，请稍后重试。",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return ConversationHandler.END
 
     await update.message.reply_text(
         "[第 2 步 / 共 3 步] 内容偏好\n\n" + ai_response
@@ -163,11 +191,23 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Load prompt from file
     system_instruction = get_prompt("onboarding_round3.txt", round_1=round_1, round_2=round_2)
 
-    ai_response = await call_gemini(
-        prompt=f"Summarize preferences: Round 1: '{round_1}', Round 2: '{round_2}'",
-        system_instruction=system_instruction,
-        temperature=0.7
-    )
+    try:
+        ai_response = await call_gemini(
+            prompt=f"Summarize preferences: Round 1: '{round_1}', Round 2: '{round_2}'",
+            system_instruction=system_instruction,
+            temperature=0.7
+        )
+    except Exception as e:
+        logger.error(f"Onboarding round 3 failed: {e}")
+        keyboard = [
+            [InlineKeyboardButton("重试", callback_data="retry_round_2")],
+            [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+        ]
+        await update.message.reply_text(
+            "AI 服务暂时不可用，请稍后重试。",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return ConversationHandler.END
 
     # Store the generated profile summary
     context.user_data["profile_summary"] = ai_response
@@ -185,6 +225,51 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
     return CONFIRM_PROFILE
+
+
+async def retry_round_2_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Retry round 2 with the same round 1 data."""
+    query = update.callback_query
+    await query.answer("正在重试...")
+
+    # Get round 1 data
+    round_1 = context.user_data.get("onboarding_round_1")
+    if not round_1:
+        await query.edit_message_text(
+            "无法重试，请重新开始注册。",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("重新开始", callback_data="start_onboarding")
+            ]])
+        )
+        return ConversationHandler.END
+
+    # Load prompt from file
+    system_instruction = get_prompt("onboarding_round2.txt", user_input=round_1)
+
+    try:
+        ai_response = await call_gemini(
+            prompt=f"The user said: '{round_1}'. Ask follow-up questions about content preferences.",
+            system_instruction=system_instruction,
+            temperature=0.9
+        )
+
+        await query.edit_message_text(
+            "[第 2 步 / 共 3 步] 内容偏好\n\n" + ai_response
+        )
+
+        return ONBOARDING_ROUND_2
+
+    except Exception as e:
+        logger.error(f"Retry round 2 failed: {e}")
+        keyboard = [
+            [InlineKeyboardButton("重试", callback_data="retry_round_2")],
+            [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+        ]
+        await query.edit_message_text(
+            "AI 服务暂时不可用，请稍后重试。",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return ConversationHandler.END
 
 
 async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -209,11 +294,23 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Load prompt from file
     system_instruction = get_prompt("onboarding_confirm.txt")
 
-    full_profile = await call_gemini(
-        prompt=f"Create profile from: {history}. Summary: {profile_summary}",
-        system_instruction=system_instruction,
-        temperature=0.5
-    )
+    try:
+        full_profile = await call_gemini(
+            prompt=f"Create profile from: {history}. Summary: {profile_summary}",
+            system_instruction=system_instruction,
+            temperature=0.5
+        )
+    except Exception as e:
+        logger.error(f"Failed to generate profile: {e}")
+        keyboard = [
+            [InlineKeyboardButton("重试", callback_data="confirm_profile")],
+            [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+        ]
+        await query.edit_message_text(
+            "AI 服务暂时不可用，请稍后重试。",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return ConversationHandler.END
 
     save_user_profile(telegram_id, full_profile)
 
@@ -299,6 +396,7 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 InlineKeyboardButton("偏好设置", callback_data="update_preferences"),
                 InlineKeyboardButton("信息源", callback_data="manage_sources"),
             ],
+            [InlineKeyboardButton("查看统计", callback_data="view_stats")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -307,7 +405,7 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             f"{'─' * 24}\n\n"
             "你的个性化 Web3 情报简报。\n"
             "每日精选，智能推送。\n\n"
-            "请选择操作：",
+            "请选择操作，或直接发消息与 AI 对话：",
             reply_markup=reply_markup
         )
     else:
@@ -452,6 +550,64 @@ DeFi (3)
     )
 
 
+async def view_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user statistics via callback."""
+    query = update.callback_query
+    await query.answer()
+
+    from services.profile_updater import analyze_feedback_trends
+
+    def _translate_trend(trend: str) -> str:
+        translations = {
+            "improving": "改善中",
+            "declining": "下降中",
+            "stable": "稳定",
+            "no_data": "暂无数据",
+        }
+        return translations.get(trend, trend.replace('_', ' '))
+
+    user = update.effective_user
+    telegram_id = str(user.id)
+
+    db_user = get_user(telegram_id)
+    if not db_user:
+        keyboard = [[InlineKeyboardButton("返回", callback_data="back_to_start")]]
+        await query.edit_message_text(
+            "你还没有注册。请使用 /start 开始。",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    trends = await analyze_feedback_trends(telegram_id, days=30)
+
+    stats_text = f"""你的统计
+{'─' * 24}
+
+注册时间：{db_user.get('created', '未知')[:10]}
+
+最近 30 天
+  反馈次数         {trends['total_feedbacks']}
+  正面评价         {trends['positive_count']}
+  负面评价         {trends['negative_count']}
+  满意度           {trends['positive_rate']:.0%}
+  趋势             {_translate_trend(trends['trend'])}
+{f"  主要问题         {', '.join(trends['common_issues'][:2])}" if trends['common_issues'] else ""}
+
+{'─' * 24}
+
+使用 /settings 调整偏好设置。"""
+
+    keyboard = [
+        [
+            InlineKeyboardButton("更新偏好", callback_data="settings_update"),
+            InlineKeyboardButton("返回", callback_data="back_to_start"),
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(stats_text, reply_markup=reply_markup)
+
+
 def get_start_callbacks():
     """Get standalone callback handlers for start menu."""
     return [
@@ -460,6 +616,8 @@ def get_start_callbacks():
         CallbackQueryHandler(update_preferences, pattern="^update_preferences$"),
         CallbackQueryHandler(manage_sources, pattern="^manage_sources$"),
         CallbackQueryHandler(view_sample, pattern="^view_sample$"),
+        CallbackQueryHandler(view_stats, pattern="^view_stats$"),
+        CallbackQueryHandler(learn_more, pattern="^learn_more$"),
     ]
 
 
@@ -468,6 +626,8 @@ def get_start_handler() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
+            CallbackQueryHandler(start_onboarding, pattern="^start_onboarding$"),
+            CallbackQueryHandler(retry_round_2_callback, pattern="^retry_round_2$"),
         ],
         states={
             ONBOARDING_ROUND_1: [

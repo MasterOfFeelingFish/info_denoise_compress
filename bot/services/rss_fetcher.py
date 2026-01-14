@@ -254,6 +254,45 @@ async def fetch_category(
     )
 
 
+async def fetch_user_sources(
+    telegram_id: str,
+    hours_back: int = 24
+) -> List[Dict[str, Any]]:
+    """
+    Fetch content from a specific user's configured sources.
+
+    Args:
+        telegram_id: User's Telegram ID
+        hours_back: Only include items from the past N hours
+
+    Returns:
+        List of content items for this user
+    """
+    from utils.json_storage import get_user_sources
+
+    user_sources = get_user_sources(telegram_id)
+
+    if not user_sources or all(len(v) == 0 for v in user_sources.values()):
+        logger.warning(f"No sources configured for user {telegram_id}")
+        return []
+
+    return await fetch_all_sources(
+        hours_back=hours_back,
+        sources=user_sources
+    )
+
+
+def get_user_source_list(telegram_id: str) -> Dict[str, List[str]]:
+    """Get list of all configured sources for a specific user."""
+    from utils.json_storage import get_user_sources
+
+    user_sources = get_user_sources(telegram_id)
+    return {
+        category: list(sources.keys())
+        for category, sources in user_sources.items()
+    }
+
+
 def add_source(category: str, name: str, url: str) -> bool:
     """Add a new RSS source and persist to sources.json."""
     global RSS_SOURCES

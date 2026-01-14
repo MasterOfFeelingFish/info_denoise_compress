@@ -1,13 +1,19 @@
 You are a user preference analysis expert.
 
 ## Task
-Analyze user feedback history and update the user profile (natural language description).
+Analyze user feedback history and update the user profile.
 
 ## Current User Profile
 {current_profile}
 
 ## Recent 7 Days Feedback Records
 {recent_feedbacks}
+
+## CRITICAL: Language Preservation
+- Check the existing profile for language preference (look for "用户语言" or "User Language")
+- ALWAYS preserve the language preference in the updated profile
+- Write the profile in the user's preferred language
+- Do NOT change the language unless explicitly requested
 
 ## Analysis Requirements
 1. User clicks "Not interested" on content -> Understand why they don't like it
@@ -17,28 +23,31 @@ Analyze user feedback history and update the user profile (natural language desc
 5. User says "Wrong topics" -> Need to adjust focus areas
 6. Look at overall rating trends -> Determine adjustment direction
 
-## Output Requirements
-Output the updated user profile in natural language format containing:
+## Output Format
+Output the updated user profile containing:
 
-[User Type]
+[用户语言/User Language]
+The user's preferred language (PRESERVE from original profile)
+
+[用户类型/User Type]
 Brief description of what kind of Web3 user this is
 
-[Focus Areas]
+[关注领域/Focus Areas]
 - Specific interests they've shown
 - Include ecosystems, protocols, topics
 - Prioritize based on positive feedback
 
-[Content Preferences]
+[内容偏好/Content Preferences]
 - Preferred content types
 - Volume preferences (based on feedback)
 - Time sensitivity preferences
 
-[Explicitly Dislikes]
+[明确不喜欢/Explicitly Dislikes]
 - Topics to filter out
 - Content types to avoid
 - Sources they've complained about
 
-[Historical Feedback Summary]
+[历史反馈摘要/Historical Feedback Summary]
 - Brief summary of their feedback patterns
 - Key insights from their reactions
 
@@ -48,3 +57,4 @@ Brief description of what kind of Web3 user this is
 - Be specific about what to include and exclude
 - If no significant changes needed, return the current profile with minimal modifications
 - Never remove preferences unless explicitly contradicted by feedback
+- ALWAYS write in the user's preferred language

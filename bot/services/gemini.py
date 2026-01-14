@@ -10,9 +10,11 @@ Supports:
 - Thinking mode (thinking_level: LOW/HIGH)
 - Thought signatures in response
 - JSON structured output
+- Automatic retry on network errors
 
 Reference: https://ai.google.dev/gemini-api/docs/thinking
 """
+import asyncio
 import httpx
 import json
 import logging
@@ -21,6 +23,10 @@ from typing import Optional, Tuple
 from config import GEMINI_API_KEY, GEMINI_API_URL, GEMINI_MODEL, GEMINI_THINKING_LEVEL
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
 
 
 class GeminiService:
@@ -46,6 +52,7 @@ class GeminiService:
         response_mime_type: Optional[str] = None,
         thinking_level: Optional[str] = None,
         include_thoughts: bool = False,
+        enable_search: bool = False,
     ) -> str | Tuple[str, str]:
         """
         Generate content using Gemini 3 Pro REST API.
@@ -58,6 +65,7 @@ class GeminiService:
             response_mime_type: Optional MIME type for structured output
             thinking_level: Override thinking level (LOW/HIGH)
             include_thoughts: If True, returns (response, thoughts) tuple
+            enable_search: If True, enables Google Search grounding
 
         Returns:
             Generated text response, or (response, thoughts) if include_thoughts=True
@@ -94,44 +102,67 @@ class GeminiService:
         if response_mime_type:
             payload["generationConfig"]["responseMimeType"] = response_mime_type
 
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.api_url}?key={self.api_key}",
-                    json=payload,
-                    headers=headers,
-                    timeout=120.0  # Thinking needs more time
-                )
-                response.raise_for_status()
-                result = response.json()
+        # Add Google Search grounding tool
+        if enable_search:
+            payload["tools"] = [{"google_search": {}}]
 
-                # Extract response and thoughts from candidates
-                candidate = result["candidates"][0]["content"]
+        last_error = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{self.api_url}?key={self.api_key}",
+                        json=payload,
+                        headers=headers,
+                        timeout=120.0  # 2 minutes timeout
+                    )
+                    response.raise_for_status()
+                    result = response.json()
 
-                response_text = ""
-                thoughts_text = ""
+                    # Extract response and thoughts from candidates
+                    candidate = result["candidates"][0]["content"]
 
-                for part in candidate.get("parts", []):
-                    if part.get("thought"):
-                        # This is thinking/reasoning content
-                        thoughts_text += part.get("text", "")
-                    else:
-                        # This is the actual response
-                        response_text += part.get("text", "")
+                    response_text = ""
+                    thoughts_text = ""
 
-                if include_thoughts:
-                    return response_text, thoughts_text
-                return response_text
+                    for part in candidate.get("parts", []):
+                        if part.get("thought"):
+                            # This is thinking/reasoning content
+                            thoughts_text += part.get("text", "")
+                        else:
+                            # This is the actual response
+                            response_text += part.get("text", "")
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Gemini API HTTP error: {e.response.status_code} - {e.response.text}")
-            raise
-        except httpx.TimeoutException:
-            logger.error("Gemini API request timeout")
-            raise
-        except (KeyError, IndexError) as e:
-            logger.error(f"Gemini API response parsing error: {e}")
-            raise
+                    if include_thoughts:
+                        return response_text, thoughts_text
+                    return response_text
+
+            except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError) as e:
+                last_error = e
+                if attempt < MAX_RETRIES - 1:
+                    logger.warning(f"Gemini API network error (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                    await asyncio.sleep(RETRY_DELAY * (attempt + 1))
+                else:
+                    logger.error(f"Gemini API network error after {MAX_RETRIES} attempts: {e}")
+                    raise
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Gemini API HTTP error: {e.response.status_code} - {e.response.text}")
+                raise
+            except httpx.TimeoutException:
+                last_error = httpx.TimeoutException("Request timeout")
+                if attempt < MAX_RETRIES - 1:
+                    logger.warning(f"Gemini API timeout (attempt {attempt + 1}/{MAX_RETRIES})")
+                    await asyncio.sleep(RETRY_DELAY * (attempt + 1))
+                else:
+                    logger.error(f"Gemini API timeout after {MAX_RETRIES} attempts")
+                    raise
+            except (KeyError, IndexError) as e:
+                logger.error(f"Gemini API response parsing error: {e}")
+                raise
+
+        # Should not reach here, but just in case
+        if last_error:
+            raise last_error
 
     async def generate_json(
         self,
@@ -260,4 +291,28 @@ async def call_gemini_with_thoughts(
     return await gemini_service.generate_with_thoughts(
         prompt=prompt,
         system_instruction=system_instruction,
+    )
+
+
+async def call_gemini_with_search(
+    prompt: str,
+    system_instruction: Optional[str] = None,
+    temperature: float = 1.0,
+) -> str:
+    """
+    Generate content with Google Search grounding enabled.
+
+    Args:
+        prompt: User prompt
+        system_instruction: Optional system context
+        temperature: Sampling temperature (default 1.0)
+
+    Returns:
+        Generated text with grounded information
+    """
+    return await gemini_service.generate_content(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        temperature=temperature,
+        enable_search=True,
     )

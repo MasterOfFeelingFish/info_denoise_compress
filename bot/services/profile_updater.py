@@ -143,6 +143,92 @@ async def update_all_user_profiles() -> Dict[str, bool]:
     return results
 
 
+async def update_user_profile_from_feedback(
+    telegram_id: str,
+    feedback_type: str,
+    item_id: str = None,
+    item_title: str = None,
+    reason: str = None
+) -> Optional[str]:
+    """
+    Real-time profile update triggered by user feedback.
+    Updates profile dynamically without accumulation.
+
+    Args:
+        telegram_id: User's Telegram ID
+        feedback_type: Type of feedback (like, dislike, positive, negative)
+        item_id: Optional item ID that received feedback
+        item_title: Optional item title/content for context
+        reason: Optional reason for negative feedback
+
+    Returns:
+        Updated profile string, or None if update failed
+    """
+    user = get_user(telegram_id)
+    if not user:
+        logger.warning(f"Cannot update profile: user {telegram_id} not found")
+        return None
+
+    # Get current profile
+    current_profile = get_user_profile(telegram_id)
+    if not current_profile:
+        logger.info(f"No existing profile for {telegram_id}, skipping real-time update")
+        return None
+
+    # Build feedback context with actual content
+    feedback_context = f"Feedback type: {feedback_type}"
+    if item_title:
+        feedback_context += f"\nContent: {item_title}"
+    if reason:
+        feedback_context += f"\nReason: {reason}"
+
+    # Create focused prompt for real-time update
+    system_instruction = f"""You are a user preference profile manager.
+
+## Task
+Make a FOCUSED, MINIMAL update to the user profile based on this single feedback event.
+Do NOT accumulate or add new sections - REPLACE/MODIFY existing preferences.
+
+## Current Profile
+{current_profile}
+
+## New Feedback Event
+{feedback_context}
+
+## CRITICAL Rules
+1. If feedback is "like": The user likes this topic/content, strengthen similar topics in preferences
+2. If feedback is "dislike": The user dislikes this topic/content, add to [明确不喜欢/Explicitly Dislikes] section
+3. If feedback is "negative" with reason: Adjust based on the reason
+4. If feedback is "positive": The digest was good, no major changes needed
+5. PRESERVE the language preference field
+6. Do NOT add new sections
+7. Do NOT accumulate - update in place
+8. Keep the profile concise (max 500 chars)
+9. Write in the user's original language
+
+## Output
+Output the updated profile. Keep same structure, just update relevant parts."""
+
+    prompt = "Update the profile based on this feedback event. Output only the updated profile text."
+
+    try:
+        updated_profile = await call_gemini(
+            prompt=prompt,
+            system_instruction=system_instruction,
+            temperature=0.3  # Lower temperature for consistent updates
+        )
+
+        # Save the updated profile
+        save_user_profile(telegram_id, updated_profile)
+
+        logger.info(f"Real-time profile update for user {telegram_id}: {feedback_type}")
+        return updated_profile
+
+    except Exception as e:
+        logger.error(f"Failed real-time profile update for {telegram_id}: {e}")
+        return None
+
+
 async def analyze_feedback_trends(telegram_id: str, days: int = 30) -> Dict[str, Any]:
     """
     Analyze long-term feedback trends for a user.
@@ -159,9 +245,11 @@ async def analyze_feedback_trends(telegram_id: str, days: int = 30) -> Dict[str,
     if not feedbacks:
         return {
             "total_feedbacks": 0,
+            "positive_count": 0,
+            "negative_count": 0,
             "positive_rate": 0.0,
             "common_issues": [],
-            "trend": "neutral",
+            "trend": "no_data",
         }
 
     positive = sum(1 for fb in feedbacks if fb.get("overall") == "positive")

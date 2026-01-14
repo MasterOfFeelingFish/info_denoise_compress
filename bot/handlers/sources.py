@@ -17,13 +17,13 @@ from telegram.ext import (
     filters,
 )
 
-from services.rss_fetcher import get_source_list
-from utils.json_storage import get_user
+from services.rss_fetcher import get_user_source_list
+from utils.json_storage import get_user, add_user_source, remove_user_source
 
 logger = logging.getLogger(__name__)
 
 # Conversation states
-AWAITING_SOURCE_SUGGESTION, AWAITING_TWITTER_ADD, AWAITING_WEBSITE_ADD = range(3)
+AWAITING_SOURCE_SUGGESTION, AWAITING_TWITTER_ADD, AWAITING_WEBSITE_ADD, AWAITING_BULK_IMPORT = range(4)
 
 
 async def sources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -43,13 +43,14 @@ async def sources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             InlineKeyboardButton("Twitter", callback_data="sources_twitter"),
             InlineKeyboardButton("网站", callback_data="sources_websites"),
         ],
+        [InlineKeyboardButton("批量导入", callback_data="sources_bulk_import")],
         [InlineKeyboardButton("推荐信息源", callback_data="sources_suggest")],
         [InlineKeyboardButton("返回", callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Get source counts
-    sources = get_source_list()
+    # Get source counts for this user
+    sources = get_user_source_list(telegram_id)
     twitter_count = len(sources.get("twitter", []))
     website_count = len(sources.get("websites", []))
 
@@ -69,7 +70,8 @@ async def view_twitter_sources(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
 
-    sources = get_source_list()
+    telegram_id = str(query.from_user.id)
+    sources = get_user_source_list(telegram_id)
     twitter_sources = sources.get("twitter", [])
 
     if twitter_sources:
@@ -91,8 +93,10 @@ async def view_twitter_sources(update: Update, context: ContextTypes.DEFAULT_TYP
 
     keyboard = [
         [InlineKeyboardButton("添加 Twitter", callback_data="sources_add_twitter")],
-        [InlineKeyboardButton("返回", callback_data="sources_back")],
     ]
+    if twitter_sources:
+        keyboard.append([InlineKeyboardButton("删除 Twitter", callback_data="sources_del_twitter")])
+    keyboard.append([InlineKeyboardButton("返回", callback_data="sources_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(text, reply_markup=reply_markup)
@@ -103,7 +107,8 @@ async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
 
-    sources = get_source_list()
+    telegram_id = str(query.from_user.id)
+    sources = get_user_source_list(telegram_id)
     website_sources = sources.get("websites", [])
 
     if website_sources:
@@ -125,8 +130,10 @@ async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYP
 
     keyboard = [
         [InlineKeyboardButton("添加网站", callback_data="sources_add_website")],
-        [InlineKeyboardButton("返回", callback_data="sources_back")],
     ]
+    if website_sources:
+        keyboard.append([InlineKeyboardButton("删除网站", callback_data="sources_del_website")])
+    keyboard.append([InlineKeyboardButton("返回", callback_data="sources_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(text, reply_markup=reply_markup)
@@ -173,8 +180,9 @@ async def start_add_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle Twitter account addition."""
-    from services.rss_fetcher import add_custom_source
+    from services.rss_fetcher import validate_twitter_handle, validate_url
 
+    telegram_id = str(update.effective_user.id)
     user_input = update.message.text.strip()
 
     # Parse input: "handle | URL" format
@@ -187,8 +195,45 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
         handle = user_input
         url = ""
 
-    # Validate and add
-    result = await add_custom_source("twitter", handle, url)
+    # Validate Twitter handle
+    validation = await validate_twitter_handle(handle)
+    if not validation["valid"]:
+        keyboard = [
+            [InlineKeyboardButton("重试", callback_data="sources_add_twitter")],
+            [InlineKeyboardButton("返回", callback_data="sources_twitter")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            f"添加失败\n"
+            f"{'─' * 24}\n\n"
+            f"{validation['error']}\n\n"
+            "请重试。",
+            reply_markup=reply_markup
+        )
+        return ConversationHandler.END
+
+    handle = validation["handle"]
+
+    # Validate URL if provided
+    if url:
+        url_validation = await validate_url(url)
+        if not url_validation["valid"]:
+            keyboard = [
+                [InlineKeyboardButton("重试", callback_data="sources_add_twitter")],
+                [InlineKeyboardButton("返回", callback_data="sources_twitter")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                f"添加失败\n"
+                f"{'─' * 24}\n\n"
+                f"RSS 地址无效：{url_validation['error']}\n\n"
+                "请重试。",
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+
+    # Add to user's sources
+    success = add_user_source(telegram_id, "twitter", handle, url)
 
     keyboard = [
         [InlineKeyboardButton("添加更多", callback_data="sources_add_twitter")],
@@ -196,23 +241,25 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    if result["success"]:
+    if success:
+        message = f"已添加 {handle}。"
+        if not url:
+            message += "\n注意：需要配置 RSS 地址才能抓取。"
         await update.message.reply_text(
             f"添加成功\n"
             f"{'─' * 24}\n\n"
-            f"{result['message']}",
+            f"{message}",
             reply_markup=reply_markup
         )
-        logger.info(f"Added Twitter source: {handle} - {url}")
+        logger.info(f"Added Twitter source for user {telegram_id}: {handle}")
     else:
         await update.message.reply_text(
             f"添加失败\n"
             f"{'─' * 24}\n\n"
-            f"{result['message']}\n\n"
-            "请重试。",
+            "保存失败，请重试。",
             reply_markup=reply_markup
         )
-        logger.warning(f"Failed to add Twitter source: {handle} - {result['message']}")
+        logger.warning(f"Failed to add Twitter source for user {telegram_id}: {handle}")
 
     return ConversationHandler.END
 
@@ -238,22 +285,26 @@ async def start_add_website(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle website RSS feed addition."""
-    from services.rss_fetcher import add_custom_source
+    from services.rss_fetcher import validate_url, auto_detect_rss
 
+    telegram_id = str(update.effective_user.id)
     user_input = update.message.text.strip()
 
-    # Parse input: "Name | URL" or just URL
+    # Parse input: "Name | URL" or just URL/domain
     if "|" in user_input:
         parts = user_input.split("|", 1)
         name = parts[0].strip()
         url = parts[1].strip()
     else:
-        # Try to extract name from URL
+        # Try to extract name from URL/domain
         url = user_input
         try:
             from urllib.parse import urlparse
-            parsed = urlparse(url)
-            name = parsed.netloc.replace("www.", "").split(".")[0].title()
+            if url.startswith("http"):
+                parsed = urlparse(url)
+                name = parsed.netloc.replace("www.", "").split(".")[0].title()
+            else:
+                name = url.replace("www.", "").split(".")[0].title()
         except Exception:
             name = "Custom Source"
 
@@ -263,26 +314,53 @@ async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Validate and add
-    result = await add_custom_source("websites", name, url)
+    # If URL provided, validate it directly
+    if url.startswith("http"):
+        validation = await validate_url(url)
+        if not validation["valid"]:
+            await update.message.reply_text(
+                f"添加失败\n"
+                f"{'─' * 24}\n\n"
+                f"{validation['error']}\n\n"
+                "请检查地址后重试。",
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+        final_url = url
+    else:
+        # No full URL - try to auto-detect RSS from domain
+        detection = await auto_detect_rss(url)
+        if not detection["found"]:
+            await update.message.reply_text(
+                f"添加失败\n"
+                f"{'─' * 24}\n\n"
+                f"{detection['error']}\n\n"
+                "请检查地址后重试。",
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+        final_url = detection["url"]
 
-    if result["success"]:
+    # Add to user's sources
+    success = add_user_source(telegram_id, "websites", name, final_url)
+
+    if success:
         await update.message.reply_text(
             f"添加成功\n"
             f"{'─' * 24}\n\n"
-            f"{result['message']}",
+            f"已添加 {name}。\n"
+            f"RSS: {final_url}",
             reply_markup=reply_markup
         )
-        logger.info(f"Added website source: {name} - {url}")
+        logger.info(f"Added website source for user {telegram_id}: {name} - {final_url}")
     else:
         await update.message.reply_text(
             f"添加失败\n"
             f"{'─' * 24}\n\n"
-            f"{result['message']}\n\n"
-            "请检查地址后重试。",
+            "保存失败，请重试。",
             reply_markup=reply_markup
         )
-        logger.warning(f"Failed to add website source: {name} - {result['message']}")
+        logger.warning(f"Failed to add website source for user {telegram_id}: {name}")
 
     return ConversationHandler.END
 
@@ -310,13 +388,267 @@ async def handle_source_suggestion(update: Update, context: ContextTypes.DEFAULT
     return ConversationHandler.END
 
 
+async def start_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start bulk source import conversation."""
+    query = update.callback_query
+    await query.answer()
+
+    await query.edit_message_text(
+        f"批量导入信息源\n"
+        f"{'─' * 24}\n\n"
+        "请输入多个信息源，每行一个。\n\n"
+        "Twitter 格式：\n"
+        "  @账号名 | RSS地址\n\n"
+        "网站格式：\n"
+        "  网站名 | RSS地址\n\n"
+        "示例：\n"
+        "  @VitalikButerin | https://rss.app/feeds/xxx\n"
+        "  @lookonchain | https://nitter.net/lookonchain/rss\n"
+        "  The Block | https://theblock.co/rss.xml\n"
+        "  decrypt.co\n\n"
+        "请输入或 /cancel 取消："
+    )
+
+    return AWAITING_BULK_IMPORT
+
+
+async def handle_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle bulk source import."""
+    from services.rss_fetcher import validate_twitter_handle, validate_url, auto_detect_rss
+
+    telegram_id = str(update.effective_user.id)
+    user_input = update.message.text.strip()
+    lines = user_input.split("\n")
+
+    success_count = 0
+    fail_count = 0
+    results = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Determine category based on @ symbol
+        if line.startswith("@") or ("|" in line and line.split("|")[0].strip().startswith("@")):
+            category = "twitter"
+        else:
+            category = "websites"
+
+        # Parse name and URL
+        if "|" in line:
+            parts = line.split("|", 1)
+            name = parts[0].strip()
+            url = parts[1].strip()
+        else:
+            name = line
+            url = ""
+
+        # Process based on category
+        if category == "twitter":
+            validation = await validate_twitter_handle(name)
+            if not validation["valid"]:
+                fail_count += 1
+                results.append(f"  - {name}: {validation['error'][:30]}")
+                continue
+            name = validation["handle"]
+            if url:
+                url_validation = await validate_url(url)
+                if not url_validation["valid"]:
+                    fail_count += 1
+                    results.append(f"  - {name}: RSS无效")
+                    continue
+        else:
+            # Website
+            if url.startswith("http"):
+                validation = await validate_url(url)
+                if not validation["valid"]:
+                    fail_count += 1
+                    results.append(f"  - {name}: {validation['error'][:30]}")
+                    continue
+            elif not url:
+                # Try auto-detect
+                detection = await auto_detect_rss(name)
+                if detection["found"]:
+                    url = detection["url"]
+                    name = name.replace("www.", "").split(".")[0].title()
+                else:
+                    fail_count += 1
+                    results.append(f"  - {name}: 未找到RSS")
+                    continue
+
+        # Add to user's sources
+        success = add_user_source(telegram_id, category, name, url)
+        if success:
+            success_count += 1
+            results.append(f"  + {name}")
+        else:
+            fail_count += 1
+            results.append(f"  - {name}: 保存失败")
+
+    keyboard = [
+        [InlineKeyboardButton("继续导入", callback_data="sources_bulk_import")],
+        [InlineKeyboardButton("返回", callback_data="sources_back")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    status_text = "\n".join(results[:15])
+    if len(results) > 15:
+        status_text += f"\n  ... 还有 {len(results) - 15} 条"
+
+    await update.message.reply_text(
+        f"批量导入结果\n"
+        f"{'─' * 24}\n\n"
+        f"成功: {success_count}\n"
+        f"失败: {fail_count}\n\n"
+        f"详情：\n{status_text}",
+        reply_markup=reply_markup
+    )
+
+    logger.info(f"Bulk import for user {telegram_id}: {success_count} success, {fail_count} failed")
+    return ConversationHandler.END
+
+
+async def show_delete_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show Twitter sources with delete buttons."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(query.from_user.id)
+    sources = get_user_source_list(telegram_id)
+    twitter_sources = sources.get("twitter", [])
+
+    if not twitter_sources:
+        await query.edit_message_text(
+            "没有可删除的 Twitter 信息源。",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("返回", callback_data="sources_twitter")]
+            ])
+        )
+        return
+
+    lines = [
+        f"删除 Twitter 信息源\n"
+        f"{'─' * 24}\n\n"
+        "点击要删除的账号：\n"
+    ]
+    text = "\n".join(lines)
+
+    # Create a button for each source
+    keyboard = []
+    for source in twitter_sources:
+        keyboard.append([InlineKeyboardButton(f"❌ {source}", callback_data=f"del_tw_{source}")])
+    keyboard.append([InlineKeyboardButton("取消", callback_data="sources_twitter")])
+
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def show_delete_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show website sources with delete buttons."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(query.from_user.id)
+    sources = get_user_source_list(telegram_id)
+    website_sources = sources.get("websites", [])
+
+    if not website_sources:
+        await query.edit_message_text(
+            "没有可删除的网站信息源。",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("返回", callback_data="sources_websites")]
+            ])
+        )
+        return
+
+    lines = [
+        f"删除网站信息源\n"
+        f"{'─' * 24}\n\n"
+        "点击要删除的网站：\n"
+    ]
+    text = "\n".join(lines)
+
+    # Create a button for each source
+    keyboard = []
+    for source in website_sources:
+        keyboard.append([InlineKeyboardButton(f"❌ {source}", callback_data=f"del_web_{source}")])
+    keyboard.append([InlineKeyboardButton("取消", callback_data="sources_websites")])
+
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_delete_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Twitter source deletion."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(query.from_user.id)
+    source_name = query.data.replace("del_tw_", "")
+
+    success = remove_user_source(telegram_id, "twitter", source_name)
+
+    if success:
+        logger.info(f"Deleted Twitter source for user {telegram_id}: {source_name}")
+        await query.edit_message_text(
+            f"已删除\n"
+            f"{'─' * 24}\n\n"
+            f"{source_name} 已从你的信息源中移除。",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("继续删除", callback_data="sources_del_twitter")],
+                [InlineKeyboardButton("返回", callback_data="sources_twitter")],
+            ])
+        )
+    else:
+        await query.edit_message_text(
+            f"删除失败\n"
+            f"{'─' * 24}\n\n"
+            f"无法删除 {source_name}，请重试。",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("返回", callback_data="sources_twitter")]
+            ])
+        )
+
+
+async def handle_delete_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle website source deletion."""
+    query = update.callback_query
+    await query.answer()
+
+    telegram_id = str(query.from_user.id)
+    source_name = query.data.replace("del_web_", "")
+
+    success = remove_user_source(telegram_id, "websites", source_name)
+
+    if success:
+        logger.info(f"Deleted website source for user {telegram_id}: {source_name}")
+        await query.edit_message_text(
+            f"已删除\n"
+            f"{'─' * 24}\n\n"
+            f"{source_name} 已从你的信息源中移除。",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("继续删除", callback_data="sources_del_website")],
+                [InlineKeyboardButton("返回", callback_data="sources_websites")],
+            ])
+        )
+    else:
+        await query.edit_message_text(
+            f"删除失败\n"
+            f"{'─' * 24}\n\n"
+            f"无法删除 {source_name}，请重试。",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("返回", callback_data="sources_websites")]
+            ])
+        )
+
+
 async def sources_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Return to sources menu."""
     query = update.callback_query
     await query.answer()
 
-    # Get source counts
-    sources = get_source_list()
+    # Get source counts for this user
+    telegram_id = str(query.from_user.id)
+    sources = get_user_source_list(telegram_id)
     twitter_count = len(sources.get("twitter", []))
     website_count = len(sources.get("websites", []))
 
@@ -325,6 +657,7 @@ async def sources_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             InlineKeyboardButton("Twitter", callback_data="sources_twitter"),
             InlineKeyboardButton("网站", callback_data="sources_websites"),
         ],
+        [InlineKeyboardButton("批量导入", callback_data="sources_bulk_import")],
         [InlineKeyboardButton("推荐信息源", callback_data="sources_suggest")],
         [InlineKeyboardButton("返回", callback_data="back_to_start")],
     ]
@@ -367,6 +700,7 @@ def get_sources_handler() -> ConversationHandler:
             CallbackQueryHandler(start_source_suggestion, pattern="^sources_suggest$"),
             CallbackQueryHandler(start_add_twitter, pattern="^sources_add_twitter$"),
             CallbackQueryHandler(start_add_website, pattern="^sources_add_website$"),
+            CallbackQueryHandler(start_bulk_import, pattern="^sources_bulk_import$"),
         ],
         states={
             AWAITING_SOURCE_SUGGESTION: [
@@ -377,6 +711,9 @@ def get_sources_handler() -> ConversationHandler:
             ],
             AWAITING_WEBSITE_ADD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_website_add),
+            ],
+            AWAITING_BULK_IMPORT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_bulk_import),
             ],
         },
         fallbacks=[
@@ -390,5 +727,9 @@ def get_sources_callbacks():
     return [
         CallbackQueryHandler(view_twitter_sources, pattern="^sources_twitter$"),
         CallbackQueryHandler(view_website_sources, pattern="^sources_websites$"),
+        CallbackQueryHandler(show_delete_twitter, pattern="^sources_del_twitter$"),
+        CallbackQueryHandler(show_delete_website, pattern="^sources_del_website$"),
+        CallbackQueryHandler(handle_delete_twitter, pattern="^del_tw_"),
+        CallbackQueryHandler(handle_delete_website, pattern="^del_web_"),
         CallbackQueryHandler(sources_back, pattern="^sources_back$"),
     ]
