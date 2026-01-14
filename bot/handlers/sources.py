@@ -18,6 +18,7 @@ from telegram.ext import (
 )
 
 from services.rss_fetcher import get_user_source_list
+from utils.telegram_utils import safe_answer_callback_query
 from utils.json_storage import get_user, add_user_source, remove_user_source
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ async def sources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def view_twitter_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show list of monitored Twitter accounts."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
     sources = get_user_source_list(telegram_id)
@@ -105,7 +106,7 @@ async def view_twitter_sources(update: Update, context: ContextTypes.DEFAULT_TYP
 async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show list of monitored website RSS feeds."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
     sources = get_user_source_list(telegram_id)
@@ -142,7 +143,7 @@ async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYP
 async def start_source_suggestion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the source suggestion conversation."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     await query.edit_message_text(
         f"推荐信息源\n"
@@ -160,7 +161,7 @@ async def start_source_suggestion(update: Update, context: ContextTypes.DEFAULT_
 async def start_add_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start adding a Twitter account."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     await query.edit_message_text(
         f"添加 Twitter 账号\n"
@@ -267,7 +268,7 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def start_add_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start adding a website RSS feed."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     await query.edit_message_text(
         f"添加网站 RSS\n"
@@ -391,7 +392,7 @@ async def handle_source_suggestion(update: Update, context: ContextTypes.DEFAULT
 async def start_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start bulk source import conversation."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     await query.edit_message_text(
         f"批量导入信息源\n"
@@ -512,7 +513,7 @@ async def handle_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def show_delete_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show Twitter sources with delete buttons."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
     sources = get_user_source_list(telegram_id)
@@ -546,7 +547,7 @@ async def show_delete_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def show_delete_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show website sources with delete buttons."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
     sources = get_user_source_list(telegram_id)
@@ -580,7 +581,7 @@ async def show_delete_website(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def handle_delete_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle Twitter source deletion."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
     source_name = query.data.replace("del_tw_", "")
@@ -612,7 +613,7 @@ async def handle_delete_twitter(update: Update, context: ContextTypes.DEFAULT_TY
 async def handle_delete_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle website source deletion."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
     source_name = query.data.replace("del_web_", "")
@@ -644,7 +645,7 @@ async def handle_delete_website(update: Update, context: ContextTypes.DEFAULT_TY
 async def sources_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Return to sources menu."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     # Get source counts for this user
     telegram_id = str(query.from_user.id)

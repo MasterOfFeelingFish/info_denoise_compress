@@ -423,7 +423,8 @@ def save_user_daily_stats(
     sources_monitored: int,
     raw_items_scanned: int,
     items_sent: int,
-    status: str = "success"
+    status: str = "success",
+    filtered_items: Optional[List[Dict[str, Any]]] = None
 ) -> bool:
     """Save daily statistics for a specific user."""
     user = get_user(telegram_id)
@@ -442,6 +443,10 @@ def save_user_daily_stats(
         "items_sent": items_sent,
         "status": status,
     }
+
+    # Save filtered items for re-viewing the digest
+    if filtered_items is not None:
+        data["filtered_items"] = filtered_items
 
     return _write_json(stats_path, data)
 

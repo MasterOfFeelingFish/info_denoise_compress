@@ -20,6 +20,7 @@ from telegram.ext import (
 
 from services.gemini import call_gemini
 from utils.prompt_loader import get_prompt
+from utils.telegram_utils import safe_answer_callback_query
 from utils.json_storage import (
     get_user,
     create_user,
@@ -94,7 +95,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Begin the AI-driven preference collection (3 rounds)."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     # Initialize conversation history
     context.user_data["conversation_history"] = []
@@ -275,7 +276,7 @@ async def retry_round_2_callback(update: Update, context: ContextTypes.DEFAULT_T
 async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Save confirmed user profile and complete registration."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     user = update.effective_user
     telegram_id = str(user.id)
@@ -337,7 +338,7 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def learn_more(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show more information about the service."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     keyboard = [
         [InlineKeyboardButton("开始使用", callback_data="start_onboarding")],
@@ -383,7 +384,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Return to the main start menu."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     user = update.effective_user
     telegram_id = str(user.id)
@@ -431,30 +432,103 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def view_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show today's digest or a message if not available."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
+    from utils.json_storage import get_user_daily_stats, get_user_profile
+    from services.report_generator import prepare_digest_messages, detect_user_language, get_ai_summary
+    from handlers.feedback import create_item_feedback_keyboard, get_item_feedback_status
     from config import PUSH_HOUR, PUSH_MINUTE
+    from datetime import datetime
 
-    keyboard = [
-        [InlineKeyboardButton("返回", callback_data="back_to_start")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    telegram_id = str(query.from_user.id)
+    today = datetime.now().strftime("%Y-%m-%d")
 
-    await query.edit_message_text(
-        "今日简报\n"
-        f"{'─' * 24}\n\n"
-        f"推送时间：北京时间 {PUSH_HOUR:02d}:{PUSH_MINUTE:02d}\n\n"
-        "你的简报将自动推送。\n"
-        "请在推送时间后查看。\n\n"
-        "提示：使用 /settings 自定义偏好设置。",
-        reply_markup=reply_markup
+    # Get today's stats
+    stats = get_user_daily_stats(telegram_id, today)
+
+    if not stats or not stats.get("filtered_items"):
+        # No digest available yet
+        keyboard = [
+            [InlineKeyboardButton("返回", callback_data="back_to_start")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            "今日简报\n"
+            f"{'─' * 24}\n\n"
+            f"推送时间：北京时间 {PUSH_HOUR:02d}:{PUSH_MINUTE:02d}\n\n"
+            "你的简报将自动推送。\n"
+            "请在推送时间后查看。\n\n"
+            "提示：使用 /settings 自定义偏好设置。",
+            reply_markup=reply_markup
+        )
+        return
+
+    # Get filtered items and generate messages
+    filtered_items = stats["filtered_items"]
+    profile = get_user_profile(telegram_id) or ""
+    user_lang = detect_user_language(profile)
+
+    # Generate AI summary if not already in stats
+    ai_summary = stats.get("ai_summary", "")
+    if not ai_summary and filtered_items:
+        from services.content_filter import get_ai_summary
+        ai_summary = await get_ai_summary(filtered_items, profile)
+
+    # Prepare messages
+    header, item_messages = prepare_digest_messages(
+        filtered_items=filtered_items,
+        ai_summary=ai_summary,
+        sources_count=stats.get("sources_monitored", 0),
+        raw_count=stats.get("raw_items_scanned", 0),
+        lang=user_lang
     )
+
+    # Send header
+    await query.edit_message_text(
+        f"[回顾] {header}",
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
+
+    # Send each item with feedback buttons
+    for item_msg, item_id in item_messages:
+        # Check feedback status
+        feedback_status = get_item_feedback_status(item_id)
+
+        # Section headers don't get feedback buttons
+        if item_id.startswith("section_"):
+            await context.bot.send_message(
+                chat_id=query.from_user.id,
+                text=item_msg,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+        else:
+            # Create feedback keyboard based on status
+            if feedback_status:
+                # Already has feedback, show status
+                status_text = "👍 已点赞" if feedback_status == "like" else "👎 已标记"
+                item_keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(status_text, callback_data=f"noop")]
+                ])
+            else:
+                # No feedback yet, show buttons
+                item_keyboard = create_item_feedback_keyboard(item_id)
+
+            await context.bot.send_message(
+                chat_id=query.from_user.id,
+                text=item_msg,
+                reply_markup=item_keyboard,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
 
 
 async def update_preferences(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Redirect to settings for preference update."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     keyboard = [
         [
@@ -476,7 +550,7 @@ async def update_preferences(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def manage_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Redirect to sources management."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     keyboard = [
         [
@@ -500,7 +574,7 @@ async def manage_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def view_sample(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show a sample digest preview."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     keyboard = [
         [InlineKeyboardButton("返回", callback_data="back_to_start")],
@@ -553,7 +627,7 @@ DeFi (3)
 async def view_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show user statistics via callback."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     from services.profile_updater import analyze_feedback_trends
 

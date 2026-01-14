@@ -27,6 +27,7 @@ from telegram.ext import (
 )
 
 from config import TELEGRAM_BOT_TOKEN, PUSH_HOUR, PUSH_MINUTE, DATA_DIR, LOG_ROTATE_DAYS, LOG_BACKUP_COUNT, MAX_DIGEST_ITEMS
+from utils.telegram_utils import safe_answer_callback_query
 from handlers.start import get_start_handler, get_start_callbacks
 from handlers.feedback import get_feedback_handlers
 from handlers.settings import get_settings_handler, get_settings_callbacks
@@ -229,7 +230,8 @@ async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     sources_monitored=sources_count,
                     raw_items_scanned=len(raw_content),
                     items_sent=len(filtered_items),
-                    status="success"
+                    status="success",
+                    filtered_items=filtered_items
                 )
 
                 logger.info(f"Sent digest to {telegram_id}: {len(filtered_items)} items")
@@ -481,10 +483,16 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
 
 
+async def noop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle noop callback for already-feedback items."""
+    query = update.callback_query
+    await safe_answer_callback_query(query, "已经反馈过了", show_alert=False)
+
+
 async def show_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle show_help callback from unknown message handler."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     keyboard = [
         [
@@ -594,6 +602,7 @@ def main() -> None:
 
     # Callback for help from unknown message
     application.add_handler(CallbackQueryHandler(show_help_callback, pattern="^show_help$"))
+    application.add_handler(CallbackQueryHandler(noop_callback, pattern="^noop$"))
     application.add_handler(get_clear_callback_handler())
     application.add_handler(get_chat_to_start_handler())
     application.add_handler(get_retry_chat_handler())

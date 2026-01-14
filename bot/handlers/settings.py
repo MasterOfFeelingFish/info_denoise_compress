@@ -19,6 +19,7 @@ from telegram.ext import (
 
 from services.gemini import call_gemini
 from utils.prompt_loader import get_prompt
+from utils.telegram_utils import safe_answer_callback_query
 from utils.json_storage import (
     get_user,
     get_user_profile,
@@ -67,7 +68,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def view_current_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show user's current preference profile."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     user = update.effective_user
     telegram_id = str(user.id)
@@ -99,7 +100,7 @@ async def view_current_profile(update: Update, context: ContextTypes.DEFAULT_TYP
 async def start_profile_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the profile update conversation."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     user = update.effective_user
     telegram_id = str(user.id)
@@ -190,7 +191,7 @@ async def handle_profile_update(update: Update, context: ContextTypes.DEFAULT_TY
 async def confirm_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Ask for confirmation before resetting preferences."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     keyboard = [
         [
@@ -213,7 +214,7 @@ async def confirm_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def execute_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Execute profile reset."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     user = update.effective_user
     telegram_id = str(user.id)
@@ -249,7 +250,7 @@ Web3 新用户，通用兴趣
 async def settings_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Return to settings menu."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     keyboard = [
         [InlineKeyboardButton("查看偏好", callback_data="settings_view")],

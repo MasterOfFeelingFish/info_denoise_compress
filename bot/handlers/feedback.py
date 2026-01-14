@@ -16,6 +16,7 @@ from telegram.ext import (
     filters,
 )
 
+from utils.telegram_utils import safe_answer_callback_query
 from utils.json_storage import save_feedback, get_user
 
 logger = logging.getLogger(__name__)
@@ -64,12 +65,43 @@ def create_item_feedback_keyboard(item_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+def get_item_feedback_status(item_id: str) -> str:
+    """
+    Check if an item has already received feedback.
+    Returns "like", "dislike", or empty string if no feedback.
+    """
+    from utils.json_storage import FEEDBACK_DIR
+    from datetime import datetime
+    import os
+    import json
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    feedback_path = os.path.join(FEEDBACK_DIR, f"{today}.json")
+
+    if not os.path.exists(feedback_path):
+        return ""
+
+    try:
+        with open(feedback_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Check all feedbacks for this item_id
+        for feedback in data.get("feedbacks", []):
+            for item_fb in feedback.get("item_feedbacks", []):
+                if item_fb.get("item_id") == item_id:
+                    return item_fb.get("feedback", "")
+    except Exception:
+        return ""
+
+    return ""
+
+
 async def handle_feedback_positive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle positive feedback with real-time profile update."""
     from services.profile_updater import update_user_profile_from_feedback
 
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     user = update.effective_user
     telegram_id = str(user.id)
@@ -112,7 +144,7 @@ async def handle_feedback_positive(update: Update, context: ContextTypes.DEFAULT
 async def handle_feedback_negative(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle negative feedback - show reason selection."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     callback_data = query.data
     report_id = callback_data.replace("fb_negative_", "")
@@ -138,7 +170,7 @@ async def handle_reason_selection(update: Update, context: ContextTypes.DEFAULT_
     from services.profile_updater import update_user_profile_from_feedback
 
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     user = update.effective_user
     telegram_id = str(user.id)
@@ -276,7 +308,7 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
         response = "👎 已记录"
         indicator = "👎"
     else:
-        await query.answer()
+        await safe_answer_callback_query(query)
         return
 
     # Extract item content from the message for profile update
@@ -300,7 +332,7 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data["item_feedbacks"] = item_feedbacks
 
     # Show visual confirmation
-    await query.answer(response, show_alert=False)
+    await safe_answer_callback_query(query, response, show_alert=False)
 
     # Update the message to show feedback was recorded (remove buttons)
     if not original_text.endswith(f" {indicator}"):

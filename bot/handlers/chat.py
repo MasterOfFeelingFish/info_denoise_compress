@@ -20,6 +20,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 
 from services.gemini import call_gemini_with_search
+from utils.telegram_utils import safe_answer_callback_query
 from utils.json_storage import (
     get_user,
     get_user_profile,
@@ -289,7 +290,7 @@ async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def retry_chat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle retry_chat callback button to retry the last failed message."""
     query = update.callback_query
-    await query.answer("正在重试...")
+    await safe_answer_callback_query(query, "正在重试...")
 
     # Get the last failed message
     last_message = context.user_data.get("last_failed_message")
@@ -330,7 +331,7 @@ async def retry_chat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def clear_chat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle clear_chat callback button."""
     query = update.callback_query
-    await query.answer("今日对话已清空")
+    await safe_answer_callback_query(query, "今日对话已清空")
 
     # 只清理当天的对话历史，保留之前的
     today = datetime.now().strftime("%Y-%m-%d")
@@ -359,7 +360,7 @@ async def chat_to_start_callback(update: Update, context: ContextTypes.DEFAULT_T
     这样用户可以保留 AI 的回复内容。
     """
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     from utils.json_storage import get_user
 
@@ -447,7 +448,7 @@ def get_retry_chat_handler() -> CallbackQueryHandler:
 async def show_context_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show chat context days settings."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
 
     telegram_id = str(update.effective_user.id)
     current_days = get_user_setting(telegram_id, "chat_context_days", DEFAULT_CONTEXT_DAYS)
@@ -489,7 +490,7 @@ async def set_context_days_callback(update: Update, context: ContextTypes.DEFAUL
     set_user_setting(telegram_id, "chat_context_days", days)
 
     labels = ["只用当天", "包含昨天", "包含前天"]
-    await query.answer(f"已设置为：{labels[days]}")
+    await safe_answer_callback_query(query, f"已设置为：{labels[days]}")
 
     # Refresh the settings view
     await show_context_settings(update, context)
