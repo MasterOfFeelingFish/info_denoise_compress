@@ -1,5 +1,12 @@
 """
-AI Chat Handler
+⚠️ DEPRECATED: AI Chat functionality has been DISABLED to reduce token consumption.
+
+This file is preserved for potential future re-enablement but is NOT currently used.
+The handlers in this file are NOT registered in main.py.
+
+---
+
+AI Chat Handler (INACTIVE)
 
 Handles natural language conversations with users.
 AI has access to:

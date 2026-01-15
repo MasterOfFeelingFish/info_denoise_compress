@@ -97,8 +97,7 @@ def get_item_feedback_status(item_id: str) -> str:
 
 
 async def handle_feedback_positive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle positive feedback with real-time profile update."""
-    from services.profile_updater import update_user_profile_from_feedback
+    """Handle positive feedback."""
 
     query = update.callback_query
     await safe_answer_callback_query(query)
@@ -129,15 +128,6 @@ async def handle_feedback_positive(update: Update, context: ContextTypes.DEFAULT
 
     logger.info(f"Positive feedback from {telegram_id} for report {report_id}")
 
-    # Trigger real-time profile update
-    try:
-        await update_user_profile_from_feedback(
-            telegram_id=telegram_id,
-            feedback_type="positive"
-        )
-    except Exception as e:
-        logger.error(f"Real-time profile update failed: {e}")
-
     return ConversationHandler.END
 
 
@@ -166,8 +156,7 @@ async def handle_feedback_negative(update: Update, context: ContextTypes.DEFAULT
 
 
 async def handle_reason_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle reason selection for negative feedback with real-time profile update."""
-    from services.profile_updater import update_user_profile_from_feedback
+    """Handle reason selection for negative feedback."""
 
     query = update.callback_query
     await safe_answer_callback_query(query)
@@ -226,22 +215,11 @@ async def handle_reason_selection(update: Update, context: ContextTypes.DEFAULT_
 
         logger.info(f"Negative feedback from {telegram_id}: {selected_reason}")
 
-        # Trigger real-time profile update
-        try:
-            await update_user_profile_from_feedback(
-                telegram_id=telegram_id,
-                feedback_type="negative",
-                reason=selected_reason
-            )
-        except Exception as e:
-            logger.error(f"Real-time profile update failed: {e}")
-
     return ConversationHandler.END
 
 
 async def handle_custom_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle custom text reason for negative feedback with real-time profile update."""
-    from services.profile_updater import update_user_profile_from_feedback
+    """Handle custom text reason for negative feedback."""
 
     user = update.effective_user
     telegram_id = str(user.id)
@@ -268,16 +246,6 @@ async def handle_custom_reason(update: Update, context: ContextTypes.DEFAULT_TYP
 
     logger.info(f"Custom feedback from {telegram_id}: {custom_text[:50]}...")
 
-    # Trigger real-time profile update
-    try:
-        await update_user_profile_from_feedback(
-            telegram_id=telegram_id,
-            feedback_type="negative",
-            reason=custom_text
-        )
-    except Exception as e:
-        logger.error(f"Real-time profile update failed: {e}")
-
     # Clear user data
     context.user_data.pop("feedback_reason_selected", None)
     context.user_data.pop("feedback_report_id", None)
@@ -287,8 +255,7 @@ async def handle_custom_reason(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle like/dislike feedback on individual content items with real-time profile update."""
-    from services.profile_updater import update_user_profile_from_feedback
+    """Handle like/dislike feedback on individual content items."""
 
     query = update.callback_query
 
@@ -322,7 +289,7 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
     item_title = re.sub(r'^[🔴🔵]\s*\d+\.\s*', '', item_title).strip()
     item_title = re.sub(r'<[^>]+>', '', item_title)  # Remove HTML tags
 
-    # Store item feedback
+    # Store item feedback in memory (for later aggregation)
     item_feedbacks = context.user_data.get("item_feedbacks", [])
     item_feedbacks.append({
         "item_id": item_id,
@@ -331,32 +298,29 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
     })
     context.user_data["item_feedbacks"] = item_feedbacks
 
-    # Show visual confirmation
-    await safe_answer_callback_query(query, response, show_alert=False)
+    # IMPORTANT: Also save immediately to file for real-time statistics
+    # Create a lightweight feedback record for this single item
+    from utils.json_storage import save_feedback
+    save_feedback(
+        telegram_id=telegram_id,
+        overall_rating="positive" if feedback_type == "like" else "neutral",
+        item_feedbacks=[{
+            "item_id": item_id,
+            "feedback": feedback_type,
+            "title": item_title,
+        }]
+    )
 
-    # Update the message to show feedback was recorded (remove buttons)
-    if not original_text.endswith(f" {indicator}"):
-        try:
-            await query.edit_message_text(
-                f"{original_text} {indicator}",
-                reply_markup=None,
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass  # Message may already be edited
+    # Show visual confirmation with indicator
+    await safe_answer_callback_query(query, f"{response}", show_alert=False)
+
+    # Remove feedback buttons but keep original message (preserves HTML links)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass  # Message may already be edited
 
     logger.info(f"Item feedback from {telegram_id}: {feedback_type} on '{item_title[:30]}'")
-
-    # Trigger real-time profile update with item content
-    try:
-        await update_user_profile_from_feedback(
-            telegram_id=telegram_id,
-            feedback_type=feedback_type,
-            item_id=item_id,
-            item_title=item_title
-        )
-    except Exception as e:
-        logger.error(f"Real-time profile update failed: {e}")
 
 
 def get_feedback_handlers():

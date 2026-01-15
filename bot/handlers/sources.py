@@ -6,6 +6,7 @@ Allows viewing current sources and suggesting new ones.
 
 Reference: python-telegram-bot v22.x (Exa verified 2025-01-12)
 """
+import html
 import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -207,7 +208,7 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(
             f"添加失败\n"
             f"{'─' * 24}\n\n"
-            f"{validation['error']}\n\n"
+            f"{html.escape(validation['error'])}\n\n"
             "请重试。",
             reply_markup=reply_markup
         )
@@ -227,7 +228,7 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(
                 f"添加失败\n"
                 f"{'─' * 24}\n\n"
-                f"RSS 地址无效：{url_validation['error']}\n\n"
+                f"RSS 地址无效：{html.escape(url_validation['error'])}\n\n"
                 "请重试。",
                 reply_markup=reply_markup
             )
@@ -243,7 +244,7 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if success:
-        message = f"已添加 {handle}。"
+        message = f"已添加 {html.escape(handle)}。"
         if not url:
             message += "\n注意：需要配置 RSS 地址才能抓取。"
         await update.message.reply_text(
@@ -322,7 +323,7 @@ async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(
                 f"添加失败\n"
                 f"{'─' * 24}\n\n"
-                f"{validation['error']}\n\n"
+                f"{html.escape(validation['error'])}\n\n"
                 "请检查地址后重试。",
                 reply_markup=reply_markup
             )
@@ -335,7 +336,7 @@ async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(
                 f"添加失败\n"
                 f"{'─' * 24}\n\n"
-                f"{detection['error']}\n\n"
+                f"{html.escape(detection['error'])}\n\n"
                 "请检查地址后重试。",
                 reply_markup=reply_markup
             )
@@ -349,8 +350,8 @@ async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(
             f"添加成功\n"
             f"{'─' * 24}\n\n"
-            f"已添加 {name}。\n"
-            f"RSS: {final_url}",
+            f"已添加 {html.escape(name)}。\n"
+            f"RSS: {html.escape(final_url)}",
             reply_markup=reply_markup
         )
         logger.info(f"Added website source for user {telegram_id}: {name} - {final_url}")

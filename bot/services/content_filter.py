@@ -121,11 +121,30 @@ async def filter_content_for_user(
 Please categorize into must_read, recommended, and other sections ({MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} total items)."""
 
     try:
-        # Call Gemini for filtering
+        # Call AI for filtering (token usage is automatically logged by the provider)
         filtered_result = await call_gemini_json(
             prompt=prompt,
-            system_instruction=system_instruction
+            system_instruction=system_instruction,
+            temperature=1.0
         )
+
+        # Check for error field in AI response (Fix #6)
+        if isinstance(filtered_result, dict) and "error" in filtered_result:
+            error_msg = filtered_result.get("error", "Unknown AI error")
+            logger.error(f"AI returned error for user {telegram_id}: {error_msg}")
+            # Return fallback with error context
+            return [
+                {
+                    "id": item.get("id"),
+                    "title": item.get("title"),
+                    "summary": item.get("summary", "")[:100],
+                    "source": item.get("source"),
+                    "link": item.get("link"),
+                    "section": "other",
+                    "reason": f"AI error: {error_msg[:50]}"
+                }
+                for item in raw_content[:max_items]
+            ]
 
         # Handle new format: {must_read: [], recommended: [], other: []}
         if isinstance(filtered_result, dict):

@@ -7,6 +7,7 @@ Supports multiple languages based on user profile.
 
 Reference: Plan specification for report format
 """
+import html
 import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -435,22 +436,30 @@ def format_single_item(item: Dict[str, Any], index: int, lang: str = "zh") -> st
     """
     title = item.get("title", "Untitled")
     summary = item.get("summary", "")
-    source = item.get("source", "Unknown")
     link = item.get("link", "")
     importance = item.get("importance", "medium")
 
     # Priority indicator
     priority = "🔴" if importance == "high" else "🔵"
 
-    lines = [f"{priority} <b>{index}. {title}</b>"]
+    # Escape HTML special characters to prevent format breaking
+    title_escaped = html.escape(title)
+    summary_escaped = html.escape(summary) if summary else ""
 
-    if summary:
-        lines.append(f"{summary}")
-
+    # Make title clickable if link exists
     if link:
-        lines.append(f'<a href="{link}">{source}</a>')
+        # Escape link URL for HTML attribute safety
+        link_escaped = html.escape(link, quote=True)
+        title_html = f'<a href="{link_escaped}">{title_escaped}</a>'
     else:
-        lines.append(f"[{source}]")
+        title_html = title_escaped
+
+    lines = [f"{priority} <b>{index}. {title_html}</b>"]
+
+    if summary_escaped:
+        lines.append(f"{summary_escaped}")
+
+    # Source line removed - link is now in title
 
     return "\n".join(lines)
 

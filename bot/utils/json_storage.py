@@ -7,14 +7,9 @@ Uses JSON files for users, profiles, feedback, and content.
 import json
 import os
 import logging
-import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from pathlib import Path
-
-# File locking is only available on Unix systems
-if sys.platform != "win32":
-    import fcntl
 
 from config import (
     DATA_DIR,
@@ -39,46 +34,113 @@ def _ensure_dir(path: str) -> None:
 
 
 def _read_json(file_path: str) -> Dict[str, Any]:
-    """Read JSON file with file locking."""
-    try:
-        if not os.path.exists(file_path):
+    """
+    Read JSON file with retry logic.
+
+    No file locking needed - atomic writes guarantee consistency.
+    Retries handle transient permission issues on Windows.
+    """
+    import time
+
+    max_retries = 5
+    retry_delay = 0.05  # 50ms
+
+    for attempt in range(max_retries):
+        try:
+            if not os.path.exists(file_path):
+                return {}
+
+            # Simple read without locking (atomic writes guarantee consistency)
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in {file_path}: {e}")
+            return {}
+        except (PermissionError, OSError) as e:
+            # Retry on Windows permission errors
+            if attempt < max_retries - 1:
+                logger.debug(f"File locked, retrying ({attempt+1}/{max_retries}): {file_path}")
+                time.sleep(retry_delay)
+                retry_delay *= 1.5  # Gentle backoff
+                continue
+            else:
+                logger.error(f"Error reading {file_path} after {max_retries} retries: {e}")
+                return {}
+        except Exception as e:
+            logger.error(f"Error reading {file_path}: {e}")
             return {}
 
-        with open(file_path, "r", encoding="utf-8") as f:
-            # File locking for concurrent access (Unix only)
-            if sys.platform != "win32":
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-            try:
-                return json.load(f)
-            finally:
-                if sys.platform != "win32":
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error in {file_path}: {e}")
-        return {}
-    except Exception as e:
-        logger.error(f"Error reading {file_path}: {e}")
-        return {}
+    return {}
 
 
 def _write_json(file_path: str, data: Dict[str, Any]) -> bool:
-    """Write JSON file with file locking."""
-    try:
-        _ensure_dir(os.path.dirname(file_path))
+    """
+    Write JSON file using atomic write with retry logic.
 
-        with open(file_path, "w", encoding="utf-8") as f:
-            # File locking for concurrent access (Unix only)
-            if sys.platform != "win32":
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
+    Uses temp file + atomic rename to avoid file lock issues on Windows.
+    This is more reliable than msvcrt.locking().
+    """
+    import time
+    import tempfile
+
+    max_retries = 5  # Increased retries for atomic write
+    retry_delay = 0.05  # 50ms
+
+    for attempt in range(max_retries):
+        temp_fd = None
+        temp_path = None
+        try:
+            _ensure_dir(os.path.dirname(file_path))
+
+            # Write to temporary file in same directory (same filesystem)
+            dir_path = os.path.dirname(file_path) or '.'
+            temp_fd, temp_path = tempfile.mkstemp(
+                dir=dir_path,
+                prefix='.tmp_',
+                suffix='.json',
+                text=True
+            )
+
+            # Write JSON to temp file
+            with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                temp_fd = None  # Prevent double close
                 json.dump(data, f, ensure_ascii=False, indent=2)
-                return True
-            finally:
-                if sys.platform != "win32":
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-    except Exception as e:
-        logger.error(f"Error writing {file_path}: {e}")
-        return False
+                f.flush()
+                os.fsync(f.fileno())
+
+            # Atomic replace (os.replace is atomic on both Windows and Unix)
+            os.replace(temp_path, file_path)
+            temp_path = None  # Prevent cleanup of successful file
+            return True
+
+        except (PermissionError, OSError) as e:
+            # Retry on Windows file lock errors
+            if attempt < max_retries - 1:
+                logger.debug(f"File locked for write, retrying ({attempt+1}/{max_retries}): {file_path}")
+                time.sleep(retry_delay)
+                retry_delay *= 1.5  # Gentle backoff
+                continue
+            else:
+                logger.error(f"Error writing {file_path} after {max_retries} retries: {e}")
+                return False
+        except Exception as e:
+            logger.error(f"Error writing {file_path}: {e}")
+            return False
+        finally:
+            # Cleanup on failure
+            if temp_fd is not None:
+                try:
+                    os.close(temp_fd)
+                except:
+                    pass
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+
+    return False
 
 
 # ============ User Management ============
@@ -180,20 +242,28 @@ def get_user_profile(telegram_id: str) -> Optional[str]:
         return None
 
 
-def save_user_profile(telegram_id: str, profile: str) -> bool:
-    """Save user's natural language profile."""
-    user = get_user(telegram_id)
-    if not user:
-        logger.error(f"Cannot save profile: user {telegram_id} not found")
-        return False
+def save_user_profile(telegram_id: str, profile: str, user_id: Optional[str] = None) -> bool:
+    """Save user's natural language profile.
+
+    Args:
+        telegram_id: User's Telegram ID
+        profile: Profile content
+        user_id: Optional user ID (avoids file lock race condition)
+    """
+    if not user_id:
+        user = get_user(telegram_id)
+        if not user:
+            logger.error(f"Cannot save profile: user {telegram_id} not found")
+            return False
+        user_id = user['id']
 
     _ensure_dir(PROFILES_DIR)
-    profile_path = os.path.join(PROFILES_DIR, f"{user['id']}.txt")
+    profile_path = os.path.join(PROFILES_DIR, f"{user_id}.txt")
 
     try:
         with open(profile_path, "w", encoding="utf-8") as f:
             f.write(profile)
-        logger.info(f"Saved profile for user {user['id']}")
+        logger.info(f"Saved profile for user {user_id}")
         return True
     except Exception as e:
         logger.error(f"Error saving profile for {telegram_id}: {e}")
@@ -380,19 +450,33 @@ def remove_user_source(telegram_id: str, category: str, name: str) -> bool:
 
 # ============ Per-User Raw Content ============
 
-def save_user_raw_content(telegram_id: str, date: str, items: List[Dict[str, Any]]) -> bool:
-    """Save raw fetched content for a user on a specific day."""
-    user = get_user(telegram_id)
-    if not user:
-        return False
+def save_user_raw_content(
+    telegram_id: str,
+    date: str,
+    items: List[Dict[str, Any]],
+    user_id: Optional[str] = None
+) -> bool:
+    """Save raw fetched content for a user on a specific day.
 
-    user_content_dir = os.path.join(RAW_CONTENT_DIR, user["id"])
+    Args:
+        telegram_id: User's Telegram ID
+        date: Date string (YYYY-MM-DD)
+        items: Raw content items
+        user_id: Optional user ID (avoids file lock race condition)
+    """
+    if not user_id:
+        user = get_user(telegram_id)
+        if not user:
+            return False
+        user_id = user["id"]
+
+    user_content_dir = os.path.join(RAW_CONTENT_DIR, user_id)
     _ensure_dir(user_content_dir)
     content_path = os.path.join(user_content_dir, f"{date}.json")
 
     data = {
         "date": date,
-        "user_id": user["id"],
+        "user_id": user_id,
         "fetched_at": datetime.now().isoformat(),
         "count": len(items),
         "items": items,
@@ -424,20 +508,34 @@ def save_user_daily_stats(
     raw_items_scanned: int,
     items_sent: int,
     status: str = "success",
-    filtered_items: Optional[List[Dict[str, Any]]] = None
+    filtered_items: Optional[List[Dict[str, Any]]] = None,
+    user_id: Optional[str] = None
 ) -> bool:
-    """Save daily statistics for a specific user."""
-    user = get_user(telegram_id)
-    if not user:
-        return False
+    """Save daily statistics for a specific user.
 
-    user_stats_dir = os.path.join(DAILY_STATS_DIR, user["id"])
+    Args:
+        telegram_id: User's Telegram ID
+        date: Date string (YYYY-MM-DD)
+        sources_monitored: Number of sources monitored
+        raw_items_scanned: Number of raw items scanned
+        items_sent: Number of items sent
+        status: Status string (default "success")
+        filtered_items: Filtered items list (optional)
+        user_id: Optional user ID (avoids file lock race condition)
+    """
+    if not user_id:
+        user = get_user(telegram_id)
+        if not user:
+            return False
+        user_id = user["id"]
+
+    user_stats_dir = os.path.join(DAILY_STATS_DIR, user_id)
     _ensure_dir(user_stats_dir)
     stats_path = os.path.join(user_stats_dir, f"{date}.json")
 
     data = {
         "date": date,
-        "user_id": user["id"],
+        "user_id": user_id,
         "sources_monitored": sources_monitored,
         "raw_items_scanned": raw_items_scanned,
         "items_sent": items_sent,
@@ -536,6 +634,7 @@ def cleanup_old_data() -> Dict[str, int]:
 
     # Clean raw_content - handle per-user subdirectories
     if os.path.exists(RAW_CONTENT_DIR):
+        root_level_cleaned = False
         for item in os.listdir(RAW_CONTENT_DIR):
             item_path = os.path.join(RAW_CONTENT_DIR, item)
             if os.path.isdir(item_path):
@@ -543,15 +642,16 @@ def cleanup_old_data() -> Dict[str, int]:
                 results["raw_content"] += _cleanup_old_files_in_dir(
                     item_path, RAW_CONTENT_RETENTION_DAYS
                 )
-            elif item.endswith(".json"):
-                # Legacy global files
+            elif item.endswith(".json") and not root_level_cleaned:
+                # Legacy global files - only process root level once
                 results["raw_content"] += _cleanup_old_files_in_dir(
                     RAW_CONTENT_DIR, RAW_CONTENT_RETENTION_DAYS
                 )
-                break  # Only need to run once for root level
+                root_level_cleaned = True
 
     # Clean daily_stats - handle per-user subdirectories
     if os.path.exists(DAILY_STATS_DIR):
+        root_level_cleaned = False
         for item in os.listdir(DAILY_STATS_DIR):
             item_path = os.path.join(DAILY_STATS_DIR, item)
             if os.path.isdir(item_path):
@@ -559,12 +659,12 @@ def cleanup_old_data() -> Dict[str, int]:
                 results["daily_stats"] += _cleanup_old_files_in_dir(
                     item_path, DAILY_STATS_RETENTION_DAYS
                 )
-            elif item.endswith(".json"):
-                # Legacy global files
+            elif item.endswith(".json") and not root_level_cleaned:
+                # Legacy global files - only process root level once
                 results["daily_stats"] += _cleanup_old_files_in_dir(
                     DAILY_STATS_DIR, DAILY_STATS_RETENTION_DAYS
                 )
-                break
+                root_level_cleaned = True
 
     total = sum(results.values())
     if total > 0:

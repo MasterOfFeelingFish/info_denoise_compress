@@ -10,26 +10,74 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Gemini API Configuration
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-pro-preview")
+# ============ LLM Selection (Smart Auto-Config) ============
+# Set LLM=gemini or openai, then configure the corresponding keys
+LLM = os.getenv("LLM", "gemini").lower().strip()
 
-# Thinking level: LOW or HIGH (default HIGH for better reasoning)
-GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "HIGH")
+# Auto-configure based on LLM selection
+if LLM == "openai":
+    # OpenAI (or OpenAI-compatible: Kimi, DeepSeek, etc.)
+    LLM_PROVIDER = "openai"
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+    OPENAI_API_URL = os.getenv("OPENAI_API_URL", "")
 
-# Build API URL: supports both base URL and full URL
-_api_base = os.getenv("GEMINI_API_URL", "").rstrip("/")
-if _api_base:
-    # User provided custom URL
-    if "/v1beta/models/" in _api_base or ":generateContent" in _api_base:
-        # Full URL provided, use as-is
-        GEMINI_API_URL = _api_base
+    # Log provider info
+    if OPENAI_API_URL:
+        logger.info(f"🤖 Using OpenAI-compatible API: {OPENAI_MODEL}")
     else:
-        # Base URL provided, append path
-        GEMINI_API_URL = f"{_api_base}/v1beta/models/{GEMINI_MODEL}:generateContent"
+        logger.info(f"🤖 Using OpenAI: {OPENAI_MODEL}")
+
+elif LLM == "gemini":
+    # Google Gemini (default)
+    LLM_PROVIDER = "gemini"
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-pro-preview")
+    GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "HIGH")
+
+    # Build Gemini API URL: supports both base URL and full URL
+    _api_base = os.getenv("GEMINI_API_URL", "").rstrip("/")
+    if _api_base:
+        if "/v1beta/models/" in _api_base or ":generateContent" in _api_base:
+            GEMINI_API_URL = _api_base
+        else:
+            GEMINI_API_URL = f"{_api_base}/v1beta/models/{GEMINI_MODEL}:generateContent"
+    else:
+        GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+
+    logger.info(f"✨ Using Gemini: {GEMINI_MODEL}")
+
 else:
-    # Default Google API
+    logger.warning(f"⚠️ Unknown LLM: {LLM}, falling back to Gemini")
+    LLM_PROVIDER = "gemini"
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-pro-preview")
+    GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "HIGH")
     GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+
+# Ensure all variables exist (for compatibility)
+if LLM_PROVIDER == "gemini":
+    # Set dummy OpenAI vars
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+    OPENAI_API_URL = os.getenv("OPENAI_API_URL", "")
+else:
+    # Set dummy Gemini vars
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-pro-preview")
+    GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "HIGH")
+    GEMINI_API_URL = ""
+
+# Validate required API keys
+import sys
+if LLM_PROVIDER == "gemini" and not GEMINI_API_KEY:
+    logger.error("❌ GEMINI_API_KEY not set! Please check your .env file.")
+    logger.error("   Set GEMINI_API_KEY=your_api_key in .env")
+    sys.exit(1)
+elif LLM_PROVIDER == "openai" and not OPENAI_API_KEY:
+    logger.error("❌ OPENAI_API_KEY not set! Please check your .env file.")
+    logger.error("   Set OPENAI_API_KEY=your_api_key in .env")
+    sys.exit(1)
 
 # Telegram Bot
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -63,9 +111,9 @@ FEEDBACK_RETENTION_DAYS = _parse_int_env("FEEDBACK_RETENTION_DAYS", 30)  # 反�
 MIN_DIGEST_ITEMS = _parse_int_env("MIN_DIGEST_ITEMS", 15)  # 每日精选最少条数
 MAX_DIGEST_ITEMS = _parse_int_env("MAX_DIGEST_ITEMS", 30)  # 每日精选最多条数
 
-# AI Chat Configuration
-# AI 对话配置
-CHAT_CONTEXT_DAYS = _parse_int_env("CHAT_CONTEXT_DAYS", 1)  # 对话上下文保留天数 (0=当天, 1=昨天, 2=前天)
+# Concurrency Configuration
+# 并发配置
+CONCURRENT_USERS = _parse_int_env("CONCURRENT_USERS", 10)  # 并发处理用户数（1-50，建议10）
 
 # Paths
 USERS_FILE = os.path.join(DATA_DIR, "users.json")

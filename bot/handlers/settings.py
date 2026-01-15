@@ -6,6 +6,7 @@ Supports viewing current profile and re-running preference setup.
 
 Reference: python-telegram-bot v22.x (Exa verified 2025-01-12)
 """
+import html
 import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -79,7 +80,7 @@ async def view_current_profile(update: Update, context: ContextTypes.DEFAULT_TYP
         text = (
             f"你的偏好设置\n"
             f"{'─' * 24}\n\n"
-            f"{profile}\n\n"
+            f"{html.escape(profile)}\n\n"
             f"{'─' * 24}\n"
             "使用 /settings 修改偏好。"
         )
@@ -112,7 +113,7 @@ async def start_profile_update(update: Update, context: ContextTypes.DEFAULT_TYP
             f"更新偏好\n"
             f"{'─' * 24}\n\n"
             "当前偏好：\n"
-            f"{profile}\n\n"
+            f"{html.escape(profile)}\n\n"
             f"{'─' * 24}\n\n"
             "你想修改什么？\n\n"
             "示例：\n"
@@ -165,7 +166,7 @@ async def handle_profile_update(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(
             f"偏好已更新\n"
             f"{'─' * 24}\n\n"
-            f"{updated_profile}\n\n"
+            f"{html.escape(updated_profile)}\n\n"
             f"{'─' * 24}\n"
             "下次简报将反映这些变化。"
         )

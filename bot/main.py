@@ -14,9 +14,10 @@ import sys
 import signal
 import atexit
 from datetime import time, datetime, timedelta
+from typing import Dict, Any
 from zoneinfo import ZoneInfo
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -26,13 +27,13 @@ from telegram.ext import (
     filters,
 )
 
-from config import TELEGRAM_BOT_TOKEN, PUSH_HOUR, PUSH_MINUTE, DATA_DIR, LOG_ROTATE_DAYS, LOG_BACKUP_COUNT, MAX_DIGEST_ITEMS
+from config import TELEGRAM_BOT_TOKEN, PUSH_HOUR, PUSH_MINUTE, DATA_DIR, LOG_ROTATE_DAYS, LOG_BACKUP_COUNT, MAX_DIGEST_ITEMS, CONCURRENT_USERS
+from services.digest_processor import process_single_user
 from utils.telegram_utils import safe_answer_callback_query
 from handlers.start import get_start_handler, get_start_callbacks
 from handlers.feedback import get_feedback_handlers
 from handlers.settings import get_settings_handler, get_settings_callbacks
 from handlers.sources import get_sources_handler, get_sources_callbacks
-from handlers.chat import get_chat_handler, get_clear_command_handler, get_clear_callback_handler, get_chat_to_start_handler, get_retry_chat_handler, get_context_settings_handler, get_set_context_days_handler
 
 
 # ============ Logging Configuration ============
@@ -103,22 +104,10 @@ async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Scheduled job to generate and send daily digest to all users.
     Runs at configured time (default: 9:00 AM Beijing Time).
-    Each user has their own sources, so we fetch per-user.
+    Uses concurrent processing for better performance with pre-fetching optimization.
     """
-    from services.rss_fetcher import fetch_user_sources, get_user_source_list
-    from services.content_filter import filter_content_for_user, get_ai_summary
-    from services.report_generator import (
-        generate_empty_report,
-        detect_user_language,
-        prepare_digest_messages,
-    )
-    from utils.json_storage import (
-        get_users,
-        get_user_profile,
-        save_user_raw_content,
-        save_user_daily_stats,
-    )
-    from handlers.feedback import create_feedback_keyboard, create_item_feedback_keyboard
+    from utils.json_storage import get_users, get_user_sources
+    from services.rss_fetcher import fetch_all_sources
 
     logger.info("Starting daily digest generation...")
 
@@ -131,124 +120,68 @@ async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.warning("No users registered, skipping digest")
             return
 
-        # Process each user with their own sources
+        # ===== Pre-fetch optimization: Collect all unique sources =====
+        logger.info("Collecting all user sources...")
+        all_sources = {}  # {category: {name: url}}
+
         for user in users:
             telegram_id = user.get("telegram_id")
             if not telegram_id:
                 continue
 
-            try:
-                # 1. Fetch content from this user's sources
-                user_sources = get_user_source_list(telegram_id)
-                sources_count = sum(len(s) for s in user_sources.values())
+            user_sources = get_user_sources(telegram_id)
+            # Merge into global sources dict
+            for category, sources in user_sources.items():
+                if category not in all_sources:
+                    all_sources[category] = {}
+                for name, url in sources.items():
+                    if url and name not in all_sources[category]:
+                        all_sources[category][name] = url
 
-                raw_content = await fetch_user_sources(telegram_id, hours_back=24)
+        # Count unique sources
+        unique_sources_count = sum(len(sources) for sources in all_sources.values())
+        logger.info(f"Found {unique_sources_count} unique RSS sources across {len(users)} users")
 
-                logger.info(f"User {telegram_id}: Fetched {len(raw_content)} items from {sources_count} sources")
+        # Batch fetch all sources once (shared by all users)
+        logger.info("Pre-fetching all RSS sources...")
+        global_raw_content = await fetch_all_sources(
+            hours_back=24,
+            sources=all_sources
+        )
+        logger.info(f"Pre-fetched {len(global_raw_content)} total items")
+        # ===== Pre-fetch complete =====
 
-                # Save raw content for this user
-                save_user_raw_content(telegram_id, today, raw_content)
+        logger.info(f"Processing {len(users)} users with concurrency={CONCURRENT_USERS}")
 
-                # Get user profile for language detection
-                profile = get_user_profile(telegram_id) or ""
-                user_lang = detect_user_language(profile)
+        # Concurrent processing with semaphore to limit concurrency
+        semaphore = asyncio.Semaphore(CONCURRENT_USERS)
 
-                # 2. Filter content for user
-                filtered_items = await filter_content_for_user(
-                    telegram_id=telegram_id,
-                    raw_content=raw_content,
-                    max_items=MAX_DIGEST_ITEMS
-                )
+        async def process_with_limit(user):
+            async with semaphore:
+                # Pass global data to avoid duplicate fetching
+                return await process_single_user(context, user, today, global_raw_content)
 
-                chat_id = int(telegram_id)
-                report_id = f"{today}_{telegram_id}"
+        # Process all users concurrently
+        results = await asyncio.gather(
+            *[process_with_limit(user) for user in users],
+            return_exceptions=True  # Single user failure doesn't affect others
+        )
 
-                if filtered_items:
-                    # Generate AI summary
-                    ai_summary = await get_ai_summary(filtered_items, profile)
+        # Collect statistics
+        success_count = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "success")
+        error_count = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "error")
+        skipped_count = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "skipped")
+        exception_count = sum(1 for r in results if isinstance(r, Exception))
 
-                    # Prepare messages: header + individual items
-                    header, item_messages = prepare_digest_messages(
-                        filtered_items=filtered_items,
-                        ai_summary=ai_summary,
-                        sources_count=sources_count,
-                        raw_count=len(raw_content),
-                        lang=user_lang
-                    )
+        logger.info(
+            f"Daily digest complete: {success_count} success, {error_count} errors, "
+            f"{skipped_count} skipped, {exception_count} exceptions"
+        )
 
-                    # Send header message
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=header,
-                        parse_mode="HTML",
-                        disable_web_page_preview=True
-                    )
-
-                    # Send each item with feedback buttons
-                    for item_msg, item_id in item_messages:
-                        # Section headers don't get feedback buttons
-                        if item_id.startswith("section_"):
-                            await context.bot.send_message(
-                                chat_id=chat_id,
-                                text=item_msg,
-                                parse_mode="HTML",
-                                disable_web_page_preview=True
-                            )
-                        else:
-                            item_keyboard = create_item_feedback_keyboard(item_id)
-                            await context.bot.send_message(
-                                chat_id=chat_id,
-                                text=item_msg,
-                                reply_markup=item_keyboard,
-                                parse_mode="HTML",
-                                disable_web_page_preview=True
-                            )
-
-                    # Send final feedback message
-                    final_keyboard = create_feedback_keyboard(report_id)
-                    locale_prompt = "这份简报有帮助吗？" if user_lang == "zh" else "Was this helpful?"
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=f"{'─' * 28}\n{locale_prompt}",
-                        reply_markup=final_keyboard
-                    )
-
-                else:
-                    # No content - send empty report
-                    report = generate_empty_report(lang=user_lang)
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=report,
-                        parse_mode="HTML",
-                        disable_web_page_preview=True
-                    )
-
-                # 3. Save per-user daily stats
-                save_user_daily_stats(
-                    telegram_id=telegram_id,
-                    date=today,
-                    sources_monitored=sources_count,
-                    raw_items_scanned=len(raw_content),
-                    items_sent=len(filtered_items),
-                    status="success",
-                    filtered_items=filtered_items
-                )
-
-                logger.info(f"Sent digest to {telegram_id}: {len(filtered_items)} items")
-
-            except Exception as e:
-                logger.error(f"Failed to send digest to {telegram_id}: {e}")
-                # Save error status
-                save_user_daily_stats(
-                    telegram_id=telegram_id,
-                    date=today,
-                    sources_monitored=0,
-                    raw_items_scanned=0,
-                    items_sent=0,
-                    status=f"error: {str(e)[:50]}"
-                )
-
-        logger.info(f"Daily digest complete: {len(users)} users processed")
+        # Log any exceptions that occurred
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"User {users[i].get('telegram_id')} raised exception: {result}")
 
     except Exception as e:
         logger.error(f"Daily digest job failed: {e}", exc_info=True)
@@ -303,17 +236,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
   /settings  偏好设置
   /sources   信息源管理
   /stats     查看统计
-  /clear     清空今日对话
   /help      帮助信息
 
 {'─' * 24}
 
 功能说明：
-
-AI 对话
-  直接发送任何消息即可与 AI 对话。
-  AI 能够联网搜索获取实时信息，
-  并读取你最近 3 天的推送内容。
 
 每日简报
   每天 {PUSH_HOUR:02d}:{PUSH_MINUTE:02d}（北京时间）自动推送。
@@ -331,19 +258,14 @@ AI 对话
 统计 (/stats)
   查看你的注册时间、反馈历史、满意度趋势。
 
-对话设置（主菜单按钮）
-  设置 AI 对话的上下文天数：
-  • 只用当天 - 每天从头开始
-  • 包含昨天 - AI 能记住昨天的对话
-  • 包含前天 - AI 能记住近 3 天对话
-
-反馈
-  每条推送消息都有反馈按钮，
-  你的反馈会帮助 AI 更好地理解你的偏好。
+反馈机制
+  每条推送消息都有反馈按钮（👍/👎）。
+  你的反馈会被收集并在每日凌晨批量更新偏好画像，
+  次日推送将体现你的最新偏好。
 
 {'─' * 24}
 
-有问题？直接发消息问我！"""
+有问题？使用上方命令或主菜单操作。"""
 
     await update.message.reply_text(help_text, reply_markup=reply_markup)
 
@@ -405,7 +327,19 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def post_init(application: Application) -> None:
-    """Post-initialization callback to set up scheduled jobs."""
+    """Post-initialization callback to set up scheduled jobs and bot commands."""
+    # Set bot commands menu (only show user-facing commands)
+    # Debug commands (/test, /testprofile) are hidden from menu but still functional
+    commands = [
+        BotCommand("start", "主菜单"),
+        BotCommand("help", "帮助信息"),
+        BotCommand("settings", "偏好设置"),
+        BotCommand("sources", "信息源管理"),
+        BotCommand("stats", "查看统计"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands menu set successfully")
+
     # Get timezone for Beijing
     beijing_tz = ZoneInfo("Asia/Shanghai")
 
@@ -511,17 +445,11 @@ async def show_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
   /settings  偏好设置
   /sources   信息源管理
   /stats     查看统计
-  /clear     清空今日对话
   /help      帮助信息
 
 {'─' * 24}
 
 功能说明：
-
-AI 对话
-  直接发送任何消息即可与 AI 对话。
-  AI 能够联网搜索获取实时信息，
-  并读取你最近 3 天的推送内容。
 
 每日简报
   每天 {PUSH_HOUR:02d}:{PUSH_MINUTE:02d}（北京时间）自动推送。
@@ -539,19 +467,14 @@ AI 对话
 统计 (/stats)
   查看你的注册时间、反馈历史、满意度趋势。
 
-对话设置（主菜单按钮）
-  设置 AI 对话的上下文天数：
-  • 只用当天 - 每天从头开始
-  • 包含昨天 - AI 能记住昨天的对话
-  • 包含前天 - AI 能记住近 3 天对话
-
-反馈
-  每条推送消息都有反馈按钮，
-  你的反馈会帮助 AI 更好地理解你的偏好。
+反馈机制
+  每条推送消息都有反馈按钮（👍/👎）。
+  你的反馈会被收集并在每日凌晨批量更新偏好画像，
+  次日推送将体现你的最新偏好。
 
 {'─' * 24}
 
-有问题？直接发消息问我！"""
+有问题？使用上方命令或主菜单操作。"""
 
     await query.edit_message_text(help_text, reply_markup=reply_markup)
 
@@ -598,19 +521,10 @@ def main() -> None:
     application.add_handler(CommandHandler("test", test_fetch_command))
     application.add_handler(CommandHandler("testprofile", test_profile_command))
     application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(get_clear_command_handler())
 
     # Callback for help from unknown message
     application.add_handler(CallbackQueryHandler(show_help_callback, pattern="^show_help$"))
     application.add_handler(CallbackQueryHandler(noop_callback, pattern="^noop$"))
-    application.add_handler(get_clear_callback_handler())
-    application.add_handler(get_chat_to_start_handler())
-    application.add_handler(get_retry_chat_handler())
-    application.add_handler(get_context_settings_handler())
-    application.add_handler(get_set_context_days_handler())
-
-    # AI Chat handler - handles all text messages (must be last)
-    application.add_handler(get_chat_handler())
 
     # Error handler
     application.add_error_handler(error_handler)
