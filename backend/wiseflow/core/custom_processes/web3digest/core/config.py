@@ -145,6 +145,13 @@ class DefaultRSSSources:
             "enabled": True  # 已验证：快速稳定
         },
         {
+            "name": "ChainFeeds",
+            "url": "https://www.chainfeeds.me/rss",
+            "type": "website",
+            "category": "媒体",
+            "enabled": True  # 已验证：稳定
+        },
+        {
             "name": "The Block",
             "url": "https://www.theblock.co/rss.xml",
             "type": "website",
