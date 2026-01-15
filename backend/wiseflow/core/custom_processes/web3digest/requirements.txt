@@ -34,3 +34,6 @@ pydantic>=1.10.0
 
 # Timezone support
 pytz>=2023.3
+
+# Process monitoring (for instance check)
+psutil>=5.9.0

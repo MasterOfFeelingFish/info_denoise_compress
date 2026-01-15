@@ -181,11 +181,22 @@ class FeedbackAnalyzer:
 
             logger.info(f"✅ 用户 {user_id} 画像已实时更新（结构化和文本数据）")
 
-            # 如果反馈数量达到阈值，触发深度分析
+            # 检查是否需要深度分析（避免频繁调用LLM）
             feedback_count = await self.feedback_manager.get_feedback_count(user_id)
-            if feedback_count >= self.threshold and feedback_count % self.threshold == 0:
-                logger.info(f"用户 {user_id} 反馈达到阈值倍数，触发深度分析")
-                await self.analyze_user_feedback(user_id)
+            # 只有当反馈数量达到新的20的倍数时才触发深度分析
+            # 大幅减少LLM调用次数，提高性能
+            if feedback_count >= 20 and feedback_count % 20 == 0:
+                # 检查是否已经分析过这个数量的反馈
+                last_analyzed = structured_data.get("last_analyzed_count", 0)
+                if feedback_count > last_analyzed:
+                    logger.info(f"用户 {user_id} 反馈达到阈值 {feedback_count}，触发深度分析")
+                    # 更新已分析的数量
+                    await self.profile_manager.update_structured_profile(user_id, {
+                        "last_analyzed_count": feedback_count
+                    })
+                    # 异步执行深度分析，避免阻塞
+                    import asyncio
+                    asyncio.create_task(self._async_analyze_feedback(user_id))
 
             return True
 
@@ -247,3 +258,10 @@ class FeedbackAnalyzer:
         else:
             with open(profile_file, 'w', encoding='utf-8') as f:
                 f.write(updated_profile)
+    
+    async def _async_analyze_feedback(self, user_id: int):
+        """异步执行深度分析，避免阻塞主流程"""
+        try:
+            await self.analyze_user_feedback(user_id)
+        except Exception as e:
+            logger.error(f"异步分析反馈失败 {user_id}: {e}", exc_info=True)

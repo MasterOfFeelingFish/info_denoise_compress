@@ -1,5 +1,5 @@
 """
-对话管理模块 - 处理 3 轮对话式偏好收集
+对话管理模块 - 处理 3 轮对话式偏好收集（带详细步骤日志）
 """
 import asyncio
 from datetime import datetime, timedelta
@@ -7,7 +7,7 @@ from typing import Dict, Optional, Tuple
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from core.custom_processes.web3digest.utils.logger import setup_logger
+from utils.logger import setup_logger, log_user_step, log_user_click, log_user_command, log_user_error
 from core.custom_processes.web3digest.core.profile_manager import ProfileManager
 from core.custom_processes.web3digest.core.llm_client import LLMClient
 
@@ -71,14 +71,14 @@ class ConversationManager:
             "start_time": datetime.now(),
             "data": {}  # 收集的数据
         }
-        
+
         # 发送第一轮问题
         await self._send_stage1_question(update, context)
-    
+
     async def is_in_conversation(self, user_id: int) -> bool:
         """检查用户是否在对话中"""
         return user_id in self._conversations
-    
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理用户回复"""
         user_id = update.effective_user.id
@@ -92,7 +92,7 @@ class ConversationManager:
 
         conversation = self._conversations[user_id]
         stage = conversation["stage"]
-        
+
         # 根据当前轮次处理
         if stage == 1:
             await self._handle_stage1_response(update, context, message_text)
@@ -102,39 +102,53 @@ class ConversationManager:
             conversation["stage"] = 3
         elif stage == 3:
             await self._handle_stage3_response(update, context, message_text)
-    
+
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """处理按钮点击"""
+        """处理按钮点击 - 带详细步骤日志"""
         query = update.callback_query
         user_id = update.effective_user.id
         data = query.data
-        
+
+        # 记录按钮点击步骤
+        log_user_click(user_id, data, query.message.text if query.message else "")
+
         if user_id not in self._conversations:
+            log_user_step(user_id, "用户不在对话中，退出处理", {"user_id": user_id, "callback_data": data})
             return
-        
+
+        # 处理领域选择（domain_NFT, domain_DeFi 等）
+        if data.startswith("domain_"):
+            selected = data  # 直接使用完整的 data
+            log_user_step(user_id, "用户选择领域", {"user_id": user_id, "selected": selected})
+            await self._handle_selection(update, context, selected)
         # 处理确认按钮
-        if data == "conv_confirm":
+        elif data == "conv_confirm":
+            log_user_step(user_id, "用户确认偏好设置", {"user_id": user_id})
             await self._confirm_preferences(update, context)
         elif data == "conv_edit":
+            log_user_step(user_id, "用户请求编辑偏好", {"user_id": user_id})
             await self._edit_preferences(update, context)
         elif data.startswith("conv_select_"):
             # 处理选择类问题
             selected = data.split("_", 2)[2]
+            log_user_step(user_id, "用户选择选项", {"user_id": user_id, "selected": selected})
             await self._handle_selection(update, context, selected)
-    
+
     async def _handle_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, selected: str):
         """处理选择类问题（Phase 3优化：快速选择）"""
         user_id = update.effective_user.id
-        
+
         if user_id not in self._conversations:
             return
-        
+
         # 处理领域选择
         if selected.startswith("domain"):
             domain = selected.replace("domain_", "")
+            daily_logger.log_step("处理领域选择", {"user_id": user_id, "domain": domain}, user_id)
             if domain == "其他（自定义输入）":
                 # 提示用户自定义输入
                 text = "请直接发送消息，告诉我您关注的其他领域："
+                log_user_step(user_id, "准备发送第二轮问题", {"user_id": user_id})
                 await context.bot.edit_message_text(
                     chat_id=user_id,
                     message_id=update.callback_query.message.message_id,
@@ -144,39 +158,52 @@ class ConversationManager:
             else:
                 # 使用选择的领域
                 response = f"我主要关注 {domain}"
-                
+
                 # 发送"正在处理"提示
                 processing_msg = await context.bot.send_message(
                     chat_id=user_id,
                     text="⏳ 正在分析您的偏好...",
                     reply_to_message_id=update.callback_query.message.message_id
                 )
-                
+
                 try:
                     # 使用 LLM 提取关注领域
+                    log_user_step(user_id, "开始LLM提取兴趣领域", {"response": response})
                     interests = await self._extract_interests(response)
-                    
+                    log_user_step(user_id, "LLM提取兴趣领域完成", {"interests": interests})
+
                     # 保存数据
                     self._conversations[user_id]["data"]["interests_response"] = response
                     self._conversations[user_id]["data"]["interests"] = interests
-                    
+                    log_user_step(user_id, "兴趣数据已保存", {"user_id": user_id, "interests_count": len(interests)})
+
                     # 删除处理提示
                     try:
                         await processing_msg.delete()
+                        log_user_step(user_id, "处理提示消息已删除", {"user_id": user_id})
                     except:
-                        pass
-                    
+                        log_user_step(user_id, "删除处理提示消息失败", {"user_id": user_id})
+
                     # 发送第二轮问题
+                    user_id = update.effective_user.id
+                    log_user_step(user_id, "准备发送第二轮问题", {"user_id": user_id})
                     await self._send_stage2_question(update, context)
+                    user_id = update.effective_user.id
+                    log_user_step(user_id, "第二轮问题发送完成", {"user_id": user_id})
                 except Exception as e:
                     logger.error(f"处理选择失败: {e}")
+                    log_user_error(user_id, "process_selection_failed", str(e))
                     try:
                         await processing_msg.edit_text("❌ 处理失败，请重试")
+                        user_id = update.effective_user.id
+                        log_user_step(user_id, "显示重试提示给用户", {"user_id": user_id})
                     except:
                         pass
-    
+
     async def _send_stage1_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """发送第一轮问题 - 关注领域（Phase 3优化：添加快速选择选项）"""
+        user_id = update.effective_user.id
+        log_user_step(user_id, "准备发送第一轮问题", {"user_id": user_id})
         text = """
 🎯 **步骤 1/3：关注领域**
 
@@ -184,7 +211,9 @@ class ConversationManager:
 
 您可以说得具体一些（例如："我主要玩 DeFi 和 Layer2"），或者点击下方快速选择：
         """
-        
+        user_id = update.effective_user.id
+        log_user_step(user_id, "第一轮问题模板已生成", {"user_id": user_id, "question_length": len(text)})
+
         # 快速选择按钮 - 常见 Web3 领域
         keyboard = [
             ["DeFi", "Layer2", "NFT"],
@@ -192,18 +221,18 @@ class ConversationManager:
             ["基础设施", "投资/研究", "开发者"],
             ["其他（自定义输入）"]
         ]
-        
-        # 创建键盘布局
-        buttons_text = ["DeFi", "Layer2", "NFT", "比特币", "AI", "GameFi", "基础设施", "投资研究"]
+
+        # 创建键盘布局 - 确保callback_data和显示文本一致
+        buttons_text = ["DeFi", "Layer2", "NFT", "比特币生态", "AI+Web3", "GameFi", "基础设施", "投资/研究", "开发者"]
         button_rows = []
-        for i in range(0, len(buttons_text), 4):
-            row = buttons_text[i:i+4]
+        for i in range(0, len(buttons_text), 3):
+            row = buttons_text[i:i+3]
             button_row = [InlineKeyboardButton(text, callback_data=f"domain_{text}") for text in row]
             button_rows.append(button_row)
         button_rows.append([InlineKeyboardButton("✏️ 其他（自定义输入）", callback_data="domain_其他（自定义输入）")])
-        
+
         reply_markup = InlineKeyboardMarkup(button_rows)
-        
+
         # 判断是回调还是命令
         is_callback = update.callback_query is not None
         if is_callback:
@@ -217,28 +246,28 @@ class ConversationManager:
         else:
             # 命令：直接回复
             await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
-    
+
     async def _handle_stage1_response(self, update: Update, context: ContextTypes.DEFAULT_TYPE, response: str):
         """处理第一轮回复"""
         user_id = update.effective_user.id
-        
+
         # 发送"正在处理"提示
         processing_msg = await update.message.reply_text("⏳ 正在分析您的偏好...")
-        
+
         try:
             # 使用 LLM 提取关注领域
             interests = await self._extract_interests(response)
-            
+
             # 保存数据
             self._conversations[user_id]["data"]["interests_response"] = response
             self._conversations[user_id]["data"]["interests"] = interests
-            
+
             # 删除处理提示
             try:
                 await processing_msg.delete()
             except:
                 pass
-            
+
             # 发送第二轮问题
             await self._send_stage2_question(update, context)
         except Exception as e:
@@ -247,49 +276,76 @@ class ConversationManager:
                 await processing_msg.edit_text("❌ 处理失败，请重试")
             except:
                 pass
-    
+
     async def _send_stage2_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """发送第二轮问题 - 使用 AI 根据第一步回答生成问题"""
         user_id = update.effective_user.id
-        
+
         # 获取第一步的回答和提取的兴趣
         interests_response = self._conversations[user_id]["data"].get("interests_response", "")
         interests = self._conversations[user_id]["data"].get("interests", [])
-        
+
         # 发送"正在生成问题"提示
         generating_msg = await update.message.reply_text("⏳ 正在为您生成个性化问题...")
-        
+
         try:
             # 使用 AI 生成第二步问题
+            user_id = update.effective_user.id
+            log_user_step(user_id, "开始AI生成第二步问题", {"interests_response": interests_response, "interests": interests})
             question_text = await self._generate_stage2_question(interests_response, interests)
-            
+            user_id = update.effective_user.id
+            log_user_step(user_id, "AI生成第二步问题完成", {"user_id": user_id, "question_length": len(question_text)})
+
             # 删除生成提示
             try:
                 await generating_msg.delete()
+                user_id = update.effective_user.id
+                log_user_step(user_id, "生成提示消息已删除", {"user_id": user_id})
             except:
-                pass
-            
+                user_id = update.effective_user.id
+                log_user_step(user_id, "删除生成提示消息失败", {"user_id": user_id})
+
             # 发送 AI 生成的问题（先尝试 Markdown，失败则用纯文本）
             try:
+                user_id = update.effective_user.id
+                log_user_step(user_id, "尝试发送Markdown格式问题", {"user_id": user_id})
                 if update.message:
                     await update.message.reply_text(question_text, parse_mode="Markdown")
+                    user_id = update.effective_user.id
+                    log_user_step(user_id, "Markdown消息已发送（普通消息）", {"user_id": user_id})
                 elif update.callback_query:
                     await update.callback_query.message.reply_text(question_text, parse_mode="Markdown")
+                    user_id = update.effective_user.id
+                    log_user_step(user_id, "Markdown消息已发送（回调消息）", {"user_id": user_id})
             except Exception as parse_error:
                 # Markdown 解析失败，使用纯文本模式
                 logger.warning(f"Markdown 解析失败，使用纯文本模式: {parse_error}")
+                user_id = update.effective_user.id
+                log_user_error(user_id, "markdown_parse_failed", str(parse_error))
+                user_id = update.effective_user.id
+                log_user_step(user_id, "切换到纯文本模式重发", {"user_id": user_id})
                 if update.message:
                     await update.message.reply_text(question_text)
+                    user_id = update.effective_user.id
+                    log_user_step(user_id, "纯文本消息已发送（普通消息）", {"user_id": user_id})
                 elif update.callback_query:
                     await update.callback_query.message.reply_text(question_text)
+                    user_id = update.effective_user.id
+                    log_user_step(user_id, "纯文本消息已发送（回调消息）", {"user_id": user_id})
         except Exception as e:
             logger.error(f"生成第二步问题失败: {e}")
+            user_id = update.effective_user.id
+            log_user_error(user_id, "generate_stage2_question_failed", str(e))
             # 失败时使用默认问题
             try:
+                user_id = update.effective_user.id
+                log_user_step(user_id, "尝试删除失败的生成提示", {"user_id": user_id})
                 await generating_msg.delete()
             except:
                 pass
-            
+            user_id = update.effective_user.id
+            log_user_step(user_id, "准备使用默认问题重新开始", {"user_id": user_id})
+
             interests_str = ', '.join(interests[:3]) if interests else 'Web3'
             default_text = f"""
 📊 **第二步：您更关注哪些类型的信息？**
@@ -303,33 +359,33 @@ class ConversationManager:
 示例：
 "我主要看链上数据，特别是大户动向，还关注空投信息"
             """
-            
+
             if update.message:
                 await update.message.reply_text(default_text, parse_mode="Markdown")
             elif update.callback_query:
                 await update.callback_query.message.reply_text(default_text, parse_mode="Markdown")
-    
+
     async def _handle_stage2_response(self, update: Update, context: ContextTypes.DEFAULT_TYPE, response: str):
         """处理第二轮回复"""
         user_id = update.effective_user.id
-        
+
         # 发送"正在处理"提示
         processing_msg = await update.message.reply_text("⏳ 正在分析您的偏好...")
-        
+
         try:
             # 使用 LLM 提取偏好
             preferences = await self._extract_preferences(response)
-            
+
             # 保存数据
             self._conversations[user_id]["data"]["preferences_response"] = response
             self._conversations[user_id]["data"]["preferences"] = preferences
-            
+
             # 删除处理提示
             try:
                 await processing_msg.delete()
             except:
                 pass
-            
+
             # 发送第三轮问题
             await self._send_stage3_question(update, context)
         except Exception as e:
@@ -338,33 +394,33 @@ class ConversationManager:
                 await processing_msg.edit_text("❌ 处理失败，请重试")
             except:
                 pass
-    
+
     async def _send_stage3_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """发送第三轮问题 - 使用 AI 根据第二步回答生成问题"""
         user_id = update.effective_user.id
-        
+
         # 获取前两步的回答和数据
         interests_response = self._conversations[user_id]["data"].get("interests_response", "")
         interests = self._conversations[user_id]["data"].get("interests", [])
         preferences_response = self._conversations[user_id]["data"].get("preferences_response", "")
         preferences = self._conversations[user_id]["data"].get("preferences", {})
-        
+
         # 发送"正在生成问题"提示
         generating_msg = await update.message.reply_text("⏳ 正在为您生成个性化问题...")
-        
+
         try:
             # 使用 AI 生成第三步问题
             question_text = await self._generate_stage3_question(
                 interests_response, interests,
                 preferences_response, preferences
             )
-            
+
             # 删除生成提示
             try:
                 await generating_msg.delete()
             except:
                 pass
-            
+
             # 发送 AI 生成的问题（先尝试 Markdown，失败则用纯文本）
             try:
                 if update.message:
@@ -385,7 +441,7 @@ class ConversationManager:
                 await generating_msg.delete()
             except:
                 pass
-            
+
             default_text = """
 ⚖️ **最后一步：信息量和补充说明**
 
@@ -401,33 +457,33 @@ class ConversationManager:
 
 请告诉我您的偏好。
             """
-            
+
             if update.message:
                 await update.message.reply_text(default_text, parse_mode="Markdown")
             elif update.callback_query:
                 await update.callback_query.message.reply_text(default_text, parse_mode="Markdown")
-    
+
     async def _handle_stage3_response(self, update: Update, context: ContextTypes.DEFAULT_TYPE, response: str):
         """处理第三轮回复"""
         user_id = update.effective_user.id
-        
+
         # 发送"正在处理"提示
         processing_msg = await update.message.reply_text("⏳ 正在生成您的偏好设置...")
-        
+
         try:
             # 提取信息量偏好和其他要求
             volume_prefs = await self._extract_volume_preferences(response)
-            
+
             # 保存数据
             self._conversations[user_id]["data"]["volume_response"] = response
             self._conversations[user_id]["data"]["volume_preferences"] = volume_prefs
-            
+
             # 删除处理提示
             try:
                 await processing_msg.delete()
             except:
                 pass
-            
+
             # 生成确认信息
             await self._send_confirmation(update, context)
         except Exception as e:
@@ -436,15 +492,15 @@ class ConversationManager:
                 await processing_msg.edit_text("❌ 处理失败，请重试")
             except:
                 pass
-    
+
     async def _send_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """发送确认信息"""
         user_id = update.effective_user.id
         data = self._conversations[user_id]["data"]
-        
+
         # 生成总结
         summary = await self._generate_preference_summary(data)
-        
+
         text = f"""
 ✅ **请确认您的偏好设置**
 
@@ -454,22 +510,22 @@ class ConversationManager:
 
 **注意**：您随时可以使用 /profile 命令查看和更新偏好。
         """
-        
+
         keyboard = [
             [InlineKeyboardButton("✅ 确认设置", callback_data="conv_confirm")],
             [InlineKeyboardButton("✏️ 重新设置", callback_data="conv_edit")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
-    
+
     async def _confirm_preferences(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """确认偏好设置"""
         user_id = update.effective_user.id
-        
+
         # 获取收集的数据
         data = self._conversations[user_id]["data"]
-        
+
         # 整理成结构化数据
         profile_data = {
             "interests": data.get("interests", []),
@@ -478,13 +534,13 @@ class ConversationManager:
                 **data.get("volume_preferences", {})
             }
         }
-        
+
         # 保存画像
         await self.profile_manager.create_profile(user_id, profile_data)
-        
+
         # 清除对话状态
         del self._conversations[user_id]
-        
+
         # 发送确认消息
         try:
             await update.callback_query.edit_message_text(
@@ -503,13 +559,13 @@ class ConversationManager:
                 "期待为您提供有价值的信息！",
                 parse_mode="Markdown"
             )
-        
+
         logger.info(f"用户 {user_id} 完成偏好设置")
-        
+
         # 延迟一下，然后显示主菜单
         import asyncio
         await asyncio.sleep(1.5)
-        
+
         # 显示主菜单
         if self.bot:
             # 使用 callback_query 的 message 来显示主菜单
@@ -525,30 +581,30 @@ class ConversationManager:
                 [InlineKeyboardButton("🔙 返回", callback_data="main_menu")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
             welcome_text = """
 🎉 欢迎回来！我是您的 Web3 信息助手。
 
 请选择您要的操作：
             """
-            
+
             await update.callback_query.message.reply_text(welcome_text, reply_markup=reply_markup)
-    
+
     async def _edit_preferences(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """重新设置偏好"""
         user_id = update.effective_user.id
-        
+
         # 清除当前对话
         del self._conversations[user_id]
-        
+
         # 重新开始
         await self.start_preference_conversation(update, context)
-    
+
     # LLM 辅助方法
     async def _generate_stage2_question(self, interests_response: str, interests: list) -> str:
         """使用 AI 根据第一步回答生成第二步问题"""
         interests_str = ', '.join(interests) if interests else 'Web3相关领域'
-        
+
         prompt = f"""你是 Web3 信息偏好收集助手。用户已经回答了第一步问题，现在需要生成第二步问题。
 
 ## 用户第一步回答
@@ -579,7 +635,7 @@ class ConversationManager:
 基于您提到的 [具体领域]，请告诉我：
 ...
 """
-        
+
         try:
             # Phase 3优化：降低temperature和max_tokens，加快响应速度
             response = await self.llm_client.complete(prompt, max_tokens=200, temperature=0.3)
@@ -599,14 +655,14 @@ class ConversationManager:
 示例：
 "我主要看链上数据，特别是大户动向，还关注空投信息"
             """
-    
+
     async def _generate_stage3_question(self, interests_response: str, interests: list,
                                         preferences_response: str, preferences: dict) -> str:
         """使用 AI 根据第二步回答生成第三步问题"""
         interests_str = ', '.join(interests) if interests else 'Web3相关领域'
         content_types = ', '.join(preferences.get("content_types", [])) if preferences.get("content_types") else "未明确"
         sources = ', '.join(preferences.get("sources", [])) if preferences.get("sources") else "未明确"
-        
+
         prompt = f"""你是 Web3 信息偏好收集助手。用户已经完成了前两步，现在需要生成第三步（最后一步）问题。
 
 ## 用户第一步回答（关注领域）
@@ -641,7 +697,7 @@ class ConversationManager:
 基于您提到的 [总结]，请告诉我：
 ...
 """
-        
+
         try:
             response = await self.llm_client.complete(prompt, max_tokens=300, temperature=0.7)
             return response.strip()
@@ -663,7 +719,7 @@ class ConversationManager:
 
 请告诉我您的偏好。
             """
-    
+
     async def _extract_interests(self, text: str) -> list:
         """使用 LLM 提取关注领域"""
         prompt = f"""
@@ -678,7 +734,7 @@ class ConversationManager:
 
 只返回关键词列表，如：["DeFi", "Layer2", "以太坊"]
 """
-        
+
         try:
             # 优化：减少 max_tokens，降低 temperature，加快响应
             response = await self.llm_client.complete(prompt, max_tokens=200, temperature=0.1)
@@ -689,7 +745,7 @@ class ConversationManager:
             logger.warning(f"提取关注领域失败: {e}")
             # 失败时返回空列表
             return []
-    
+
     async def _extract_preferences(self, text: str) -> dict:
         """使用 LLM 提取内容偏好"""
         prompt = f"""
@@ -711,7 +767,7 @@ class ConversationManager:
     "dislikes": ["价格预测"]
 }}
 """
-        
+
         try:
             # 优化：减少 max_tokens，降低 temperature，加快响应
             response = await self.llm_client.complete(prompt, max_tokens=300, temperature=0.1)
@@ -720,7 +776,7 @@ class ConversationManager:
         except Exception as e:
             logger.warning(f"提取内容偏好失败: {e}")
             return {}
-    
+
     async def _extract_volume_preferences(self, text: str) -> dict:
         """提取信息量偏好"""
         prompt = f"""
@@ -734,7 +790,7 @@ class ConversationManager:
     "additional_notes": ["不喜欢价格预测", "主要关注中文内容"]
 }}
 """
-        
+
         try:
             # 优化：减少 max_tokens，降低 temperature，加快响应
             response = await self.llm_client.complete(prompt, max_tokens=150, temperature=0.1)
@@ -743,26 +799,26 @@ class ConversationManager:
         except Exception as e:
             logger.warning(f"提取信息量偏好失败: {e}")
             return {"info_volume": "标准版(10-20条)", "additional_notes": []}
-    
+
     async def _generate_preference_summary(self, data: dict) -> str:
         """生成偏好总结"""
         interests = data.get("interests", [])
         prefs = data.get("preferences", {})
         volume = data.get("volume_preferences", {})
-        
+
         summary = f"**关注领域**：{', '.join(interests) if interests else '未设置'}\n\n"
-        
+
         if prefs.get("content_types"):
             summary += f"**内容类型**：{', '.join(prefs['content_types'])}\n\n"
-        
+
         if prefs.get("sources"):
             sources = [f"@{s}" for s in prefs["sources"]]
             summary += f"**关注信息源**：{', '.join(sources)}\n\n"
-        
+
         if volume.get("info_volume"):
             summary += f"**信息量**：{volume['info_volume']}\n\n"
-        
+
         if volume.get("additional_notes"):
             summary += f"**其他要求**：{', '.join(volume['additional_notes'])}\n\n"
-        
+
         return summary

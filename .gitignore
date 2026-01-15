@@ -37,3 +37,19 @@ Thumbs.db
 *.db
 *.log
 
+# Environment files
+.env
+backend/wiseflow/.env
+backend/wiseflow/core/custom_processes/web3digest/.env
+
+# Data directories
+backend/wiseflow/data/
+backend/wiseflow/core/custom_processes/web3digest/data/
+data/
+tmpclaude-*/
+.claude/
+
+# Temporary files
+nul
+*.nul
+test_speed_direct.py

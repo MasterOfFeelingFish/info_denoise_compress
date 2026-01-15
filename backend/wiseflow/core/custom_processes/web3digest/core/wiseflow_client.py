@@ -11,6 +11,7 @@ import hashlib
 
 # 使用简化的 RSS 抓取
 from core.tools.rss_parsor import fetch_rss
+from core.tools.rss_parsor_fast import fetch_rss_optimized
 from core.wis.async_cache import SqliteCache
 
 from core.custom_processes.web3digest.utils.logger import setup_logger
@@ -74,16 +75,14 @@ class WiseFlowClient:
             logger.error(f"获取今日信息失败: {e}")
             return []
     
-    async def trigger_crawl(self, sources: List[Dict] = None, focus_point: str = "Web3 信息聚合"):
+    async def trigger_crawl(self, sources: List[Dict] = None, focus_point: str = "Web3 信息聚合", test_mode: bool = False, test_suffix: str = ""):
         """
-        触发抓取任务 - 简化版，直接使用 RSS 解析
+        触发抓取任务
         
         Args:
-            sources: 信息源列表，如果为 None 则使用默认源
-            focus_point: 关注点（暂不使用）
-        
-        Returns:
-            Dict 包含抓取结果统计
+            sources: 信息源列表，如果为 None 则使用所有源
+            test_mode: 是否为测试模式
+            test_suffix: 测试模式下的文件名后缀
         """
         if not self._initialized:
             await self.initialize()
@@ -114,11 +113,18 @@ class WiseFlowClient:
             success_count = 0
             fail_count = 0
             
-            # 批量抓取，每次最多 10 个并行（提高速度）
-            batch_size = 10
+            # 使用信号量控制并发数，避免过多请求
+            semaphore = asyncio.Semaphore(30)  # 提高到30个并发
+            
+            async def fetch_with_semaphore(source):
+                async with semaphore:
+                    return await self._fetch_single_rss(source, test_mode=test_mode)
+            
+            # 批量抓取，每次最多 30 个并行（提高速度）
+            batch_size = 30
             for i in range(0, len(rss_urls), batch_size):
                 batch = rss_urls[i:i+batch_size]
-                tasks = [self._fetch_single_rss(src) for src in batch]
+                tasks = [fetch_with_semaphore(src) for src in batch]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 
                 for result in results:
@@ -137,7 +143,9 @@ class WiseFlowClient:
             
             # 保存到文件
             today = date.today().isoformat()
-            await self._save_items(today, unique_items)
+            if test_mode and test_suffix:
+                today = today + test_suffix
+            await self._save_items(today, unique_items, test_mode=test_mode)
             
             return {
                 "status": 0 if success_count > 0 else 1,
@@ -152,20 +160,32 @@ class WiseFlowClient:
             logger.error(f"触发抓取失败: {e}", exc_info=True)
             raise
     
-    async def _fetch_single_rss(self, source: Dict) -> List[Dict]:
-        """抓取单个 RSS 源"""
+    async def _fetch_single_rss(self, source: Dict, test_mode: bool = False) -> List[Dict]:
+        """抓取单个 RSS 源 - 使用优化版本"""
         url = source.get("url")
         name = source.get("name", "未知")
         category = source.get("category", "")
-        
+
         try:
-            # 使用 WiseFlow 的 RSS 解析器
-            results, feed_title, feed_info = await fetch_rss(
-                url, 
-                existings=set(),
-                cache_manager=self.cache_manager
-            )
+            # 测试模式下不使用缓存，但不主动清除（避免延迟）
+            cache_to_use = None if test_mode else self.cache_manager
             
+            # 使用优化的 RSS 解析器以提高速度
+            # 设置较短的超时时间，避免等待太久
+            import asyncio
+            try:
+                results, feed_title, feed_info = await asyncio.wait_for(
+                    fetch_rss_optimized(
+                        url,
+                        existings=set(),
+                        cache_manager=cache_to_use
+                    ),
+                    timeout=6.0  # 6秒超时（比RSS解析器稍长）
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"RSS 抓取超时（6s）: {name}")
+                return []
+
             items = []
             for result in results:
                 # 转换为标准格式
@@ -185,10 +205,10 @@ class WiseFlowClient:
                     }
                 }
                 items.append(item)
-            
+
             logger.debug(f"从 {name} 获取 {len(items)} 条内容")
             return items
-            
+
         except Exception as e:
             logger.warning(f"抓取 {name} ({url}) 失败: {e}")
             return []
@@ -211,23 +231,33 @@ class WiseFlowClient:
         
         return unique
     
-    async def _save_items(self, today: str, items: List[Dict]):
-        """保存抓取的内容到 JSON 文件"""
+    async def _save_items(self, today: str, items: List[Dict], test_mode: bool = False):
+        """保存抓取的内容到 JSON 文件
+        
+        Args:
+            today: 日期字符串
+            items: 要保存的项目列表
+            test_mode: 是否为测试模式（测试模式下不合并旧数据）
+        """
         today_file = self.data_dir / f"{today}.json"
         
-        # 读取现有数据（如果有）
-        existing_items = []
-        if today_file.exists():
-            try:
-                with open(today_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    existing_items = data.get("items", [])
-            except Exception:
-                pass
-        
-        # 合并新旧数据并去重
-        all_items = existing_items + items
-        unique_items = self._deduplicate_items(all_items)
+        # 测试模式下直接保存新数据，不合并旧数据
+        if test_mode:
+            unique_items = self._deduplicate_items(items)
+        else:
+            # 读取现有数据（如果有）
+            existing_items = []
+            if today_file.exists():
+                try:
+                    with open(today_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        existing_items = data.get("items", [])
+                except Exception:
+                    pass
+            
+            # 合并新旧数据并去重
+            all_items = existing_items + items
+            unique_items = self._deduplicate_items(all_items)
         
         # 保存
         data = {

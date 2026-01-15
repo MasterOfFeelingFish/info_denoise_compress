@@ -122,7 +122,7 @@ class AsyncDatabaseManager:
     ALLOWED_SOURCE_TYPES = {"web", "rss"}
     ALLOWED_TIME_SLOTS = {'first', 'second', 'third', 'fourth'}
     
-    def __init__(self, pool_size: int = 6, max_retries: int = 3, logger = None):
+    def __init__(self, pool_size: int = 20, max_retries: int = 3, logger = None):
         self.db_path = base_directory / "data.db"
         self.max_retries = max_retries
         

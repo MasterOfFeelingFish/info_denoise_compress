@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     LLM_API_BASE: str = Field("https://api.moonshot.cn/v1", env="LLM_API_BASE")
     LLM_API_KEY: str = Field(..., env="LLM_API_KEY")
     PRIMARY_MODEL: str = Field("moonshot-v1-32k", env="PRIMARY_MODEL")
-    LLM_CONCURRENT_NUMBER: int = Field(3, env="LLM_CONCURRENT_NUMBER")
+    LLM_CONCURRENT_NUMBER: int = Field(10, env="LLM_CONCURRENT_NUMBER")
     
     # RSS 配置
     RSS_APP_TOKEN: Optional[str] = Field(None, env="RSS_APP_TOKEN")
@@ -182,10 +182,38 @@ class DefaultRSSSources:
         },
         {
             "name": "ChainCatcher",
-            "url": "https://www.chaincatcher.com/rss",
+            "url": "https://www.chaincatcher.com/clist.xml",
             "type": "website",
             "category": "媒体",
-            "enabled": False  # 用户可自行启用
+            "enabled": True  # 已验证：有效
+        },
+        {
+            "name": "TechFlow Post",
+            "url": "https://www.techflowpost.com/api/client/common/rss.xml",
+            "type": "website",
+            "category": "媒体",
+            "enabled": True  # 已验证：有效
+        },
+        {
+            "name": "DeFi Rate",
+            "url": "https://defirate.com/rss",
+            "type": "website",
+            "category": "媒体",
+            "enabled": True  # 已验证：有效
+        },
+        {
+            "name": "Next Event Horizon",
+            "url": "https://nexteventhorizon.substack.com/feed",
+            "type": "website",
+            "category": "媒体",
+            "enabled": True  # 已验证：有效
+        },
+        {
+            "name": "Prediction News",
+            "url": "https://predictionnews.com/feed/",
+            "type": "website",
+            "category": "媒体",
+            "enabled": True  # 已验证：有效
         },
     ]
 

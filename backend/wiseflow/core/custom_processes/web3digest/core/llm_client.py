@@ -308,7 +308,9 @@ class LLMClient:
             return "• 暂无详细过滤统计"
         
         lines = []
-        total_filtered = sum(filter_stats.values())
+        # 只计算预期的数字类型键，跳过 total, selected, filter_rate
+        numeric_keys = ["meme_promotion", "price_predictions", "ads", "irrelevant", "duplicates", "low_quality"]
+        total_filtered = sum(int(filter_stats.get(key, 0)) for key in numeric_keys)
         
         if total_filtered == 0:
             return "• 暂无详细过滤统计"
@@ -323,7 +325,7 @@ class LLMClient:
         
         # 只显示有统计的类别
         for key, label in stat_labels.items():
-            count = filter_stats.get(key, 0)
+            count = int(filter_stats.get(key, 0)) if filter_stats.get(key) is not None else 0
             if count > 0:
                 lines.append(f"• {label}: {count}条")
         
@@ -418,11 +420,11 @@ class LLMClient:
         digest += f"""📊 价值统计
 {'─' * 25}
 
-🔍 监控 {stats.get('sources_count', 5)} 个信息源
-📥 扫描 {stats.get('raw_count', 0)} 条原始信息
-✨ 精选 {stats.get('selected_count', 0)} 条 ({stats.get('filter_rate', '5%')})
-⏱ 今日节省 ~{stats.get('time_saved', 1)}小时 阅读时间
-📈 累计节省 {stats.get('total_time_saved', 0)}小时
+🔍 监控 {int(stats.get('sources_count', 5))} 个信息源
+📥 扫描 {int(stats.get('raw_count', 0))} 条原始信息
+✨ 精选 {int(stats.get('selected_count', 0))} 条 ({str(stats.get('filter_rate', '5%'))})
+⏱ 今日节省 ~{float(stats.get('time_saved', 1))}小时 阅读时间
+📈 累计节省 {float(stats.get('total_time_saved', 0))}小时
 
 {'━' * 25}
 
@@ -479,29 +481,35 @@ class LLMClient:
     
     async def analyze_feedback(self, current_profile: str, feedbacks: List[Dict]) -> str:
         """分析用户反馈，更新画像理解"""
+        # 只取最近5条反馈，减少token消耗
+        recent_feedbacks = feedbacks[-5:]
+        
+        # 简化反馈格式
         feedback_text = "\n".join([
-            f"- {fb['date']}: 整体评价{fb['overall']}, 原因: {fb.get('reason', '无')}"
-            for fb in feedbacks[-10:]  # 只看最近10条
+            f"- {fb.get('overall', '')}: {', '.join(fb.get('reason_selected', []))}"
+            for fb in recent_feedbacks
         ])
         
-        prompt = f"""
-你是一个用户偏好分析专家。请分析用户的反馈历史。
+        # 简化画像，只取关键部分
+        profile_summary = current_profile[:500] + "..." if len(current_profile) > 500 else current_profile
+        
+        prompt = f"""分析用户反馈，更新理解：
 
-## 当前用户画像
-{current_profile}
+画像：{profile_summary}
 
-## 最近反馈记录
+最近反馈：
 {feedback_text}
 
-## 任务
-分析用户反馈，输出对用户的新理解（自然语言）：
-
-1. 用户表达了什么不满？
-2. 用户表达了什么喜好？
-3. 用户对信息量的偏好变化？
-4. 需要注意的特殊要求？
-
-请用自然语言描述，用于更新画像的"AI 学习理解"部分。
-"""
+基于反馈总结用户偏好（100字以内）："""
         
-        return await self.complete(prompt, max_tokens=500, temperature=0.3)
+        # 设置超时并减少token
+        import asyncio
+        try:
+            result = await asyncio.wait_for(
+                self.complete(prompt, max_tokens=200, temperature=0.3),
+                timeout=10.0  # 10秒超时
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.warning("反馈分析超时，使用默认结果")
+            return "用户偏好持续学习中"
