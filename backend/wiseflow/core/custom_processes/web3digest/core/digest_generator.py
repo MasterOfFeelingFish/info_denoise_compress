@@ -437,6 +437,9 @@ class DigestGenerator:
                     "recommendation_reason": "兜底信息（确保有内容）"
                 })
 
+        # 6.5. 确保来源多样性（至少来自不同来源）
+        selected = self._ensure_source_diversity(selected, raw_info, min_sources=5)
+
         # 7. 构建筛选统计信息
         filter_stats = {
             "total": len(raw_info),
@@ -445,6 +448,98 @@ class DigestGenerator:
         }
 
         return selected[:settings.MAX_INFO_PER_USER], filter_stats
+
+    def _ensure_source_diversity(self, selected: List[Dict], raw_info: List[Dict], min_sources: int = 5) -> List[Dict]:
+        """
+        确保来源多样性：至少从min_sources个不同来源选择内容
+
+        Args:
+            selected: 已选中的信息列表
+            raw_info: 原始信息列表
+            min_sources: 最小来源数量
+
+        Returns:
+            确保多样性的信息列表
+        """
+        if not selected or not raw_info:
+            return selected
+
+        # 统计已选中的来源
+        selected_sources = set()
+        source_count = {}  # 统计每个来源被选中的次数
+
+        for item in selected:
+            source = item.get("source", "")
+            if source:
+                selected_sources.add(source)
+                source_count[source] = source_count.get(source, 0) + 1
+
+        # 如果来源数量已经足够，直接返回
+        if len(selected_sources) >= min_sources:
+            logger.debug(f"来源多样性满足要求：{len(selected_sources)} 个不同来源")
+            return selected
+
+        # 需要补充更多不同来源的内容
+        logger.info(f"当前只有 {len(selected_sources)} 个不同来源，需要补充到至少 {min_sources} 个")
+
+        # 从原始信息中按来源分组
+        info_by_source = {}
+        for info in raw_info:
+            source = info.get("source", "")
+            if source:
+                if source not in info_by_source:
+                    info_by_source[source] = []
+                info_by_source[source].append(info)
+
+        # 优先从尚未选中的来源中选择
+        selected_ids = {item.get("id") for item in selected}
+        new_items = []
+        target_sources = min_sources
+
+        # 先补充来自未选中来源的内容
+        for source, items in info_by_source.items():
+            # 动态检查当前来源数量（包括新添加的）
+            current_source_count = len(selected_sources)
+            if current_source_count >= target_sources:
+                break
+
+            if source not in selected_sources:
+                # 从这个来源选择1条高质量内容
+                for item in items:
+                    if item.get("id") not in selected_ids:
+                        # 找到一条就添加到选中列表
+                        new_items.append({
+                            "id": item.get("id"),
+                            "title": item.get("title", ""),
+                            "summary": item.get("content", "")[:200],
+                            "source": item.get("source", ""),
+                            "url": item.get("url", ""),
+                            "publish_time": item.get("publish_time", ""),
+                            "scores": {
+                                "relevance_score": 2.5,
+                                "importance_score": 1.5,
+                                "freshness_score": 1.0,
+                                "total_score": 5.0,
+                                "confidence": 0.5
+                            },
+                            "recommendation_reason": f"来源多样性补充（来自{source}）"
+                        })
+                        selected_ids.add(item.get("id"))
+                        selected_sources.add(source)  # 更新来源集合
+                        break
+
+        # 合并新选择的内容到已选中列表
+        if new_items:
+            # 保持原有顺序，新内容追加到后面
+            result = selected + new_items
+            original_source_set = set(item.get('source', '') for item in selected)
+            final_source_set = set(item.get('source', '') for item in result)
+            original_count = len(original_source_set)
+            final_count = len(final_source_set)
+            logger.info(f"已补充 {len(new_items)} 条内容，来源数量从 {original_count} 增加到 {final_count}")
+            return result
+
+        return selected
 
     async def _build_enhanced_profile(self, text_profile: str, structured_profile: Optional[Dict] = None) -> str:
         """构建增强的画像描述（结合结构化数据和文本，用于 AI 筛选）"""

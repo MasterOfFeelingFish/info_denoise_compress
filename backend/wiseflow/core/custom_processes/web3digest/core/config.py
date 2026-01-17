@@ -156,7 +156,7 @@ class DefaultRSSSources:
             "url": "https://www.theblock.co/rss.xml",
             "type": "website",
             "category": "媒体",
-            "enabled": False  # 国内访问可能慢
+            "enabled": True  # 启用以提升多样性
         },
         # 中文媒体
         {
@@ -164,14 +164,14 @@ class DefaultRSSSources:
             "url": "https://foresightnews.pro/feed",
             "type": "website",
             "category": "媒体",
-            "enabled": False  # 国内访问可能慢，用户可自行启用
+            "enabled": True  # 启用以提升多样性
         },
         {
             "name": "律动 BlockBeats",
             "url": "https://www.theblockbeats.info/rss",
             "type": "website",
             "category": "媒体",
-            "enabled": False  # 国内访问可能慢，用户可自行启用
+            "enabled": True  # 启用以提升多样性
         },
         {
             "name": "金色财经",

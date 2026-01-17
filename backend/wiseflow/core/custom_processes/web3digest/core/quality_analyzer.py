@@ -1,10 +1,60 @@
 """
 简报质量分析器 - 计算整体质量指标
 """
-from typing import List, Dict
+import re
+from typing import List, Dict, Set
 from core.custom_processes.web3digest.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+# 权威源配置字典（支持多种格式和别名）
+AUTHORITY_SOURCES = {
+    # 行业领袖 & KOL
+    'vitalik': ['vitalikbuterin', 'vitalik', '@vitalikbuterin', 'vitalik buterin'],
+    'cz_binance': ['czbinance', 'cz binance', 'cz_binance', '@cz_binance', 'changpeng', 'chang peng'],
+    'brian_armstrong': ['brianarmstrong', 'brian armstrong', '@brian_armstrong', 'coinbase ceo'],
+    
+    # 项目官方
+    'ethereum': ['ethereum', '以太坊', 'eth', 'ethereum foundation'],
+    'solana': ['solana', 'solana labs'],
+    'arbitrum': ['arbitrum', 'arbitrum one', 'arbitrum foundation'],
+    'optimism': ['optimism', 'optimistic ethereum'],
+    'polygon': ['polygon', 'matic', 'polygon labs'],
+    'uniswap': ['uniswap', 'uniswap protocol'],
+    
+    # 权威媒体
+    'coindesk': ['coindesk', 'coin desk'],
+    'cointelegraph': ['cointelegraph', 'coin telegraph'],
+    'theblock': ['theblock', 'the block', 'theblock__', '@theblock__'],
+    'decrypt': ['decrypt', 'decrypt media'],
+    'chainfeeds': ['chainfeeds', 'chain feeds'],
+    
+    # 知名机构
+    'a16z': ['a16z', 'andreessen horowitz', 'a16zcrypto'],
+    'paradigm': ['paradigm', 'paradigm capital'],
+    'consensys': ['consensys', 'consen sys'],
+    
+    # 其他权威源
+    'binance': ['binance', 'binance exchange'],
+    'coinbase': ['coinbase', 'coinbase exchange'],
+}
+
+# 兴趣同义词词典
+INTEREST_SYNONYMS = {
+    'DeFi': ['defi', '去中心化金融', 'defi协议', 'defi 协议', '流动性挖矿', '去中心化交易所', 'dex', 'lending', '借贷'],
+    'NFT': ['nft', 'nfts', '非同质化代币', '数字藏品', 'non-fungible token', '数字艺术品'],
+    'Layer2': ['layer2', 'layer 2', 'l2', '扩容方案', '二层网络', 'rollup', 'rollups'],
+    '以太坊': ['ethereum', 'eth', '以太坊生态', 'ethereum ecosystem'],
+    'Solana': ['solana', 'sol', 'solana生态', 'solana ecosystem'],
+    'Arbitrum': ['arbitrum', 'arb', 'arbitrum生态'],
+    'Optimism': ['optimism', 'op', 'optimism生态'],
+    'GameFi': ['gamefi', 'game fi', '链游', '区块链游戏', 'web3游戏'],
+    'AI': ['ai', 'artificial intelligence', '人工智能', 'ai+crypto', 'ai crypto'],
+    'Meme币': ['meme', 'meme币', 'meme coin', '模因币'],
+    'DAO': ['dao', '去中心化自治组织', '去中心化组织'],
+    'Web3': ['web3', 'web 3', 'web3.0'],
+    '元宇宙': ['metaverse', '元宇宙', '虚拟世界'],
+}
 
 
 class DigestQualityAnalyzer:
@@ -12,6 +62,84 @@ class DigestQualityAnalyzer:
 
     def __init__(self):
         pass
+
+    def _is_authority_source(self, source_name: str) -> bool:
+        """
+        判断是否为权威源
+        
+        Args:
+            source_name: 源名称
+            
+        Returns:
+            是否为权威源
+        """
+        if not source_name:
+            return False
+        
+        # 清理源名称：移除特殊字符并转换为小写
+        source_clean = re.sub(r'[@_\-\s]', '', source_name.lower())
+        
+        # 检查是否匹配权威源列表
+        for auth_key, variants in AUTHORITY_SOURCES.items():
+            for variant in variants:
+                variant_clean = re.sub(r'[@_\-\s]', '', variant.lower())
+                # 部分匹配：variant在source中，或source在variant中
+                if variant_clean in source_clean or source_clean in variant_clean:
+                    return True
+        
+        return False
+
+    def _normalize_interest_keywords(self, interest: str) -> List[str]:
+        """
+        获取兴趣的关键词列表（包含同义词）
+        
+        Args:
+            interest: 兴趣名称
+            
+        Returns:
+            关键词列表（包含原始兴趣和同义词）
+        """
+        keywords = [interest.lower()]
+        
+        # 添加同义词
+        if interest in INTEREST_SYNONYMS:
+            keywords.extend([k.lower() for k in INTEREST_SYNONYMS[interest]])
+        else:
+            # 检查是否在某个同义词列表中
+            for key, synonyms in INTEREST_SYNONYMS.items():
+                if interest.lower() in [s.lower() for s in synonyms]:
+                    keywords.extend([k.lower() for k in synonyms])
+                    keywords.append(key.lower())
+                    break
+        
+        return keywords
+
+    def _matches_interest(self, interest_keywords: List[str], text: str) -> bool:
+        """
+        检查文本是否匹配兴趣关键词
+        
+        Args:
+            interest_keywords: 兴趣关键词列表
+            text: 要检查的文本
+            
+        Returns:
+            是否匹配
+        """
+        if not text:
+            return False
+        
+        text_lower = text.lower()
+        # 清理文本：移除标点符号，只保留字母数字和空格
+        text_clean = re.sub(r'[^\w\s]', ' ', text_lower)
+        
+        # 检查是否有任何关键词匹配
+        for keyword in interest_keywords:
+            keyword_clean = re.sub(r'[^\w\s]', '', keyword)
+            # 单词边界匹配（避免部分匹配）
+            if keyword_clean in text_clean:
+                return True
+        
+        return False
 
     async def calculate_digest_quality(self, user_id: int,
                                       selected_info: List[Dict],
@@ -68,12 +196,10 @@ class DigestQualityAnalyzer:
             unique_sources = len(set(filter(None, sources)))
             diversity_score = min(unique_sources / 10.0, 1.0)  # 假设10个不同来源为满分
 
-            # 4. 权威性(权威来源占比)
-            authority_sources = ['vitalik', 'ethereum', 'uniswap', 'coinbase',
-                               'binance', 'consensys', 'a16z', 'paradigm']
+            # 4. 权威性(权威来源占比) - 使用改进的匹配逻辑
             authority_count = sum(
                 1 for src in sources
-                if any(auth.lower() in src.lower() for auth in authority_sources)
+                if self._is_authority_source(src)
             )
             authority_score = min(authority_count / len(sources), 1.0) if sources else 0
 
@@ -120,7 +246,7 @@ class DigestQualityAnalyzer:
     def _calculate_interest_coverage(self, selected_info: List[Dict],
                                     user_interests: List[str]) -> List[str]:
         """
-        计算哪些用户兴趣被覆盖
+        计算哪些用户兴趣被覆盖（改进的匹配算法，支持同义词和模糊匹配）
 
         Args:
             selected_info: 筛选后的信息列表
@@ -132,12 +258,22 @@ class DigestQualityAnalyzer:
         covered = []
 
         for interest in user_interests:
+            # 获取兴趣的关键词列表（包含同义词）
+            interest_keywords = self._normalize_interest_keywords(interest)
+            
             for item in selected_info:
-                title = item.get("title", "").lower()
-                summary = item.get("summary", "").lower()
-                combined_text = f"{title} {summary}"
+                # 扩展匹配字段：title, summary, content, source_category等
+                title = item.get("title", "")
+                summary = item.get("summary", "")
+                content = item.get("content", "")
+                source_category = item.get("source_category", "")
+                source = item.get("source", "")
+                
+                # 组合所有文本进行匹配
+                combined_text = f"{title} {summary} {content} {source_category} {source}"
 
-                if interest.lower() in combined_text:
+                # 使用改进的匹配逻辑
+                if self._matches_interest(interest_keywords, combined_text):
                     covered.append(interest)
                     break  # 找到一个匹配就跳过
 
