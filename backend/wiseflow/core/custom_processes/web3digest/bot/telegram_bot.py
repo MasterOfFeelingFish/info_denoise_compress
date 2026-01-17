@@ -16,6 +16,7 @@ from core.custom_processes.web3digest.core.user_manager import UserManager
 from core.custom_processes.web3digest.core.profile_manager import ProfileManager
 from core.custom_processes.web3digest.core.conversation_manager import ConversationManager
 from core.custom_processes.web3digest.utils.logger import setup_logger
+from core.custom_processes.web3digest.utils.i18n import get_user_language, translate
 
 logger = setup_logger(__name__)
 
@@ -103,9 +104,10 @@ class Web3DigestBot:
         log_user_step(user_id, "开始鉴权检查", {"user_id": user_id})
         if not await self.auth_manager.check_user_access(user_id):
             log_user_step(user_id, "访问被拒绝", {"user_id": user_id})
+            lang = get_user_language(update)
             await update.message.reply_text(
-                "❌ 抱歉，您没有访问权限。\n\n"
-                "如有疑问，请联系管理员。"
+                translate("auth.access_denied", lang) + "\n\n" +
+                translate("auth.contact_admin", lang)
             )
             logger.warning(f"用户 {user_id} 访问被拒绝")
             return
@@ -135,28 +137,29 @@ class Web3DigestBot:
 
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /help 命令"""
-        help_text = """
-🤖 **Web3 Daily Digest 使用指南**
+        lang = get_user_language(update)
+        help_text = f"""
+{translate("commands.help.title", lang)}
 
-**主要命令：**
-/start - 开始使用或重新设置偏好
-/profile - 查看和更新我的偏好
-/sources - 管理信息源
-/feedback - 主动反馈
-/test - 手动触发一次简报（测试用）
+{translate("commands.help.main_commands", lang)}
+{translate("commands.help.cmd_start", lang)}
+{translate("commands.help.cmd_profile", lang)}
+{translate("commands.help.cmd_sources", lang)}
+{translate("commands.help.cmd_feedback", lang)}
+{translate("commands.help.cmd_test", lang)}
 
-**功能特点：**
-• 🎯 AI 个性化筛选 - 基于您的偏好精准筛选
-• 💬 对话式设置 - 3 轮对话完成偏好收集
-• 📊 价值可感知 - 展示为您节省了多少时间
-• 🔄 持续学习 - 根据反馈不断优化
+{translate("commands.help.features", lang)}
+{translate("commands.help.feature_1", lang)}
+{translate("commands.help.feature_2", lang)}
+{translate("commands.help.feature_3", lang)}
+{translate("commands.help.feature_4", lang)}
 
-**反馈方式：**
-• 在简报底部点击 👍/👎
-• 对单条信息标记"不感兴趣"或"很有用"
-• 使用 /feedback 命令主动反馈
+{translate("commands.help.feedback_ways", lang)}
+{translate("commands.help.feedback_1", lang)}
+{translate("commands.help.feedback_2", lang)}
+{translate("commands.help.feedback_3", lang)}
 
-如有问题，请联系管理员。
+{translate("commands.help.contact_admin", lang)}
         """
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -167,24 +170,25 @@ class Web3DigestBot:
         # 判断是命令还是回调
         is_callback = update.callback_query is not None
         query = update.callback_query if is_callback else None
+        lang = get_user_language(update)
 
         # 发送"正在加载"提示
         if is_callback:
             await query.answer()  # 响应回调，避免超时
             # 先编辑消息显示加载状态
             try:
-                await query.edit_message_text("⏳ 正在加载您的偏好...")
+                await query.edit_message_text(translate("profile.loading", lang))
             except Exception as e:
                 logger.warning(f"编辑消息失败，尝试发送新消息: {e}")
                 # 如果编辑失败，发送新消息
                 try:
-                    loading_msg = await query.message.reply_text("⏳ 正在加载您的偏好...")
+                    loading_msg = await query.message.reply_text(translate("profile.loading", lang))
                 except:
                     loading_msg = None
             else:
                 loading_msg = None
         else:
-            loading_msg = await update.message.reply_text("⏳ 正在加载您的偏好...")
+            loading_msg = await update.message.reply_text(translate("profile.loading", lang))
 
         try:
             # 获取用户画像
@@ -198,24 +202,24 @@ class Web3DigestBot:
                     stats = structured_data.get("stats", {})
                     feedback_count = stats.get("total_feedbacks", 0)
                     if feedback_count > 0:
-                        profile += f"\n\n📊 **反馈统计**\n"
-                        profile += f"• 总反馈次数: {feedback_count}\n"
-                        profile += f"• 正面反馈: {stats.get('positive_count', 0)}次\n"
-                        profile += f"• 负面反馈: {stats.get('negative_count', 0)}次\n"
+                        profile += f"\n\n{translate('profile.stats_title', lang)}\n"
+                        profile += translate('profile.total_feedbacks', lang, count=feedback_count) + "\n"
+                        profile += translate('profile.positive_count', lang, count=stats.get('positive_count', 0)) + "\n"
+                        profile += translate('profile.negative_count', lang, count=stats.get('negative_count', 0)) + "\n"
                         if stats.get("last_feedback_time"):
                             from datetime import datetime
                             last_time = datetime.fromisoformat(stats["last_feedback_time"]).strftime("%Y-%m-%d %H:%M")
-                            profile += f"• 最后反馈: {last_time}"
+                            profile += translate('profile.last_feedback', lang, time=last_time)
 
                 # 准备键盘
                 keyboard = [
-                    [InlineKeyboardButton("✏️ 修改偏好", callback_data="profile_edit")],
-                    [InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu")]
+                    [InlineKeyboardButton(translate("profile.edit_button", lang), callback_data="profile_edit")],
+                    [InlineKeyboardButton(translate("profile.back_button", lang), callback_data="main_menu")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 # 合并消息，一次性发送（更快）
-                full_text = f"📝 **您的当前偏好画像：**\n\n{profile}\n\n请选择操作："
+                full_text = f"{translate('profile.title', lang)}\n\n{profile}\n\n{translate('profile.select_action', lang)}"
 
                 if is_callback:
                     # 回调：编辑消息
@@ -249,14 +253,14 @@ class Web3DigestBot:
                 # 没有画像，开始收集
                 if is_callback:
                     try:
-                        await query.edit_message_text("⚠️ 您还没有设置偏好，正在开始设置...")
+                        await query.edit_message_text(translate("profile.no_profile", lang))
                     except:
-                        await query.message.reply_text("⚠️ 您还没有设置偏好，正在开始设置...")
+                        await query.message.reply_text(translate("profile.no_profile", lang))
                 await self.conversation_manager.start_preference_conversation(update, context)
         except Exception as e:
             log_user_error(user_id, "test_flow_failed", str(e))
             logger.error(f"测试流程失败: {e}", exc_info=True)
-            error_text = "❌ 加载失败，请稍后重试"
+            error_text = translate("profile.load_failed", lang)
             if is_callback:
                 try:
                     await query.edit_message_text(error_text)
@@ -275,26 +279,27 @@ class Web3DigestBot:
     async def _show_settings_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示设置菜单（供命令和回调使用）"""
         user_id = update.effective_user.id
+        lang = get_user_language(update)
 
         # 鉴权检查
         if not await self.auth_manager.check_user_access(user_id):
             if update.message:
-                await update.message.reply_text("❌ 您没有访问权限，请联系管理员")
+                await update.message.reply_text(translate("auth.no_access_permission", lang) + translate("auth.contact_admin", lang))
             elif update.callback_query:
-                await update.callback_query.answer("❌ 您没有访问权限", show_alert=True)
+                await update.callback_query.answer(translate("auth.no_access_permission", lang), show_alert=True)
             return
 
         # 显示设置菜单
         keyboard = [
-            [InlineKeyboardButton("📝 修改偏好画像", callback_data="settings_profile")],
-            [InlineKeyboardButton("📰 管理信息源", callback_data="settings_sources")],
-            [InlineKeyboardButton("⏰ 推送时间设置", callback_data="settings_push_time")],
-            [InlineKeyboardButton("📊 查看使用统计", callback_data="settings_stats")],
-            [InlineKeyboardButton("🔙 返回", callback_data="main_menu")]
+            [InlineKeyboardButton(translate("settings.edit_profile", lang), callback_data="settings_profile")],
+            [InlineKeyboardButton(translate("settings.manage_sources", lang), callback_data="settings_sources")],
+            [InlineKeyboardButton(translate("settings.push_time", lang), callback_data="settings_push_time")],
+            [InlineKeyboardButton(translate("settings.stats", lang), callback_data="settings_stats")],
+            [InlineKeyboardButton(translate("settings.back", lang), callback_data="main_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        menu_text = "⚙️ **设置中心**\n\n请选择要修改的设置项："
+        menu_text = f"{translate('settings.menu_title', lang)}\n\n{translate('settings.select_item', lang)}"
 
         if update.message:
             await update.message.reply_text(
@@ -316,10 +321,11 @@ class Web3DigestBot:
     async def cmd_sources(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /sources 命令 - 信息源管理"""
         user_id = update.effective_user.id
+        lang = get_user_language(update)
 
         # 鉴权检查
         if not await self.auth_manager.check_user_access(user_id):
-            await update.message.reply_text("❌ 您没有访问权限")
+            await update.message.reply_text(translate("auth.no_access_permission", lang))
             return
 
         await self._show_sources_menu(update, context, user_id)
@@ -328,6 +334,8 @@ class Web3DigestBot:
         """显示信息源管理菜单(增强版-带迁移检查和帮助)"""
         if user_id is None:
             user_id = update.effective_user.id
+        
+        lang = get_user_language(update)
 
         # 检查是否有新源需要迁移
         from core.custom_processes.web3digest.core.source_migration_manager import SourceMigrationManager
@@ -343,41 +351,35 @@ class Web3DigestBot:
         custom_enabled = sum(1 for s in sources_config["custom_sources"] if s.get("enabled", True))
 
         # 构建菜单文本
-        menu_text = f"""📡 **信息源管理**
-"""
+        menu_text = translate("sources.menu_title", lang) + "\n"
 
         # 如果有新源可用,显示提示
         if migration_info["has_new_sources"]:
-            menu_text += f"""
-🆕 **发现 {migration_info['count']} 个新预设信息源!**
-点击下方"迁移新源"按钮添加
+            menu_text += f"\n{translate('sources.new_sources_found', lang, count=migration_info['count'])}\n"
+            menu_text += f"{translate('sources.click_to_migrate', lang)}\n\n"
 
-"""
-
-        menu_text += f"""**预设信息源**: {preset_enabled}/{preset_count} 已启用
-**自定义信息源**: {custom_enabled}/{custom_count} 已启用
-
-💡 **小贴士**:
-• 预设源由系统精选,质量有保障
-• 您可以添加自己关注的Twitter账号和网站RSS
-• 点击"帮助"了解如何添加自定义源
-
-请选择操作："""
+        menu_text += f"{translate('sources.preset_enabled', lang, enabled=preset_enabled, total=preset_count)}\n"
+        menu_text += f"{translate('sources.custom_enabled', lang, enabled=custom_enabled, total=custom_count)}\n\n"
+        menu_text += f"{translate('sources.tips', lang)}\n"
+        menu_text += f"{translate('sources.tip_1', lang)}\n"
+        menu_text += f"{translate('sources.tip_2', lang)}\n"
+        menu_text += f"{translate('sources.tip_3', lang)}\n\n"
+        menu_text += translate("sources.select_action", lang)
 
         keyboard = [
-            [InlineKeyboardButton("📋 查看预设信息源", callback_data="sources_view_preset")],
-            [InlineKeyboardButton("➕ 添加 Twitter 账号", callback_data="sources_add_twitter")],
-            [InlineKeyboardButton("➕ 添加网站 RSS", callback_data="sources_add_website")],
-            [InlineKeyboardButton("📝 我的自定义源", callback_data="sources_view_custom")],
+            [InlineKeyboardButton(translate("sources.view_preset", lang), callback_data="sources_view_preset")],
+            [InlineKeyboardButton(translate("sources.add_twitter", lang), callback_data="sources_add_twitter")],
+            [InlineKeyboardButton(translate("sources.add_website", lang), callback_data="sources_add_website")],
+            [InlineKeyboardButton(translate("sources.my_custom", lang), callback_data="sources_view_custom")],
         ]
 
         # 如果有新源,添加迁移按钮
         if migration_info["has_new_sources"]:
-            keyboard.append([InlineKeyboardButton(f"🔄 迁移新源 ({migration_info['count']}个)", callback_data="sources_migrate")])
+            keyboard.append([InlineKeyboardButton(translate("sources.migrate_new", lang, count=migration_info['count']), callback_data="sources_migrate")])
 
         # 添加帮助按钮
-        keyboard.append([InlineKeyboardButton("❓ 如何添加RSS源?", callback_data="sources_help")])
-        keyboard.append([InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu")])
+        keyboard.append([InlineKeyboardButton(translate("sources.help_rss", lang), callback_data="sources_help")])
+        keyboard.append([InlineKeyboardButton(translate("sources.back_menu", lang), callback_data="main_menu")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -388,70 +390,61 @@ class Web3DigestBot:
 
     async def _show_sources_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示信息源添加帮助文档"""
-        help_text = """📖 **如何添加自定义信息源?**
+        lang = get_user_language(update)
+        help_text = f"""{translate("sources_help.title", lang)}
 
 ━━━━━━━━━━━━━━━
-## 🐦 添加 Twitter 账号
+{translate("sources_help.twitter_section", lang)}
 
-**步骤1**: 找到Twitter用户名
-• 打开Twitter个人主页
-• 复制用户名 (例如: @VitalikButerin 或 VitalikButerin)
+{translate("sources_help.twitter_step1", lang)}
+• {translate("sources_help.twitter_step1_1", lang)}
+• {translate("sources_help.twitter_step1_2", lang)}
 
-**步骤2**: 在Bot中添加
-• 点击"➕ 添加 Twitter 账号"
-• 输入用户名(带或不带@都可以)
-• 系统会自动验证并添加
+{translate("sources_help.twitter_step2", lang)}
+• {translate("sources_help.twitter_step2_1", lang)}
+• {translate("sources_help.twitter_step2_2", lang)}
+• {translate("sources_help.twitter_step2_3", lang)}
 
 ━━━━━━━━━━━━━━━
-## 🌐 添加网站 RSS
+{translate("sources_help.website_section", lang)}
 
-**方法1**: 使用常见媒体RSS
+{translate("sources_help.website_method1", lang)}
 ```
-• CoinDesk:
-  https://www.coindesk.com/arc/outboundfeeds/rss/
-
-• Cointelegraph:
-  https://cointelegraph.com/rss
-
-• Decrypt:
-  https://decrypt.co/feed
-
-• ChainFeeds:
-  https://www.chainfeeds.me/rss
+{translate("sources_help.website_examples", lang)}
 ```
 
-**方法2**: 查找RSS链接
-• 访问网站,查找RSS图标 📡
-• 或在网址后加 /rss、/feed 尝试
-• 使用RSS查找工具: https://rss.app/
+{translate("sources_help.website_method2", lang)}
+• {translate("sources_help.website_method2_1", lang)}
+• {translate("sources_help.website_method2_2", lang)}
+• {translate("sources_help.website_method2_3", lang)}
 
-**步骤**: 在Bot中添加
-• 点击"➕ 添加网站 RSS"
-• 粘贴RSS链接
-• 系统会自动验证
-
-━━━━━━━━━━━━━━━
-## ❓ 常见问题
-
-**Q: 添加后多久生效?**
-A: 立即生效,下次简报就会包含新源内容
-
-**Q: 可以添加多少个自定义源?**
-A: 没有数量限制,但建议不超过20个
-
-**Q: 如何删除不需要的源?**
-A: 进入"我的自定义源",点击删除按钮
-
-**Q: 为什么有些源验证失败?**
-A: 可能原因:
-  • RSS链接错误或失效
-  • 网站不支持RSS
-  • 网络连接问题
+{translate("sources_help.website_step", lang)}
+• {translate("sources_help.website_step_1", lang)}
+• {translate("sources_help.website_step_2", lang)}
+• {translate("sources_help.website_step_3", lang)}
 
 ━━━━━━━━━━━━━━━
-💡 **提示**: 系统会自动验证RSS源的质量和时效性,确保为您提供最新、最相关的信息!"""
+{translate("sources_help.faq_section", lang)}
 
-        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="sources_manage")]]
+{translate("sources_help.faq_q1", lang)}
+{translate("sources_help.faq_a1", lang)}
+
+{translate("sources_help.faq_q2", lang)}
+{translate("sources_help.faq_a2", lang)}
+
+{translate("sources_help.faq_q3", lang)}
+{translate("sources_help.faq_a3", lang)}
+
+{translate("sources_help.faq_q4", lang)}
+{translate("sources_help.faq_a4", lang)}
+  {translate("sources_help.faq_a4_1", lang)}
+  {translate("sources_help.faq_a4_2", lang)}
+  {translate("sources_help.faq_a4_3", lang)}
+
+━━━━━━━━━━━━━━━
+{translate("sources_help.hint", lang)}"""
+
+        keyboard = [[InlineKeyboardButton(translate("sources_help.back", lang), callback_data="sources_manage")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.callback_query.edit_message_text(
@@ -462,6 +455,7 @@ A: 可能原因:
 
     async def _show_push_time_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
         """显示推送时间设置界面"""
+        lang = get_user_language(update)
         # 获取当前推送时间
         current_time = await self.profile_manager.get_push_time(user_id)
 
@@ -470,34 +464,34 @@ A: 可能原因:
             ["07:00", "08:00", "09:00"],
             ["10:00", "12:00", "14:00"],
             ["16:00", "18:00", "20:00"],
-            ["22:00", "自定义时间"]
+            ["22:00", translate("push_time.custom_button", lang)]
         ]
 
         keyboard = []
         for row in preset_times:
             button_row = []
             for time_str in row:
-                if time_str == "自定义时间":
-                    button_row.append(InlineKeyboardButton("✏️ 自定义", callback_data="push_time_custom"))
+                if time_str == translate("push_time.custom_button", lang):
+                    button_row.append(InlineKeyboardButton(translate("push_time.custom_button", lang), callback_data="push_time_custom"))
                 else:
                     # 标记当前选择的时间
                     prefix = "✅ " if time_str == current_time else ""
                     button_row.append(InlineKeyboardButton(f"{prefix}{time_str}", callback_data=f"push_time_{time_str}"))
             keyboard.append(button_row)
 
-        keyboard.append([InlineKeyboardButton("🔙 返回设置", callback_data="settings_menu")])
+        keyboard.append([InlineKeyboardButton(translate("push_time.back_settings", lang), callback_data="settings_menu")])
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        menu_text = f"""⏰ **推送时间设置**
+        menu_text = f"""{translate('push_time.title', lang)}
 
-当前推送时间：**{current_time}**
+{translate('push_time.current_time', lang, time=current_time)}
 
-请选择您希望的每日推送时间：
+{translate('push_time.select_time', lang)}
 
-💡 提示：
-• 选择预设时间，或点击"自定义"输入特定时间
-• 使用 24 小时制，格式：HH:MM
-• 例如：09:00、14:30、20:00
+{translate('push_time.hint', lang)}
+{translate('push_time.hint_1', lang)}
+{translate('push_time.hint_2', lang)}
+{translate('push_time.hint_3', lang)}
 """
 
         if update.message:
@@ -513,9 +507,10 @@ A: 可能原因:
         from core.custom_processes.web3digest.core.config import settings
 
         # 显示加载提示
+        lang = get_user_language(update)
         if update.callback_query:
             try:
-                await update.callback_query.edit_message_text("⏳ 正在计算统计数据...")
+                await update.callback_query.edit_message_text(translate("stats.calculating", lang))
             except:
                 pass
 
@@ -560,18 +555,18 @@ A: 可能原因:
         enabled_sources = sum(1 for s in sources_config["preset_sources"] if s.get("enabled", True))
         enabled_sources += sum(1 for s in sources_config["custom_sources"] if s.get("enabled", True))
 
-        stats_text = f"""📊 **您的使用统计**
+        stats_text = f"""{translate('stats.title', lang)}
 
-📰 已接收简报: {total_digests} 份
-💬 反馈次数: {total_feedbacks} 次
-⏱️ 累计节省时间: {round(total_time_saved, 1)} 小时
-📡 信息源: {enabled_sources}/{total_sources} 已启用
+{translate('stats.digests', lang, count=total_digests)}
+{translate('stats.feedbacks', lang, count=total_feedbacks)}
+{translate('stats.time_saved', lang, hours=round(total_time_saved, 1))}
+{translate('stats.sources', lang, enabled=enabled_sources, total=total_sources)}
 
-💡 持续使用和反馈，AI 将越来越了解您的偏好！
+{translate('stats.hint', lang)}
 """
 
         keyboard = [
-            [InlineKeyboardButton("🔙 返回设置", callback_data="settings_menu")]
+            [InlineKeyboardButton(translate("stats.back_settings", lang), callback_data="settings_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -583,32 +578,34 @@ A: 可能原因:
     async def cmd_feedback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /feedback 命令 - 主动反馈"""
         user_id = update.effective_user.id
+        lang = get_user_language(update)
 
         # 鉴权检查
         if not await self.auth_manager.check_user_access(user_id):
-            await update.message.reply_text("❌ 您没有访问权限")
+            await update.message.reply_text(translate("auth.no_access_permission", lang))
             return
 
         keyboard = [
             [
-                InlineKeyboardButton("👍 整体满意", callback_data="feedback_positive_manual"),
-                InlineKeyboardButton("👎 需要改进", callback_data="feedback_negative_manual")
+                InlineKeyboardButton(translate("feedback.positive", lang), callback_data="feedback_positive_manual"),
+                InlineKeyboardButton(translate("feedback.negative", lang), callback_data="feedback_negative_manual")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.message.reply_text(
-            "💬 请选择您的整体评价：",
+            translate("feedback.select_rating", lang),
             reply_markup=reply_markup
         )
 
-    async def _generate_personalized_feedback_message(self, user_id: int, feedback_type: str) -> str:
+    async def _generate_personalized_feedback_message(self, user_id: int, feedback_type: str, lang: str = 'zh') -> str:
         """
         生成个性化的反馈确认消息（Phase 2优化）
 
         Args:
             user_id: 用户ID
             feedback_type: "positive" 或 "negative"
+            lang: 语言代码（默认 'zh'）
 
         Returns:
             个性化的确认消息
@@ -619,9 +616,9 @@ A: 可能原因:
             if not profile:
                 # 如果没有画像，返回通用消息
                 if feedback_type == "positive":
-                    return "🌟 感谢您的认可！我们会继续努力，为您提供更优质的内容~"
+                    return translate("feedback.positive_thanks_generic", lang)
                 else:
-                    return "📝 感谢反馈！我们会认真分析并改进内容推荐质量~"
+                    return translate("feedback.negative_recorded", lang)
 
             # 提取用户兴趣
             interests = profile.get("interests", [])
@@ -631,29 +628,37 @@ A: 可能原因:
             # 构建兴趣描述
             interest_desc = ""
             if interests:
-                interest_desc = "、".join(interests[:2])  # 最多显示2个
+                interest_desc = "、".join(interests[:2]) if lang == 'zh' else ", ".join(interests[:2])  # 最多显示2个
             elif content_types:
-                interest_desc = "、".join(content_types[:2])
+                interest_desc = "、".join(content_types[:2]) if lang == 'zh' else ", ".join(content_types[:2])
 
             # 生成个性化消息
             if feedback_type == "positive":
                 if interest_desc:
-                    return f"✅ 感谢反馈！我们会继续为您推荐 {interest_desc} 等相关内容"
+                    # 注意：这里硬编码了消息格式，因为包含动态内容
+                    # 如果后续需要更复杂的多语言，可以改为使用模板
+                    if lang == 'zh':
+                        return f"✅ 感谢反馈！我们会继续为您推荐 {interest_desc} 等相关内容"
+                    else:
+                        return f"✅ Thank you for the feedback! We will continue recommending {interest_desc} and related content"
                 else:
-                    return "✅ 感谢反馈！我们会继续为您提供优质内容"
+                    return translate("feedback.positive_thanks_generic", lang)
             else:  # negative
                 if interest_desc:
-                    return f"📝 已记录！我们将优化 {interest_desc} 相关内容的推荐"
+                    if lang == 'zh':
+                        return f"📝 已记录！我们将优化 {interest_desc} 相关内容的推荐"
+                    else:
+                        return f"📝 Recorded! We will optimize recommendations for {interest_desc} and related content"
                 else:
-                    return "📝 已记录！我们将改进内容推荐"
+                    return translate("feedback.negative_recorded", lang)
 
         except Exception as e:
             logger.error(f"生成个性化反馈消息失败: {e}")
             # 失败时返回通用消息
             if feedback_type == "positive":
-                return "✅ 感谢反馈！"
+                return translate("feedback.positive_thanks_generic", lang)
             else:
-                return "📝 已记录！"
+                return translate("feedback.negative_recorded", lang)
 
     async def handle_manual_feedback(self, update: Update, context: ContextTypes.DEFAULT_TYPE, feedback_type: str):
         """处理手动反馈"""
@@ -682,25 +687,28 @@ A: 可能原因:
                 await feedback_analyzer.update_profile_with_feedback(user_id, feedback_data)
                 
                 # 显示感谢消息
+                lang = get_user_language(update)
                 if feedback_type == "positive":
-                    await query.edit_message_text("✅ 感谢您的满意！我们会继续努力提供优质内容。")
+                    await query.edit_message_text(translate("feedback.positive_thanks", lang))
                 else:
                     # 询问具体原因
                     keyboard = [
-                        [InlineKeyboardButton("内容不感兴趣", callback_data="feedback_reason_内容不感兴趣")],
-                        [InlineKeyboardButton("漏掉重要信息", callback_data="feedback_reason_漏掉重要信息")],
-                        [InlineKeyboardButton("信息太多/太杂", callback_data="feedback_reason_信息太多/太杂")],
-                        [InlineKeyboardButton("信息太少", callback_data="feedback_reason_信息太少")],
-                        [InlineKeyboardButton("💡 跳过，直接保存", callback_data="feedback_reason_skip")]
+                        [InlineKeyboardButton(translate("feedback.not_interested", lang), callback_data="feedback_reason_内容不感兴趣")],
+                        [InlineKeyboardButton(translate("feedback.miss_important", lang), callback_data="feedback_reason_漏掉重要信息")],
+                        [InlineKeyboardButton(translate("feedback.too_much", lang), callback_data="feedback_reason_信息太多/太杂")],
+                        [InlineKeyboardButton(translate("feedback.too_little", lang), callback_data="feedback_reason_信息太少")],
+                        [InlineKeyboardButton(translate("feedback.skip", lang), callback_data="feedback_reason_skip")]
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
-                    await query.edit_message_text("📝 请告诉我们具体需要改进的地方：", reply_markup=reply_markup)
+                    await query.edit_message_text(translate("feedback.reason_required", lang), reply_markup=reply_markup)
             else:
-                await query.answer("❌ 保存失败，请重试", show_alert=True)
+                lang = get_user_language(update)
+                await query.answer(translate("feedback.save_failed", lang), show_alert=True)
                 
         except Exception as e:
             logger.error(f"处理手动反馈失败: {e}", exc_info=True)
-            await query.answer("❌ 处理失败，请重试", show_alert=True)
+            lang = get_user_language(update)
+            await query.answer(translate("feedback.process_failed", lang), show_alert=True)
     
     async def handle_feedback_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理反馈回调（Phase 2优化：添加个性化确认消息）"""
@@ -713,7 +721,8 @@ A: 可能原因:
             await self.feedback_manager.save_feedback(user_id, "positive")
 
             # 生成个性化确认消息
-            message = await self._generate_personalized_feedback_message(user_id, "positive")
+            lang = get_user_language(update)
+            message = await self._generate_personalized_feedback_message(user_id, "positive", lang)
             try:
                 await query.answer(message, show_alert=False)
             except BadRequest as e:
@@ -727,7 +736,7 @@ A: 可能原因:
             try:
                 await self.application.bot.send_message(
                     chat_id=user_id,
-                    text=f"{message}\n\n💡 AI正在学习您的偏好，未来的推荐会更加精准！"
+                    text=f"{message}\n\n{translate('feedback.ai_learning', lang)}"
                 )
             except:
                 pass
@@ -741,8 +750,9 @@ A: 可能原因:
         elif data.startswith("feedback_negative"):
             # 负面反馈：先不保存，等用户选择原因或跳过后再保存
             # 立即响应，避免用户重复点击
+            lang = get_user_language(update)
             try:
-                message = await self._generate_personalized_feedback_message(user_id, "negative")
+                message = await self._generate_personalized_feedback_message(user_id, "negative", lang)
                 await query.answer(message, show_alert=False)
             except:
                 pass
@@ -762,7 +772,8 @@ A: 可能原因:
                     pass
 
             # 发送可选的原因选择（不强制）
-            reason_msg = await self._show_feedback_reasons_optional(query, user_id)
+            lang = get_user_language(update)
+            reason_msg = await self._show_feedback_reasons_optional(query, user_id, lang)
             if reason_msg:
                 self._active_feedback_reasons[user_id] = reason_msg.message_id
 
@@ -772,30 +783,31 @@ A: 可能原因:
 
     async def _show_feedback_reasons_new(self, query, user_id: int):
         """显示反馈原因选择（发送新消息）- 已废弃，保留兼容"""
-        await self._show_feedback_reasons_optional(query, user_id)
+        # 默认使用中文（已废弃的函数，保持兼容性）
+        await self._show_feedback_reasons_optional(query, user_id, 'zh')
 
-    async def _show_feedback_reasons_optional(self, query, user_id: int):
+    async def _show_feedback_reasons_optional(self, query, user_id: int, lang: str = 'zh'):
         """显示可选的反馈原因选择（不强制）"""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
         keyboard = [
-            [InlineKeyboardButton("内容不感兴趣", callback_data="feedback_reason_内容不感兴趣")],
-            [InlineKeyboardButton("漏掉重要信息", callback_data="feedback_reason_漏掉重要信息")],
-            [InlineKeyboardButton("信息太多/太杂", callback_data="feedback_reason_信息太多/太杂")],
-            [InlineKeyboardButton("信息太少", callback_data="feedback_reason_信息太少")],
-            [InlineKeyboardButton("💡 跳过，直接保存", callback_data="feedback_reason_skip")]
+            [InlineKeyboardButton(translate("feedback.not_interested", lang), callback_data="feedback_reason_内容不感兴趣")],
+            [InlineKeyboardButton(translate("feedback.miss_important", lang), callback_data="feedback_reason_漏掉重要信息")],
+            [InlineKeyboardButton(translate("feedback.too_much", lang), callback_data="feedback_reason_信息太多/太杂")],
+            [InlineKeyboardButton(translate("feedback.too_little", lang), callback_data="feedback_reason_信息太少")],
+            [InlineKeyboardButton(translate("feedback.skip", lang), callback_data="feedback_reason_skip")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         # 发送新消息（可选，用户可以选择跳过）
         msg = await self.application.bot.send_message(
             chat_id=user_id,
-            text="💬 可选：告诉我们具体哪里需要改进？\n（可选择跳过直接保存反馈）",
+            text=translate("feedback.reason_optional", lang),
             reply_markup=reply_markup
         )
         return msg
 
-    async def _show_item_feedback_reasons(self, user_id: int, item_id: str, source: str):
+    async def _show_item_feedback_reasons(self, user_id: int, item_id: str, source: str, lang: str = 'zh'):
         """显示单条信息的反馈原因选择"""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -813,18 +825,18 @@ A: 可能原因:
 
         # 使用英文代码代替中文，避免 callback_data 编码问题
         keyboard = [
-            [InlineKeyboardButton("内容不感兴趣", callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_not_interested")],
-            [InlineKeyboardButton("漏掉重要信息", callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_miss_important")],
-            [InlineKeyboardButton("信息太多/太杂", callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_too_much")],
-            [InlineKeyboardButton("信息太少", callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_too_little")],
-            [InlineKeyboardButton("💡 跳过，直接保存", callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_skip")]
+            [InlineKeyboardButton(translate("feedback.not_interested", lang), callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_not_interested")],
+            [InlineKeyboardButton(translate("feedback.miss_important", lang), callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_miss_important")],
+            [InlineKeyboardButton(translate("feedback.too_much", lang), callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_too_much")],
+            [InlineKeyboardButton(translate("feedback.too_little", lang), callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_too_little")],
+            [InlineKeyboardButton(translate("feedback.skip", lang), callback_data=f"item_feedback_reason_{safe_item_id}_{safe_source}_skip")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         # 发送新消息（可选，用户可以选择跳过）
         msg = await self.application.bot.send_message(
             chat_id=user_id,
-            text="💬 可选：告诉我们具体哪里需要改进？\n（可选择跳过直接保存反馈）",
+            text=translate("feedback.reason_optional", lang),
             reply_markup=reply_markup
         )
         self._active_feedback_reasons[user_id] = msg.message_id
@@ -843,8 +855,9 @@ A: 可能原因:
             pass
 
         # 立即更新界面，提升响应速度
+        lang = get_user_language(update)
         try:
-            await query.edit_message_text("⏳ 正在保存反馈...")
+            await query.edit_message_text(translate("feedback.processing", lang))
         except:
             pass
 
@@ -858,8 +871,8 @@ A: 可能原因:
             # 编辑消息显示确认
             try:
                 await query.edit_message_text(
-                    "✅ 反馈已记录，感谢！\n\n"
-                    "💬 如需补充说明，请直接发送文字消息。或回复 /start 返回主菜单。"
+                    f"{translate('feedback.saved', lang)}\n\n"
+                    f"{translate('feedback.supplement', lang)}"
                 )
             except:
                 # 如果编辑失败，删除消息
@@ -879,10 +892,11 @@ A: 可能原因:
             )
 
             # 编辑消息显示确认
+            lang = get_user_language(update)
             try:
                 await query.edit_message_text(
-                    f"✅ 已记录：{reason}\n\n"
-                    "💬 如需补充说明，请直接发送文字消息。或回复 /start 返回主菜单。"
+                    f"{translate('feedback.saved_with_reason', lang, reason=reason)}\n\n"
+                    f"{translate('feedback.supplement', lang)}"
                 )
             except Exception as e:
                 logger.warning(f"编辑反馈消息失败: {e}")
@@ -905,8 +919,9 @@ A: 可能原因:
             pass
 
         # 立即更新界面，提升响应速度
+        lang = get_user_language(update)
         try:
-            await query.edit_message_text("⏳ 正在保存反馈...")
+            await query.edit_message_text(translate("feedback.processing", lang))
         except:
             pass
 
@@ -942,11 +957,12 @@ A: 可能原因:
             # 跳过，直接保存反馈（不带原因）
             await self.feedback_manager.add_item_feedback(user_id, item_id, source, "dislike")
             # 编辑消息显示确认
+            lang = get_user_language(update)
             try:
                 await query.edit_message_text(
-                    "🙏 已记录您的反馈！\n\n"
-                    "💡 我们会减少推荐类似内容，努力为您找到更感兴趣的信息~\n\n"
-                    "💬 如需补充说明，请随时发送文字消息告诉我们~"
+                    f"{translate('feedback.item_saved', lang)}\n\n"
+                    f"{translate('feedback.item_reduce', lang)}\n\n"
+                    f"{translate('feedback.item_supplement', lang)}"
                 )
             except:
                 # 如果编辑失败，删除消息
@@ -966,11 +982,12 @@ A: 可能原因:
             )
 
             # 编辑消息显示确认
+            lang = get_user_language(update)
             try:
                 await query.edit_message_text(
-                    f"📝 已记录：{reason}\n\n"
-                    "🎯 感谢您的详细反馈！AI 会学习您的偏好，让推荐越来越精准~\n\n"
-                    "💬 如需补充说明，请随时发送文字消息告诉我们~"
+                    f"{translate('feedback.item_recorded', lang, reason=reason)}\n\n"
+                    f"{translate('feedback.item_thanks', lang)}\n\n"
+                    f"{translate('feedback.item_supplement', lang)}"
                 )
             except Exception as e:
                 logger.warning(f"编辑反馈消息失败: {e}")
@@ -1029,8 +1046,9 @@ A: 可能原因:
         if rating == "like":
             # 正面反馈：直接保存并显示确认
             await self.feedback_manager.add_item_feedback(user_id, item_id, source, rating)
+            lang = get_user_language(update)
             try:
-                await query.answer("🌟 太棒了！已标记为有用，我们会推荐更多类似内容~", show_alert=False)
+                await query.answer(translate("feedback.item_liked", lang), show_alert=False)
             except BadRequest as e:
                 # 处理查询超时或无效的情况
                 if "Query is too old" in str(e) or "query id is invalid" in str(e):
@@ -1049,7 +1067,8 @@ A: 可能原因:
             }
 
             # 显示反馈原因选择界面
-            await self._show_item_feedback_reasons(user_id, item_id, source)
+            lang = get_user_language(update)
+            await self._show_item_feedback_reasons(user_id, item_id, source, lang)
 
     async def cmd_test(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /test 命令 - 完整流程测试（支持命令和按钮点击）"""
@@ -1067,26 +1086,28 @@ A: 可能原因:
             chat = update.message.chat
 
         # 鉴权检查
+        lang = get_user_language(update) if not is_callback else 'zh'  # 回调时使用默认语言
         if not await self.auth_manager.check_user_access(user_id):
             if is_callback:
-                await context.bot.send_message(chat.id, "❌ 您没有访问权限")
+                await context.bot.send_message(chat.id, translate("test.no_access", lang))
             else:
-                await update.message.reply_text("❌ 您没有访问权限")
+                await update.message.reply_text(translate("test.no_access", lang))
             return
 
         # 简化测试流程 - 无论是否有画像都允许测试
         profile = await self.profile_manager.get_profile(user_id)
         if not profile and not is_callback:
             # 命令行式执行，提示设置偏好
-            await update.message.reply_text("⚠️ 请先使用 /start 设置您的偏好")
+            await update.message.reply_text(translate("test.no_profile", lang))
             return
 
         # 发送测试提示 - 按钮点击可以直接执行
         if is_callback:
-            await context.bot.send_message(chat.id, "🚀 开始生成测试简报...")
-            status_msg = await context.bot.send_message(chat.id, "📥 正在抓取信息...")
+            await context.bot.send_message(chat.id, translate("test.starting", lang))
+            status_msg = await context.bot.send_message(chat.id, translate("test.crawling", lang))
         else:
-            status_msg = await update.message.reply_text("🚀 开始测试简报生成...\n\n📥 步骤 1/4: 正在抓取信息...")
+            lang = get_user_language(update)
+            status_msg = await update.message.reply_text(f"{translate('test.testing', lang)}\n\n{translate('test.step_1', lang)}")
 
         try:
             log_user_step(user_id, "开始测试简报流程", {"action": "test_digest", "has_profile": profile is not None})
@@ -1105,37 +1126,39 @@ A: 可能原因:
             log_user_error(user_id, "test_flow_failed", str(e))
             logger.error(f"测试流程失败: {e}", exc_info=True)
             try:
-                await status_msg.edit_text(f"❌ 发生错误：{str(e)}")
+                lang = get_user_language(update) if hasattr(update, 'effective_user') else 'zh'
+                await status_msg.edit_text(translate("test.error", lang, error=str(e)))
             except:
                 pass
 
     async def show_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示主菜单 - 带步骤日志"""
         user_id = update.effective_user.id
+        lang = get_user_language(update)
         log_user_step(user_id, "显示主菜单", {"update_type": "message" if update.message else "callback"})
-        await self._send_main_menu(user_id)
+        await self._send_main_menu(user_id, lang)
 
-    async def show_main_menu_by_id(self, user_id: int):
+    async def show_main_menu_by_id(self, user_id: int, lang: str = 'zh'):
         """通过用户ID显示主菜单"""
         log_user_step(user_id, "显示主菜单", {"trigger": "after_test"})
-        await self._send_main_menu(user_id)
+        await self._send_main_menu(user_id, lang)
 
-    async def _send_main_menu(self, user_id: int):
+    async def _send_main_menu(self, user_id: int, lang: str = 'zh'):
         """发送主菜单消息"""
         keyboard = [
-            [InlineKeyboardButton("📝 修改偏好画像", callback_data="settings_profile")],
-            [InlineKeyboardButton("📡 管理信息源", callback_data="settings_sources")],
-            [InlineKeyboardButton("⏰ 推送时间设置", callback_data="settings_push_time")],
-            [InlineKeyboardButton("📊 查看使用统计", callback_data="settings_stats")],
-            [InlineKeyboardButton("🧪 测试简报", callback_data="test_digest")],
-            [InlineKeyboardButton("🔙 返回", callback_data="main_menu")]
+            [InlineKeyboardButton(translate("main_menu.edit_profile", lang), callback_data="settings_profile")],
+            [InlineKeyboardButton(translate("main_menu.manage_sources", lang), callback_data="settings_sources")],
+            [InlineKeyboardButton(translate("main_menu.push_time", lang), callback_data="settings_push_time")],
+            [InlineKeyboardButton(translate("main_menu.view_stats", lang), callback_data="settings_stats")],
+            [InlineKeyboardButton(translate("main_menu.test_digest", lang), callback_data="test_digest")],
+            [InlineKeyboardButton(translate("main_menu.back", lang), callback_data="main_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        welcome_text = """
-🎉 欢迎回来！我是您的 Web3 信息助手。
+        welcome_text = f"""
+{translate("main_menu.welcome", lang)}
 
-请选择您要的操作：
+{translate("main_menu.select_action", lang)}
         """
 
         try:
@@ -1156,9 +1179,10 @@ A: 可能原因:
         user_id = update.effective_user.id
 
         # 鉴权检查（除了对话中的消息，因为对话开始前已经检查过）
+        lang = get_user_language(update)
         if user_id not in self._adding_source_state:
             if not await self.auth_manager.check_user_access(user_id):
-                await update.message.reply_text("❌ 您没有访问权限")
+                await update.message.reply_text(translate("auth.no_access_permission", lang))
                 return
 
         # 检查是否在对话中
@@ -1178,10 +1202,10 @@ A: 可能原因:
                 minute = int(minute)
                 if not (0 <= hour <= 23 and 0 <= minute <= 59):
                     await update.message.reply_text(
-                        "❌ 时间格式错误！\n\n"
-                        "请输入正确的时间格式：HH:MM\n"
-                        "例如：09:00、14:30、20:00\n"
-                        "时间范围：00:00 - 23:59"
+                        f"{translate('push_time.format_error', lang)}\n\n"
+                        f"{translate('push_time.format_error_desc', lang)}\n"
+                        f"{translate('push_time.format_examples', lang)}\n"
+                        f"{translate('push_time.format_range', lang)}"
                     )
                     return
 
@@ -1190,21 +1214,21 @@ A: 可能原因:
                 if success:
                     del self._custom_push_time_state[user_id]
                     await update.message.reply_text(
-                        f"✅ 推送时间已设置为 **{time_str}**\n\n"
-                        "您的每日简报将在该时间推送。",
+                        f"{translate('push_time.time_saved', lang, time=time_str)}\n\n"
+                        f"{translate('push_time.time_saved_desc', lang)}",
                         parse_mode=ParseMode.MARKDOWN
                     )
                 else:
-                    await update.message.reply_text("❌ 设置失败，请重试")
+                    await update.message.reply_text(translate("push_time.set_failed", lang))
             except ValueError:
                 await update.message.reply_text(
-                    "❌ 时间格式错误！\n\n"
-                    "请输入正确的时间格式：HH:MM\n"
-                    "例如：09:00、14:30、20:00"
+                    f"{translate('push_time.format_error', lang)}\n\n"
+                    f"{translate('push_time.format_error_desc', lang)}\n"
+                    f"{translate('push_time.format_examples', lang)}"
                 )
         else:
             # 不在对话中，提示使用命令
-            await update.message.reply_text("请使用 /start 开始，或使用 /help 查看帮助")
+            await update.message.reply_text(translate("messages.use_start", lang))
 
     # 回调处理器
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1297,14 +1321,16 @@ A: 可能原因:
             if data.startswith("source_delete_confirm_"):
                 # 确认删除
                 source_id = data.replace("source_delete_confirm_", "")
+                lang = get_user_language(update)
                 success = await self.source_manager.remove_custom_source(update.effective_user.id, source_id)
                 if success:
-                    await query.edit_message_text("✅ 信息源已删除")
+                    await query.edit_message_text(translate("source_actions.deleted", lang))
                     from core.custom_processes.web3digest.bot.source_handlers import show_custom_sources
                     await show_custom_sources(self, update, context)
                 else:
+                    lang = get_user_language(update)
                     try:
-                        await query.answer("❌ 删除失败", show_alert=True)
+                        await query.answer(translate("source_actions.delete_failed", lang), show_alert=True)
                     except BadRequest as e:
                         if "Query is too old" in str(e) or "query id is invalid" in str(e):
                             logger.warning(f"Callback query timeout for user {update.effective_user.id}: {e}")
@@ -1320,7 +1346,8 @@ A: 可能原因:
             migration_manager = SourceMigrationManager()
 
             # 显示处理中提示
-            await query.edit_message_text("⏳ 正在迁移新信息源...")
+            lang = get_user_language(update)
+            await query.edit_message_text(translate("migration.migrating", lang))
 
             # 执行迁移
             result = await migration_manager.migrate_user_sources(user_id)
@@ -1328,9 +1355,9 @@ A: 可能原因:
             if result["migrated"] > 0:
                 # 构建迁移成功消息
                 new_sources_text = "\n".join([f"• {name}" for name in result["new_sources"]])
-                success_text = f"""✅ **迁移完成!**
+                success_text = f"""{translate('migration.success_title', lang)}
 
-已为您添加 {result['migrated']} 个新信息源:
+{translate('migration.success_desc', lang, count=result['migrated'])}
 
 {new_sources_text}
 
@@ -1339,7 +1366,7 @@ A: 可能原因:
                 await query.edit_message_text(success_text, parse_mode=ParseMode.MARKDOWN)
                 await asyncio.sleep(2)
             else:
-                await query.edit_message_text("ℹ️ 没有需要迁移的新源")
+                await query.edit_message_text(translate("migration.no_new", lang))
                 await asyncio.sleep(1)
 
             # 返回源管理菜单
@@ -1373,11 +1400,12 @@ A: 可能原因:
             time_str = data.replace("push_time_", "")
             if time_str == "custom":
                 # 自定义时间输入
+                lang = get_user_language(update)
                 await query.edit_message_text(
-                    "⏰ **自定义推送时间**\n\n"
-                    "请输入推送时间，格式：HH:MM\n"
-                    "例如：09:00、14:30、20:00\n\n"
-                    "💡 提示：使用 24 小时制，范围 00:00 - 23:59",
+                    f"{translate('push_time.custom_title', lang)}\n\n"
+                    f"{translate('push_time.custom_input', lang)}\n"
+                    f"{translate('push_time.custom_examples', lang)}\n\n"
+                    f"{translate('push_time.custom_hint', lang)}",
                     parse_mode=ParseMode.MARKDOWN
                 )
                 # 标记用户正在输入自定义时间
@@ -1386,9 +1414,10 @@ A: 可能原因:
             else:
                 # 选择预设时间
                 success = await self.profile_manager.update_push_time(user_id, time_str)
+                lang = get_user_language(update)
                 if success:
                     try:
-                        await query.answer(f"✅ 推送时间已设置为 {time_str}", show_alert=False)
+                        await query.answer(translate("push_time.time_set", lang, time=time_str), show_alert=False)
                     except BadRequest as e:
                         if "Query is too old" in str(e) or "query id is invalid" in str(e):
                             logger.warning(f"Callback query timeout for user {user_id}: {e}")
@@ -1397,7 +1426,7 @@ A: 可能原因:
                     await self._show_push_time_settings(update, context, user_id)
                 else:
                     try:
-                        await query.answer("❌ 设置失败，请重试", show_alert=True)
+                        await query.answer(translate("push_time.set_failed", lang), show_alert=True)
                     except BadRequest as e:
                         if "Query is too old" in str(e) or "query id is invalid" in str(e):
                             logger.warning(f"Callback query timeout for user {user_id}: {e}")
@@ -1417,8 +1446,9 @@ A: 可能原因:
             await self.handle_admin_callback(update, context)
         else:
             # 其他回调
+            lang = get_user_language(update)
             try:
-                await query.edit_message_text("功能开发中...")
+                await query.edit_message_text(translate("common.function_developing", lang))
             except BadRequest as e:
                 if "Message is not modified" in str(e):
                     # 消息内容相同，忽略错误
@@ -1427,7 +1457,7 @@ A: 可能原因:
                     logger.error(f"编辑消息失败: {e}")
                     # 尝试回答回调
                     try:
-                        await query.answer("功能开发中...", show_alert=True)
+                        await query.answer(translate("common.function_developing", lang), show_alert=True)
                     except:
                         pass
 
@@ -1437,24 +1467,25 @@ A: 可能原因:
         user_id = update.effective_user.id
 
         # 检查管理员权限
+        lang = get_user_language(update)
         if not await self.auth_manager.is_admin(user_id):
-            await update.message.reply_text("❌ 您没有管理员权限")
+            await update.message.reply_text(translate("admin.admin_no_permission", lang))
             logger.warning(f"用户 {user_id} 尝试访问管理员功能但无权限")
             return
 
         # 显示管理员菜单
         keyboard = [
-            [InlineKeyboardButton("👥 用户管理", callback_data="admin_users")],
-            [InlineKeyboardButton("✅ 白名单管理", callback_data="admin_whitelist")],
-            [InlineKeyboardButton("🚫 黑名单管理", callback_data="admin_blacklist")],
-            [InlineKeyboardButton("📊 系统统计", callback_data="admin_stats")],
-            [InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu")]
+            [InlineKeyboardButton(translate("admin.user_management", lang), callback_data="admin_users")],
+            [InlineKeyboardButton(translate("admin.whitelist", lang), callback_data="admin_whitelist")],
+            [InlineKeyboardButton(translate("admin.blacklist", lang), callback_data="admin_blacklist")],
+            [InlineKeyboardButton(translate("admin.system_stats", lang), callback_data="admin_stats")],
+            [InlineKeyboardButton(translate("admin.back_menu", lang), callback_data="main_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        menu_text = """🔐 **管理员面板**
+        menu_text = f"""{translate('admin.title', lang)}
 
-请选择要管理的功能："""
+{translate('admin.select_function', lang)}"""
 
         await update.message.reply_text(menu_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
 
@@ -1465,9 +1496,10 @@ A: 可能原因:
         data = query.data
 
         # 检查管理员权限
+        lang = get_user_language(update)
         if not await self.auth_manager.is_admin(user_id):
             try:
-                await query.answer("❌ 您没有管理员权限", show_alert=True)
+                await query.answer(translate("admin.no_permission", lang), show_alert=True)
             except BadRequest as e:
                 if "Query is too old" in str(e) or "query id is invalid" in str(e):
                     logger.warning(f"Callback query timeout for user {user_id}: {e}")
@@ -1504,10 +1536,11 @@ A: 可能原因:
     async def _show_user_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示用户管理界面"""
         from core.custom_processes.web3digest.core.auth_manager import UserStatus
+        lang = get_user_language(update)
 
         users = await self.user_manager.get_all_users()
 
-        text = f"👥 **用户管理**\n\n共 {len(users)} 个用户\n\n"
+        text = f"{translate('admin.user_mgmt_title', lang)}\n\n{translate('admin.total_users', lang, count=len(users))}\n\n"
 
         # 显示前10个用户
         for i, user in enumerate(users[:10], 1):
@@ -1516,20 +1549,20 @@ A: 可能原因:
             role = await self.auth_manager.get_user_role(user_id)
 
             status_icon = {
-                UserStatus.ACTIVE: "✅",
-                UserStatus.INACTIVE: "⚪",
-                UserStatus.BANNED: "🚫",
-                UserStatus.SUSPENDED: "⏸️"
+                UserStatus.ACTIVE: translate("admin.status_active", lang),
+                UserStatus.INACTIVE: translate("admin.status_inactive", lang),
+                UserStatus.BANNED: translate("admin.status_banned", lang),
+                UserStatus.SUSPENDED: translate("admin.status_suspended", lang)
             }.get(status, "❓")
 
             text += f"{i}. {user.get('name', 'Unknown')} ({user_id})\n"
-            text += f"   角色: {role.value} | 状态: {status_icon} {status.value}\n\n"
+            text += f"   {translate('admin.role', lang)}: {role.value} | {translate('admin.status', lang)}: {status_icon} {status.value}\n\n"
 
         if len(users) > 10:
-            text += f"... 还有 {len(users) - 10} 个用户"
+            text += translate("admin.more_users", lang, count=len(users) - 10)
 
         keyboard = [
-            [InlineKeyboardButton("🔙 返回管理员菜单", callback_data="admin_menu")]
+            [InlineKeyboardButton(translate("admin.back_admin", lang), callback_data="admin_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1538,9 +1571,10 @@ A: 可能原因:
 
     async def _show_whitelist_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示白名单管理界面"""
+        lang = get_user_language(update)
         whitelist = await self.auth_manager.get_whitelist()
 
-        text = f"✅ **白名单管理**\n\n当前白名单: {len(whitelist)} 个用户\n\n"
+        text = f"{translate('admin.whitelist_title', lang)}\n\n{translate('admin.whitelist_count', lang, count=len(whitelist))}\n\n"
 
         if whitelist:
             for user_id in whitelist[:10]:
@@ -1548,12 +1582,12 @@ A: 可能原因:
                 name = user.get("name", "Unknown") if user else "Unknown"
                 text += f"• {name} ({user_id})\n"
         else:
-            text += "白名单为空（所有用户可访问）"
+            text += translate("admin.whitelist_empty", lang)
 
         keyboard = [
-            [InlineKeyboardButton("➕ 添加用户", callback_data="admin_wl_add")],
-            [InlineKeyboardButton("➖ 移除用户", callback_data="admin_wl_remove")],
-            [InlineKeyboardButton("🔙 返回", callback_data="admin_menu")]
+            [InlineKeyboardButton(translate("admin.add_user", lang), callback_data="admin_wl_add")],
+            [InlineKeyboardButton(translate("admin.remove_user", lang), callback_data="admin_wl_remove")],
+            [InlineKeyboardButton(translate("admin.back_admin", lang), callback_data="admin_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1562,9 +1596,10 @@ A: 可能原因:
 
     async def _show_blacklist_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示黑名单管理界面"""
+        lang = get_user_language(update)
         blacklist = await self.auth_manager.get_blacklist()
 
-        text = f"🚫 **黑名单管理**\n\n当前黑名单: {len(blacklist)} 个用户\n\n"
+        text = f"{translate('admin.blacklist_title', lang)}\n\n{translate('admin.blacklist_count', lang, count=len(blacklist))}\n\n"
 
         if blacklist:
             for user_id in blacklist[:10]:
@@ -1572,12 +1607,12 @@ A: 可能原因:
                 name = user.get("name", "Unknown") if user else "Unknown"
                 text += f"• {name} ({user_id})\n"
         else:
-            text += "黑名单为空"
+            text += translate("admin.blacklist_empty", lang)
 
         keyboard = [
-            [InlineKeyboardButton("➕ 添加用户", callback_data="admin_bl_add")],
-            [InlineKeyboardButton("➖ 移除用户", callback_data="admin_bl_remove")],
-            [InlineKeyboardButton("🔙 返回", callback_data="admin_menu")]
+            [InlineKeyboardButton(translate("admin.add_user", lang), callback_data="admin_bl_add")],
+            [InlineKeyboardButton(translate("admin.remove_user", lang), callback_data="admin_bl_remove")],
+            [InlineKeyboardButton(translate("admin.back_admin", lang), callback_data="admin_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1586,26 +1621,27 @@ A: 可能原因:
 
     async def _show_system_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示系统统计"""
+        lang = get_user_language(update)
         users = await self.user_manager.get_all_users()
         active_users = await self.user_manager.get_active_users()
         admins = await self.auth_manager.get_all_admins()
         whitelist = await self.auth_manager.get_whitelist()
         blacklist = await self.auth_manager.get_blacklist()
 
-        text = f"""📊 **系统统计**
+        text = f"""{translate('admin.system_stats_title', lang)}
 
-👥 **用户统计**
-• 总用户数: {len(users)}
-• 活跃用户: {len(active_users)}
-• 管理员数: {len(admins)}
+{translate('admin.user_stats', lang)}
+• {translate('admin.total_users_stat', lang, count=len(users))}
+• {translate('admin.active_users', lang, count=len(active_users))}
+• {translate('admin.admin_count', lang, count=len(admins))}
 
-🔐 **鉴权统计**
-• 白名单用户: {len(whitelist)}
-• 黑名单用户: {len(blacklist)}
+{translate('admin.auth_stats', lang)}
+• {translate('admin.whitelist_stat', lang, count=len(whitelist))}
+• {translate('admin.blacklist_stat', lang, count=len(blacklist))}
 """
 
         keyboard = [
-            [InlineKeyboardButton("🔙 返回管理员菜单", callback_data="admin_menu")]
+            [InlineKeyboardButton(translate("admin.back_admin", lang), callback_data="admin_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1615,14 +1651,17 @@ A: 可能原因:
     async def _handle_user_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理用户操作"""
         # TODO: 实现用户操作（封禁、解封、设置角色等）
-        await update.callback_query.answer("功能开发中...", show_alert=True)
+        lang = get_user_language(update)
+        await update.callback_query.answer(translate("common.function_developing", lang), show_alert=True)
 
     async def _handle_whitelist_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理白名单操作"""
         # TODO: 实现白名单添加/移除
-        await update.callback_query.answer("功能开发中...", show_alert=True)
+        lang = get_user_language(update)
+        await update.callback_query.answer(translate("common.function_developing", lang), show_alert=True)
 
     async def _handle_blacklist_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理黑名单操作"""
         # TODO: 实现黑名单添加/移除
-        await update.callback_query.answer("功能开发中...", show_alert=True)
+        lang = get_user_language(update)
+        await update.callback_query.answer(translate("common.function_developing", lang), show_alert=True)
