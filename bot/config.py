@@ -140,17 +140,17 @@ _DEFAULT_SOURCES = {
         # Web3 news sites with verified RSS feeds
         "Cointelegraph": "https://cointelegraph.com/rss",
         "CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
-        "Odaily": "https://www.odaily.news/newsflash/rss",
-        "ChainFeeds": "https://www.chainfeeds.xyz/feed",
-        "The Block Beats": "https://www.theblockbeats.info/rss",
-        "Foresight News": "https://foresightnews.pro/rss",
+        "The Block Beats": "https://api.theblockbeats.news/v1/open-api/home-xml",  # Fixed: using API endpoint
         # Additional sites from Excel with verified RSS
         "TechFlow Post": "https://techflowpost.substack.com/feed",  # Alternative: https://techflowpost.mirror.xyz/feed/atom
         "DeFi Rate": "https://defirate.com/feed",
         "Prediction News": "https://predictionnews.com/rss/",
         "Event Horizon": "https://nexteventhorizon.substack.com/feed",
         "un.Block (吴说)": "https://unblock256.substack.com/feed",  # wublock123.com's newsletter
-        # Note: Sites without RSS feeds (verified by search):
+        # Note: Sites without RSS feeds (verified by testing):
+        # - Odaily: Returns HTML instead of RSS
+        # - ChainFeeds: 404 error
+        # - Foresight News: WAF protection page
         # - https://www.me.news/news (no RSS)
         # - https://www.chaincatcher.com/news (404 on RSS endpoint)
         # - https://www.panewslab.com/ (no RSS)
