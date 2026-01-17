@@ -301,7 +301,176 @@ class LLMClient:
 
         logger.info(f"智能兜底完成，最终选择 {len(result_indices)} 条（评分排序）")
         return result_indices[:max_select]
-    
+
+    async def batch_filter_info_with_scores(self, info_list: List[Dict],
+                                            user_profile: str,
+                                            max_select: int = 10) -> List[Dict]:
+        """
+        批量筛选信息并返回详细评分
+
+        优化版: 先使用现有筛选逻辑,再为选中的信息生成详细评分和推荐理由
+
+        Args:
+            info_list: 信息列表,每条包含 index, title, content, source
+            user_profile: 用户画像(增强版)
+            max_select: 最多选择几条
+
+        Returns:
+            List[Dict]: 包含评分、推荐理由的信息列表
+            [
+                {
+                    "id": "xxx",
+                    "title": "xxx",
+                    "summary": "xxx",
+                    "source": "xxx",
+                    "url": "xxx",
+                    "publish_time": "xxx",
+                    "scores": {
+                        "relevance_score": 4.5,
+                        "importance_score": 2.5,
+                        "freshness_score": 1.8,
+                        "total_score": 8.8,
+                        "confidence": 0.88
+                    },
+                    "recommendation_reason": "匹配您关注的DeFi领域..."
+                },
+                ...
+            ]
+        """
+        if not info_list:
+            return []
+
+        # 1. 先使用现有的batch_filter_info获取选中的索引
+        selected_indices = await self.batch_filter_info(info_list, user_profile, max_select)
+
+        if not selected_indices:
+            return []
+
+        # 2. 为选中的信息生成详细评分和推荐理由
+        scored_items = []
+        for idx in selected_indices:
+            if 0 <= idx < len(info_list):
+                info = info_list[idx]
+
+                # 生成评分和推荐理由
+                scores_and_reason = await self._generate_scores_and_reason(
+                    info=info,
+                    user_profile=user_profile
+                )
+
+                scored_items.append({
+                    "id": info.get("id", f"item_{idx}"),
+                    "title": info.get("title", ""),
+                    "summary": info.get("content", "")[:200],
+                    "source": info.get("source", ""),
+                    "url": info.get("url", ""),
+                    "publish_time": info.get("publish_time", ""),
+                    "scores": scores_and_reason["scores"],
+                    "recommendation_reason": scores_and_reason["reason"]
+                })
+
+        logger.info(f"完成评分生成,共 {len(scored_items)} 条信息")
+        return scored_items
+
+    async def _generate_scores_and_reason(self, info: Dict, user_profile: str) -> Dict:
+        """
+        为单条信息生成评分和推荐理由
+
+        Args:
+            info: 单条信息
+            user_profile: 用户画像
+
+        Returns:
+            {
+                "scores": {
+                    "relevance_score": 4.5,
+                    "importance_score": 2.5,
+                    "freshness_score": 1.8,
+                    "total_score": 8.8,
+                    "confidence": 0.88
+                },
+                "reason": "推荐理由文本"
+            }
+        """
+
+        prompt = f"""你是Web3资讯评分专家。请对这条信息进行多维度评分。
+
+## 用户画像
+{user_profile[:500]}
+
+## 信息内容
+标题: {info.get('title', '')}
+内容: {info.get('content', '')[:300]}
+来源: {info.get('source', '')}
+
+## 评分维度
+1. 相关度(0-5分): 与用户兴趣的匹配程度
+2. 重要性(0-3分): 信息本身的重要程度
+3. 新鲜度(0-2分): 信息的时效性
+
+## 输出要求
+返回JSON格式,不要添加任何其他文字:
+{{
+    "relevance_score": 4.5,
+    "importance_score": 2.5,
+    "freshness_score": 1.8,
+    "reason": "匹配您关注的DeFi领域,来自权威来源,讨论了您关心的TVL变化"
+}}"""
+
+        try:
+            response = await self.complete(prompt, max_tokens=200, temperature=0.2)
+
+            # 尝试解析JSON
+            # 清理可能的markdown代码块标记
+            response_clean = response.strip()
+            if response_clean.startswith("```"):
+                # 移除代码块标记
+                lines = response_clean.split('\n')
+                response_clean = '\n'.join(lines[1:-1]) if len(lines) > 2 else response_clean
+
+            result = json.loads(response_clean)
+
+            # 计算总分
+            total = result.get("relevance_score", 3.0) + result.get("importance_score", 2.0) + result.get("freshness_score", 1.0)
+
+            return {
+                "scores": {
+                    "relevance_score": round(result.get("relevance_score", 3.0), 1),
+                    "importance_score": round(result.get("importance_score", 2.0), 1),
+                    "freshness_score": round(result.get("freshness_score", 1.0), 1),
+                    "total_score": round(total, 1),
+                    "confidence": round(min(total / 10.0, 1.0), 2)
+                },
+                "reason": result.get("reason", "AI推荐")[:100]  # 限制理由长度
+            }
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"评分JSON解析失败: {e}, 响应: {response[:100]}")
+            # 返回默认评分
+            return {
+                "scores": {
+                    "relevance_score": 3.0,
+                    "importance_score": 2.0,
+                    "freshness_score": 1.0,
+                    "total_score": 6.0,
+                    "confidence": 0.6
+                },
+                "reason": "AI推荐"
+            }
+        except Exception as e:
+            logger.error(f"生成评分失败: {e}")
+            # 返回默认评分
+            return {
+                "scores": {
+                    "relevance_score": 3.0,
+                    "importance_score": 2.0,
+                    "freshness_score": 1.0,
+                    "total_score": 6.0,
+                    "confidence": 0.6
+                },
+                "reason": "AI推荐"
+            }
+
     def _format_filter_stats(self, filter_stats: Dict) -> str:
         """格式化过滤统计信息（Phase 4优化）"""
         if not filter_stats:

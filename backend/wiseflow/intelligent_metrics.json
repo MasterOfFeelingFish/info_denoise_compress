@@ -1,0 +1,167 @@
+{
+  "https://rss.app/feeds/zXJZGK1tpoNrKUV1.xml": {
+    "url": "https://rss.app/feeds/zXJZGK1tpoNrKUV1.xml",
+    "name": "@VitalikButerin",
+    "avg_response_time": 5.612255334854126,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://rss.app/feeds/f1b0GQFXeSZjCd9q.xml": {
+    "url": "https://rss.app/feeds/f1b0GQFXeSZjCd9q.xml",
+    "name": "@cz_binance",
+    "avg_response_time": 5.612255334854126,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://cointelegraph.com/rss": {
+    "url": "https://cointelegraph.com/rss",
+    "name": "Cointelegraph",
+    "avg_response_time": 3.0141398906707764,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://www.coindesk.com/arc/outboundfeeds/rss/": {
+    "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "name": "CoinDesk",
+    "avg_response_time": 3.0141398906707764,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://decrypt.co/feed": {
+    "url": "https://decrypt.co/feed",
+    "name": "Decrypt",
+    "avg_response_time": 3.0141398906707764,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://www.chainfeeds.me/rss": {
+    "url": "https://www.chainfeeds.me/rss",
+    "name": "ChainFeeds",
+    "avg_response_time": 3.0151405334472656,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://www.theblock.co/rss.xml": {
+    "url": "https://www.theblock.co/rss.xml",
+    "name": "The Block",
+    "avg_response_time": 5.612255334854126,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://foresightnews.pro/feed": {
+    "url": "https://foresightnews.pro/feed",
+    "name": "Foresight News",
+    "avg_response_time": 4.341248273849487,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://www.theblockbeats.info/rss": {
+    "url": "https://www.theblockbeats.info/rss",
+    "name": "律动 BlockBeats",
+    "avg_response_time": 4.3422486782073975,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://www.jinse.cn/lives/rss": {
+    "url": "https://www.jinse.cn/lives/rss",
+    "name": "金色财经",
+    "avg_response_time": 0.043505191802978516,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://www.chaincatcher.com/clist.xml": {
+    "url": "https://www.chaincatcher.com/clist.xml",
+    "name": "ChainCatcher",
+    "avg_response_time": 5.621539831161499,
+    "success_rate": 1.0,
+    "update_frequency": 1.0,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 30,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://www.techflowpost.com/api/client/common/rss.xml": {
+    "url": "https://www.techflowpost.com/api/client/common/rss.xml",
+    "name": "TechFlow Post",
+    "avg_response_time": 5.612255334854126,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://defirate.com/rss": {
+    "url": "https://defirate.com/rss",
+    "name": "DeFi Rate",
+    "avg_response_time": 3.0151405334472656,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://nexteventhorizon.substack.com/feed": {
+    "url": "https://nexteventhorizon.substack.com/feed",
+    "name": "Next Event Horizon",
+    "avg_response_time": 5.613259315490723,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  },
+  "https://predictionnews.com/feed/": {
+    "url": "https://predictionnews.com/feed/",
+    "name": "Prediction News",
+    "avg_response_time": 5.612255334854126,
+    "success_rate": 1.0,
+    "update_frequency": 0.9,
+    "last_update": "2026-01-16T22:00:05.631311",
+    "last_articles_count": 0,
+    "failure_count": 0,
+    "total_requests": 1
+  }
+}

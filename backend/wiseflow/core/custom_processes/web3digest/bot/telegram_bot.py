@@ -325,9 +325,14 @@ class Web3DigestBot:
         await self._show_sources_menu(update, context, user_id)
 
     async def _show_sources_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int = None):
-        """显示信息源管理菜单"""
+        """显示信息源管理菜单(增强版-带迁移检查和帮助)"""
         if user_id is None:
             user_id = update.effective_user.id
+
+        # 检查是否有新源需要迁移
+        from core.custom_processes.web3digest.core.source_migration_manager import SourceMigrationManager
+        migration_manager = SourceMigrationManager()
+        migration_info = await migration_manager.check_and_notify(user_id)
 
         sources_config = await self.source_manager.get_user_sources(user_id)
 
@@ -337,10 +342,25 @@ class Web3DigestBot:
         custom_count = len(sources_config["custom_sources"])
         custom_enabled = sum(1 for s in sources_config["custom_sources"] if s.get("enabled", True))
 
+        # 构建菜单文本
         menu_text = f"""📡 **信息源管理**
+"""
 
-**预设信息源**: {preset_enabled}/{preset_count} 已启用
+        # 如果有新源可用,显示提示
+        if migration_info["has_new_sources"]:
+            menu_text += f"""
+🆕 **发现 {migration_info['count']} 个新预设信息源!**
+点击下方"迁移新源"按钮添加
+
+"""
+
+        menu_text += f"""**预设信息源**: {preset_enabled}/{preset_count} 已启用
 **自定义信息源**: {custom_enabled}/{custom_count} 已启用
+
+💡 **小贴士**:
+• 预设源由系统精选,质量有保障
+• 您可以添加自己关注的Twitter账号和网站RSS
+• 点击"帮助"了解如何添加自定义源
 
 请选择操作："""
 
@@ -349,14 +369,96 @@ class Web3DigestBot:
             [InlineKeyboardButton("➕ 添加 Twitter 账号", callback_data="sources_add_twitter")],
             [InlineKeyboardButton("➕ 添加网站 RSS", callback_data="sources_add_website")],
             [InlineKeyboardButton("📝 我的自定义源", callback_data="sources_view_custom")],
-            [InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu")]
         ]
+
+        # 如果有新源,添加迁移按钮
+        if migration_info["has_new_sources"]:
+            keyboard.append([InlineKeyboardButton(f"🔄 迁移新源 ({migration_info['count']}个)", callback_data="sources_migrate")])
+
+        # 添加帮助按钮
+        keyboard.append([InlineKeyboardButton("❓ 如何添加RSS源?", callback_data="sources_help")])
+        keyboard.append([InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu")])
+
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         if update.message:
             await update.message.reply_text(menu_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
         elif update.callback_query:
             await update.callback_query.edit_message_text(menu_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+
+    async def _show_sources_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """显示信息源添加帮助文档"""
+        help_text = """📖 **如何添加自定义信息源?**
+
+━━━━━━━━━━━━━━━
+## 🐦 添加 Twitter 账号
+
+**步骤1**: 找到Twitter用户名
+• 打开Twitter个人主页
+• 复制用户名 (例如: @VitalikButerin 或 VitalikButerin)
+
+**步骤2**: 在Bot中添加
+• 点击"➕ 添加 Twitter 账号"
+• 输入用户名(带或不带@都可以)
+• 系统会自动验证并添加
+
+━━━━━━━━━━━━━━━
+## 🌐 添加网站 RSS
+
+**方法1**: 使用常见媒体RSS
+```
+• CoinDesk:
+  https://www.coindesk.com/arc/outboundfeeds/rss/
+
+• Cointelegraph:
+  https://cointelegraph.com/rss
+
+• Decrypt:
+  https://decrypt.co/feed
+
+• ChainFeeds:
+  https://www.chainfeeds.me/rss
+```
+
+**方法2**: 查找RSS链接
+• 访问网站,查找RSS图标 📡
+• 或在网址后加 /rss、/feed 尝试
+• 使用RSS查找工具: https://rss.app/
+
+**步骤**: 在Bot中添加
+• 点击"➕ 添加网站 RSS"
+• 粘贴RSS链接
+• 系统会自动验证
+
+━━━━━━━━━━━━━━━
+## ❓ 常见问题
+
+**Q: 添加后多久生效?**
+A: 立即生效,下次简报就会包含新源内容
+
+**Q: 可以添加多少个自定义源?**
+A: 没有数量限制,但建议不超过20个
+
+**Q: 如何删除不需要的源?**
+A: 进入"我的自定义源",点击删除按钮
+
+**Q: 为什么有些源验证失败?**
+A: 可能原因:
+  • RSS链接错误或失效
+  • 网站不支持RSS
+  • 网络连接问题
+
+━━━━━━━━━━━━━━━
+💡 **提示**: 系统会自动验证RSS源的质量和时效性,确保为您提供最新、最相关的信息!"""
+
+        keyboard = [[InlineKeyboardButton("🔙 返回", callback_data="sources_manage")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            help_text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
 
     async def _show_push_time_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
         """显示推送时间设置界面"""
@@ -1211,6 +1313,42 @@ class Web3DigestBot:
             else:
                 from core.custom_processes.web3digest.bot.source_handlers import handle_delete_source
                 await handle_delete_source(self, update, context)
+        elif data == "sources_migrate":
+            # 迁移新增的预设信息源
+            user_id = update.effective_user.id
+            from core.custom_processes.web3digest.core.source_migration_manager import SourceMigrationManager
+            migration_manager = SourceMigrationManager()
+
+            # 显示处理中提示
+            await query.edit_message_text("⏳ 正在迁移新信息源...")
+
+            # 执行迁移
+            result = await migration_manager.migrate_user_sources(user_id)
+
+            if result["migrated"] > 0:
+                # 构建迁移成功消息
+                new_sources_text = "\n".join([f"• {name}" for name in result["new_sources"]])
+                success_text = f"""✅ **迁移完成!**
+
+已为您添加 {result['migrated']} 个新信息源:
+
+{new_sources_text}
+
+💡 您可以在"查看预设信息源"中管理这些源"""
+
+                await query.edit_message_text(success_text, parse_mode=ParseMode.MARKDOWN)
+                await asyncio.sleep(2)
+            else:
+                await query.edit_message_text("ℹ️ 没有需要迁移的新源")
+                await asyncio.sleep(1)
+
+            # 返回源管理菜单
+            await self._show_sources_menu(update, context, user_id)
+
+        elif data == "sources_help":
+            # 显示信息源帮助文档
+            await self._show_sources_help(update, context)
+
         elif data == "sources_back":
             # 返回信息源菜单
             await self._show_sources_menu(update, context)

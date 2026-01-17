@@ -105,7 +105,7 @@ class DigestGenerator:
             # 确保筛选结果不为空（_filter_info 已有兜底逻辑，但这里再检查一次）
             if not selected_info:
                 logger.error(f"用户 {user_id} 筛选结果为空，使用原始信息前 {settings.MIN_INFO_PER_USER} 条作为兜底")
-                # 最终兜底：直接使用原始信息前 N 条
+                # 最终兜底：直接使用原始信息前 N 条(带评分)
                 selected_info = []
                 for info in raw_info[:settings.MIN_INFO_PER_USER]:
                     selected_info.append({
@@ -114,9 +114,15 @@ class DigestGenerator:
                         "summary": info.get("content", "")[:200],
                         "source": info.get("source", ""),
                         "url": info.get("url", ""),
-                        "importance": 5,
-                        "reason": "系统兜底（确保有内容）",
-                        "publish_time": info.get("publish_time", "")
+                        "publish_time": info.get("publish_time", ""),
+                        "scores": {
+                            "relevance_score": 2.0,
+                            "importance_score": 1.0,
+                            "freshness_score": 1.0,
+                            "total_score": 4.0,
+                            "confidence": 0.4
+                        },
+                        "recommendation_reason": "系统兜底（确保有内容）"
                     })
 
                 if not selected_info:
@@ -163,9 +169,9 @@ class DigestGenerator:
                         "stats": stats
                     }
 
-            # 4. 生成简报
+            # 4. 生成简报和质量指标
             stats = await self._calculate_stats(len(raw_info), len(selected_info), user_id)
-            
+
             # 确保 stats 中的数值类型正确
             stats = {
                 "sources_count": int(stats.get("sources_count", 0)),
@@ -175,8 +181,19 @@ class DigestGenerator:
                 "time_saved": float(stats.get("time_saved", 0)),
                 "total_time_saved": float(stats.get("total_time_saved", 0))
             }
-            
+
             stats["filtered_stats"] = filter_stats  # 添加过滤统计
+
+            # 4.1. 计算简报质量指标
+            from core.custom_processes.web3digest.core.quality_analyzer import DigestQualityAnalyzer
+            quality_analyzer = DigestQualityAnalyzer()
+            digest_quality = await quality_analyzer.calculate_digest_quality(
+                user_id=user_id,
+                selected_info=selected_info,
+                user_profile=structured_profile
+            )
+            stats["digest_quality"] = digest_quality  # 添加质量指标
+
             digest_text = await self.llm_client.generate_digest(user_profile, selected_info, stats)
 
             # 4. 保存统计信息
@@ -357,33 +374,22 @@ class DigestGenerator:
                 "source": source
             })
 
-        # 3. 调用 LLM 批量筛选
-        logger.info(f"开始为用户 {user_id} 筛选个性化内容，输入 {len(info_list)} 条")
-        selected_indices = await self.llm_client.batch_filter_info(
+        # 3. 调用 LLM 批量筛选(带评分)
+        logger.info(f"开始为用户 {user_id} 筛选个性化内容（带评分），输入 {len(info_list)} 条")
+
+        # 使用新的batch_filter_info_with_scores方法
+        selected_with_scores = await self.llm_client.batch_filter_info_with_scores(
             info_list=info_list,
             user_profile=user_profile,
             max_select=settings.MAX_INFO_PER_USER
         )
-        
-        logger.info(f"AI 筛选完成，选中 {len(selected_indices)} 条内容")
 
-        # 4. 根据选中的索引构建结果
-        selected = []
-        for idx in selected_indices:
-            if 0 <= idx < len(raw_info):
-                info = raw_info[idx]
-                selected.append({
-                    "id": info.get("id"),
-                    "title": info.get("title", ""),
-                    "summary": info.get("content", "")[:200],  # 摘要
-                    "source": info.get("source", ""),
-                    "url": info.get("url", ""),
-                    "importance": 7,  # 默认重要度
-                    "reason": "",
-                    "publish_time": info.get("publish_time", "")
-                })
+        logger.info(f"AI 筛选完成，选中 {len(selected_with_scores)} 条内容（含评分）")
 
-        # 5. 确保至少返回 MIN_INFO_PER_USER 条（兜底逻辑）
+        # 4. 使用带评分的筛选结果
+        selected = selected_with_scores
+
+        # 5. 确保至少返回 MIN_INFO_PER_USER 条（兜底逻辑-带评分）
         if len(selected) < settings.MIN_INFO_PER_USER:
             logger.info(f"AI 筛选只选出 {len(selected)} 条，补充到最少数量 {settings.MIN_INFO_PER_USER}")
             selected_ids = {s.get("id") for s in selected}
@@ -391,19 +397,26 @@ class DigestGenerator:
                 if len(selected) >= settings.MIN_INFO_PER_USER:
                     break
                 if info.get("id") not in selected_ids:
+                    # 为补充的信息添加默认评分
                     selected.append({
                         "id": info.get("id"),
                         "title": info.get("title", ""),
                         "summary": info.get("content", "")[:200],
                         "source": info.get("source", ""),
                         "url": info.get("url", ""),
-                        "importance": 5,
-                        "reason": "补充信息（确保最少数量）",
-                        "publish_time": info.get("publish_time", "")
+                        "publish_time": info.get("publish_time", ""),
+                        "scores": {
+                            "relevance_score": 2.5,
+                            "importance_score": 1.5,
+                            "freshness_score": 1.0,
+                            "total_score": 5.0,
+                            "confidence": 0.5
+                        },
+                        "recommendation_reason": "补充信息（确保最少数量）"
                     })
                     selected_ids.add(info.get("id"))
 
-        # 6. 最终检查：如果还是为空，返回前 N 条（绝对不能返回空）
+        # 6. 最终检查：如果还是为空，返回前 N 条（绝对不能返回空-带评分）
         if not selected and raw_info:
             logger.warning(f"筛选结果为空，使用兜底逻辑返回前 {settings.MIN_INFO_PER_USER} 条")
             for info in raw_info[:settings.MIN_INFO_PER_USER]:
@@ -413,9 +426,15 @@ class DigestGenerator:
                     "summary": info.get("content", "")[:200],
                     "source": info.get("source", ""),
                     "url": info.get("url", ""),
-                    "importance": 5,
-                    "reason": "兜底信息（确保有内容）",
-                    "publish_time": info.get("publish_time", "")
+                    "publish_time": info.get("publish_time", ""),
+                    "scores": {
+                        "relevance_score": 2.0,
+                        "importance_score": 1.0,
+                        "freshness_score": 1.0,
+                        "total_score": 4.0,
+                        "confidence": 0.4
+                    },
+                    "recommendation_reason": "兜底信息（确保有内容）"
                 })
 
         # 7. 构建筛选统计信息

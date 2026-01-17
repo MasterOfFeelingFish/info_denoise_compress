@@ -208,6 +208,14 @@ class DigestScheduler:
                 await asyncio.sleep(0.5)
                 await self._send_item_cards(user_id, top_items)
 
+            # 3. 发送质量报告卡片（如果有质量指标）
+            if isinstance(digest_data, dict):
+                stats = digest_data.get("stats", {})
+                digest_quality = stats.get("digest_quality")
+                if digest_quality:
+                    await asyncio.sleep(0.5)
+                    await self._send_quality_report(user_id, digest_quality)
+
             logger.info(f"✅ 简报已成功发送给用户 {user_id}")
 
         except Exception as e:
@@ -264,11 +272,38 @@ class DigestScheduler:
             source = item.get("source", "未知")
             url = safe_url(item.get("url", ""))
 
+            # 获取评分数据
+            scores = item.get("scores", {})
+            recommendation_reason = item.get("recommendation_reason", "")
+
             # 构建消息
             emoji = emoji_list[i] if i < len(emoji_list) else "📌"
             card_text = f"{emoji} *{self._escape_md(title)}*\n\n"
             if summary:
                 card_text += f"{self._escape_md(summary)}\n\n"
+
+            # 添加评分信息(如果存在)
+            if scores:
+                relevance_score = scores.get("relevance_score", 0)
+                importance_score = scores.get("importance_score", 0)
+                freshness_score = scores.get("freshness_score", 0)
+                total_score = scores.get("total_score", 0)
+                confidence = scores.get("confidence", 0.5)
+
+                # 生成置信度进度条
+                confidence_bar = '█' * int(confidence * 10) + '░' * (10 - int(confidence * 10))
+
+                card_text += f"📊 *评分详情*:\n"
+                card_text += f"• 置信度: {confidence_bar} {int(confidence*100)}%\n"
+                card_text += f"• 相关度: {'⭐' * int(relevance_score)} {relevance_score}/5\n"
+                card_text += f"• 重要性: {'⭐' * int(importance_score)} {importance_score}/3\n"
+                card_text += f"• 新鲜度: {'⭐' * int(freshness_score)} {freshness_score}/2\n"
+                card_text += f"• 总分: {total_score}/10\n\n"
+
+                # 添加推荐理由
+                if recommendation_reason:
+                    card_text += f"💡 *推荐理由*: {self._escape_md(recommendation_reason[:80])}\n\n"
+
             card_text += f"📍 来源: {source}"
 
             # 单条反馈按钮 + 查看原文按钮
@@ -303,6 +338,66 @@ class DigestScheduler:
                 )
 
             await asyncio.sleep(0.3)
+
+    async def _send_quality_report(self, user_id: int, quality: Dict):
+        """发送简报质量报告卡片"""
+
+        # 生成进度条
+        def make_progress_bar(value: float, length: int = 10) -> str:
+            filled = int(value * length)
+            return '█' * filled + '░' * (length - filled)
+
+        # 构建质量报告消息
+        quality_text = f"""📊 *本次简报质量报告*
+
+*整体评分*: {quality.get('overall_score', 0)}/10 {'⭐' * int(quality.get('overall_score', 0))}
+
+*各维度评分*:
+• 个性化程度: {make_progress_bar(quality.get('personalization_level', 0))} {int(quality.get('personalization_level', 0)*100)}%
+• 内容多样性: {make_progress_bar(quality.get('diversity_score', 0))} {int(quality.get('diversity_score', 0)*100)}%
+• 来源权威性: {make_progress_bar(quality.get('authority_score', 0))} {int(quality.get('authority_score', 0)*100)}%
+• 信息新鲜度: {make_progress_bar(quality.get('freshness_level', 0))} {int(quality.get('freshness_level', 0)*100)}%
+
+*兴趣覆盖*:
+• 覆盖领域: {quality.get('coverage', {}).get('user_interests_covered', 0)}/{quality.get('coverage', {}).get('total_interests', 0)}
+• 覆盖率: {int(quality.get('coverage', {}).get('coverage_rate', 0)*100)}%
+"""
+
+        # 添加覆盖的兴趣列表
+        covered_interests = quality.get('coverage', {}).get('covered_interests', [])
+        if covered_interests:
+            quality_text += f"• 已覆盖: {', '.join(covered_interests[:3])}"
+            if len(covered_interests) > 3:
+                quality_text += f" 等{len(covered_interests)}个领域"
+            quality_text += "\n"
+
+        quality_text += f"""
+*内容质量分布*:
+• 🏆 高质量(≥8分): {quality.get('quality_distribution', {}).get('high_quality', 0)} 条
+• 📝 中等质量(6-8分): {quality.get('quality_distribution', {}).get('medium_quality', 0)} 条
+• 📄 待改进(<6分): {quality.get('quality_distribution', {}).get('low_quality', 0)} 条
+
+━━━━━━━━━━━━━━━
+💡 AI正在持续学习您的偏好,推荐会越来越精准!"""
+
+        try:
+            await self.bot.application.bot.send_message(
+                chat_id=user_id,
+                text=quality_text,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            # Markdown失败则纯文本
+            logger.warning(f"发送质量报告失败: {e}")
+            try:
+                # 移除Markdown标记重新发送
+                plain_text = quality_text.replace('*', '').replace('_', '')
+                await self.bot.application.bot.send_message(
+                    chat_id=user_id,
+                    text=plain_text
+                )
+            except Exception as e2:
+                logger.error(f"发送质量报告纯文本也失败: {e2}")
 
     def _escape_md(self, text: str) -> str:
         """转义 Markdown 特殊字符"""

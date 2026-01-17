@@ -154,24 +154,24 @@ async def start_add_website(bot, update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def handle_add_source_input(bot, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理用户输入的信息源"""
+    """处理用户输入的信息源（增强版）"""
     user_id = update.effective_user.id
     input_text = update.message.text.strip()
-    
+
     if input_text.lower() == "/cancel":
         del bot._adding_source_state[user_id]
         await update.message.reply_text("❌ 已取消添加信息源")
         return
-    
+
     state = bot._adding_source_state.get(user_id)
     if not state:
         return
-    
+
     source_type = state["type"]
-    
+
     # 显示处理中
-    processing_msg = await update.message.reply_text("⏳ 正在验证信息源...")
-    
+    processing_msg = await update.message.reply_text("⏳ 正在验证信息源（检查可用性和内容质量）...")
+
     try:
         if source_type == "twitter":
             result = await bot.source_manager.add_custom_twitter(user_id, input_text)
@@ -179,22 +179,42 @@ async def handle_add_source_input(bot, update: Update, context: ContextTypes.DEF
             result = await bot.source_manager.add_custom_website(user_id, input_text)
         else:
             result = {"success": False, "message": "未知的信息源类型"}
-        
+
         # 清除状态
         del bot._adding_source_state[user_id]
-        
-        # 显示结果
+
+        # 显示结果（增强版）
         if result["success"]:
-            await processing_msg.edit_text(
-                f"{result['message']}\n\n"
-                "✅ 信息源已添加并启用，将在下次抓取时生效。"
-            )
+            success_text = f"{result['message']}\n\n✅ 信息源已添加并启用，将在下次抓取时生效。"
+
+            # 如果有警告信息，附加显示
+            if result.get("warning"):
+                success_text += f"\n\n⚠️ {result['warning']}"
+
+            await processing_msg.edit_text(success_text)
         else:
-            await processing_msg.edit_text(
-                f"❌ {result['message']}\n\n"
-                "请检查输入是否正确，或稍后重试。"
-            )
-            
+            # 构建详细的错误消息
+            error_text = f"❌ 添加失败\n\n{result['message']}"
+
+            # 根据错误码提供更多上下文
+            error_code = result.get("error_code")
+            if error_code == "TIMEOUT":
+                error_text += "\n\n💡 提示：该源响应较慢，请检查URL或稍后重试。"
+            elif error_code == "HTTP_ERROR":
+                error_text += "\n\n💡 提示：请检查URL是否正确，确保可以访问。"
+            elif error_code == "EMPTY_FEED":
+                error_text += "\n\n💡 提示：该RSS源当前没有任何内容，可能URL不正确。"
+            elif error_code == "LOW_QUALITY_FEED":
+                error_text += "\n\n💡 提示：该源缺少有效内容，请确认是否为有效的RSS源。"
+            elif error_code == "STALE_FEED":
+                error_text += "\n\n💡 提示：该源长时间未更新，可能已废弃。"
+            elif error_code == "PARSE_ERROR":
+                error_text += "\n\n💡 提示：RSS格式解析失败，请确认URL是否正确。"
+            elif error_code == "INVALID_USERNAME":
+                error_text += "\n\n💡 提示：Twitter用户名只能包含字母、数字和下划线。"
+
+            await processing_msg.edit_text(error_text)
+
     except Exception as e:
         logger.error(f"添加信息源失败: {e}", exc_info=True)
         del bot._adding_source_state[user_id]
