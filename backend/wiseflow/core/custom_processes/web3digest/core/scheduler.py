@@ -363,9 +363,13 @@ class DigestScheduler:
 • 覆盖率: {int(quality.get('coverage', {}).get('coverage_rate', 0)*100)}%
 """
 
-        # 添加覆盖的兴趣列表
-        covered_interests = quality.get('coverage', {}).get('covered_interests', [])
-        if covered_interests:
+        # 添加覆盖的兴趣列表（确保数据一致性）
+        coverage_data = quality.get('coverage', {})
+        user_interests_covered = coverage_data.get('user_interests_covered', 0)
+        covered_interests = coverage_data.get('covered_interests', [])
+        
+        # 只有在确实有覆盖的兴趣时才显示
+        if user_interests_covered > 0 and covered_interests:
             quality_text += f"• 已覆盖: {', '.join(covered_interests[:3])}"
             if len(covered_interests) > 3:
                 quality_text += f" 等{len(covered_interests)}个领域"
