@@ -129,24 +129,32 @@ USER_SOURCES_DIR = os.path.join(DATA_DIR, "user_sources")  # Per-user source con
 # Hardcoded default sources (used if env not set)
 _DEFAULT_SOURCES = {
     "twitter": {
-        "@VitalikButerin": "",
-        "@lookonchain": "",
-        "@whale_alert": "",
-        "@EmberCN": "",
-        "@ai_9684xtpa": "",
-        "@ethereum": "",
-        "@solana": "",
-        "@arbitrum": "",
-        "@CoinDesk": "",
-        "@TheBlock__": "",
-        "@WuBlockchain": "",
-        "@BlockBeatsAsia": "",
+        # These are bundled Twitter feeds from RSS.app
+        # The actual feeds are aggregated through these URLs:
+        # 1. https://rss.app/feeds/IsgW5eIWYB1aKRPi.xml
+        # 2. https://rss.app/feeds/JvRpA2NIzhBNRtUp.xml
+        "Twitter Bundle 1": "https://rss.app/feeds/IsgW5eIWYB1aKRPi.xml",
+        "Twitter Bundle 2": "https://rss.app/feeds/JvRpA2NIzhBNRtUp.xml",
     },
     "websites": {
-        "The Block": "https://www.theblock.co/rss.xml",
-        "CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
-        "Decrypt": "https://decrypt.co/feed",
+        # Web3 news sites with verified RSS feeds
         "Cointelegraph": "https://cointelegraph.com/rss",
+        "CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+        "Odaily": "https://www.odaily.news/newsflash/rss",
+        "ChainFeeds": "https://www.chainfeeds.xyz/feed",
+        "The Block Beats": "https://www.theblockbeats.info/rss",
+        "Foresight News": "https://foresightnews.pro/rss",
+        # Additional sites from Excel with verified RSS
+        "TechFlow Post": "https://techflowpost.substack.com/feed",  # Alternative: https://techflowpost.mirror.xyz/feed/atom
+        "DeFi Rate": "https://defirate.com/feed",
+        "Prediction News": "https://predictionnews.com/rss/",
+        "Event Horizon": "https://nexteventhorizon.substack.com/feed",
+        "un.Block (吴说)": "https://unblock256.substack.com/feed",  # wublock123.com's newsletter
+        # Note: Sites without RSS feeds (verified by search):
+        # - https://www.me.news/news (no RSS)
+        # - https://www.chaincatcher.com/news (404 on RSS endpoint)
+        # - https://www.panewslab.com/ (no RSS)
+        # - Telegram channels cannot be added as RSS
     }
 }
 
