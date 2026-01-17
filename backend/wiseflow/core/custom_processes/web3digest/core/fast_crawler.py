@@ -18,8 +18,9 @@ logger = setup_logger(__name__)
 class FastRssCrawler:
     """高性能RSS爬虫"""
 
-    def __init__(self, cache_manager: Optional[SqliteCache] = None):
+    def __init__(self, cache_manager: Optional[SqliteCache] = None, rss_history_manager=None):
         self.cache_manager = cache_manager
+        self.rss_history_manager = rss_history_manager
         self.timeout_config = {
             # 快速源 - 3秒超时
             'cointelegraph.com': 3,
@@ -123,6 +124,13 @@ class FastRssCrawler:
 
             elapsed = time.time() - start_time
             logger.info(f"Fast fetch: {name} -> {len(items)} items in {elapsed:.2f}s")
+
+            # 保存到历史存储（如果有配置）
+            if self.rss_history_manager and items:
+                try:
+                    await self.rss_history_manager.save_rss_items(url, name, items)
+                except Exception as e:
+                    logger.warning(f"Failed to save RSS history for {name}: {e}")
 
             return items
 

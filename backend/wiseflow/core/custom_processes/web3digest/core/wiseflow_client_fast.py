@@ -22,10 +22,11 @@ logger = setup_logger(__name__)
 class FastWiseFlowClient:
     """高速WiseFlow客户端"""
 
-    def __init__(self):
+    def __init__(self, rss_history_manager=None):
         self.cache_manager = None
         self.rss_app_client = RSSAppClient()
         self.intelligent_scheduler = IntelligentScheduler()
+        self.rss_history_manager = rss_history_manager
         self._initialized = False
         self.data_dir = Path(settings.DATA_DIR) / "raw_info"
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -79,7 +80,7 @@ class FastWiseFlowClient:
             crawl_results = []
 
             # 使用高速爬虫
-            async with FastRssCrawler(self.cache_manager) as crawler:
+            async with FastRssCrawler(self.cache_manager, rss_history_manager=self.rss_history_manager) as crawler:
                 # 并发抓取所有源
                 try:
                     all_items, source_metrics = await crawler.crawl_multiple(optimized_sources)

@@ -14,6 +14,7 @@ from core.custom_processes.web3digest.core.config import settings
 from core.custom_processes.web3digest.core.wiseflow_client import WiseFlowClient
 from core.custom_processes.web3digest.core.wiseflow_client_fast import FastWiseFlowClient
 from core.custom_processes.web3digest.core.background_prefetcher import background_prefetcher
+from core.custom_processes.web3digest.core.rss_history_manager import RssHistoryManager
 
 logger = setup_logger(__name__)
 
@@ -24,7 +25,8 @@ class CrawlerScheduler:
     def __init__(self):
         self.scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
         self.wiseflow_client = WiseFlowClient()
-        self.fast_wiseflow_client = FastWiseFlowClient()
+        self.rss_history_manager = RssHistoryManager()
+        self.fast_wiseflow_client = FastWiseFlowClient(rss_history_manager=self.rss_history_manager)
         self._running = False
     
     async def start(self):
@@ -47,11 +49,29 @@ class CrawlerScheduler:
             replace_existing=True
         )
 
+        # 添加RSS历史抓取任务（每30分钟抓取一次，保存历史数据）
+        self.scheduler.add_job(
+            func=self._rss_history_job,
+            trigger=CronTrigger(minute="*/30"),  # 每30分钟执行
+            id="rss_history_crawl",
+            name="RSS历史数据抓取",
+            replace_existing=True
+        )
+
+        # 添加定期清理任务（每天凌晨2点清理超过7天的旧数据）
+        self.scheduler.add_job(
+            func=self._cleanup_history_job,
+            trigger=CronTrigger(hour=2, minute=0),  # 每天凌晨2点执行
+            id="cleanup_rss_history",
+            name="清理RSS历史数据",
+            replace_existing=True
+        )
+
         # 启动调度器
         self.scheduler.start()
         self._running = True
 
-        logger.info("抓取调度器已启动，每小时执行一次抓取任务，后台预抓取已启用")
+        logger.info("抓取调度器已启动，每小时执行一次抓取任务，每30分钟执行RSS历史抓取，后台预抓取已启用")
     
     async def stop(self):
         """停止调度器"""
@@ -117,6 +137,49 @@ class CrawlerScheduler:
                 logger.info(f"普通爬虫完成: {result}")
             except Exception as e2:
                 logger.error(f"普通爬虫也失败: {e2}", exc_info=True)
+
+    async def _rss_history_job(self):
+        """RSS历史抓取任务（每30分钟执行）"""
+        logger.info("开始执行RSS历史抓取任务...")
+
+        try:
+            # 获取所有启用的RSS源
+            sources = await self.fast_wiseflow_client._get_enabled_sources()
+
+            if not sources:
+                logger.warning("没有启用的RSS源，跳过历史抓取")
+                return
+
+            logger.info(f"开始抓取 {len(sources)} 个RSS源的历史数据...")
+
+            # 使用FastRssCrawler抓取（会自动保存到历史存储）
+            from core.custom_processes.web3digest.core.fast_crawler import FastRssCrawler
+            async with FastRssCrawler(
+                self.fast_wiseflow_client.cache_manager,
+                rss_history_manager=self.rss_history_manager
+            ) as crawler:
+                # 并发抓取所有源
+                all_items, source_metrics = await crawler.crawl_multiple(sources)
+
+                logger.info(
+                    f"RSS历史抓取完成: {len(sources)} 个源, "
+                    f"{len(all_items)} 条数据已保存到历史存储"
+                )
+
+        except Exception as e:
+            logger.error(f"RSS历史抓取任务失败: {e}", exc_info=True)
+
+    async def _cleanup_history_job(self):
+        """清理RSS历史数据任务（每天执行）"""
+        logger.info("开始清理超过7天的RSS历史数据...")
+
+        try:
+            cleaned_count = await self.rss_history_manager.cleanup_old_items(days=7)
+
+            logger.info(f"RSS历史数据清理完成: 清理了 {cleaned_count} 条旧数据")
+
+        except Exception as e:
+            logger.error(f"清理RSS历史数据失败: {e}", exc_info=True)
     
     async def trigger_manual_crawl(self) -> dict:
         """手动触发抓取（用于测试）"""
