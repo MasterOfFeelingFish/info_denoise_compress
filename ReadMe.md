@@ -151,8 +151,9 @@ info_denoise_compress/
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/your-username/info_denoise_compress.git
+git clone https://github.com/WFHTask/info_denoise_compress.git
 cd info_denoise_compress
+git checkout beta1.0
 ```
 
 ### 2. 配置环境变量
@@ -161,91 +162,37 @@ cd info_denoise_compress
 cp bot/.env.example bot/.env
 ```
 
-编辑 `bot/.env`:
+编辑 `bot/.env`，填写以下**必填项**：
 
 ```bash
-# ============================================================================
-# 🤖 LLM 配置（必填，三选一）
-# ============================================================================
-# 提供商选择: gemini / openai (含 Kimi 等兼容 API)
-LLM=openai
-
-# --- Gemini 配置 ---
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-3-pro-preview
-
-# --- OpenAI / Kimi 配置 ---
-OPENAI_API_KEY=your_api_key
-OPENAI_MODEL=gpt-4o                              # 或 kimi-k2-thinking
-OPENAI_API_URL=                                   # Kimi: https://api.moonshot.cn/v1/chat/completions
-
-# ============================================================================
-# 📱 Telegram Bot 配置（必填）
-# ============================================================================
+# Telegram Bot Token（必填）
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 
-# ============================================================================
-# ⏰ 推送配置
-# ============================================================================
-PUSH_HOUR=9                      # 推送时间（小时，北京时间）
-PUSH_MINUTE=0                    # 推送时间（分钟）
+# 管理员 Telegram ID（必填，多个用逗号分隔）
+ADMIN_TELEGRAM_IDS=123456789
 
-# ============================================================================
-# 📊 简报配置
-# ============================================================================
-MIN_DIGEST_ITEMS=15              # 每日精选最少条数
-MAX_DIGEST_ITEMS=30              # 每日精选最多条数
-MAX_AI_INPUT_ITEMS=800           # AI单次输入最大条数（0=不限制，超过则分批处理）
+# LLM 配置（二选一）
+# --- 方案 A: 使用 Kimi（推荐，国内可用）---
+LLM=openai
+OPENAI_API_KEY=your_kimi_api_key
+OPENAI_MODEL=kimi-k2-thinking
+OPENAI_API_URL=https://api.moonshot.cn/v1/chat/completions
 
-# 并发处理用户数（推送简报时同时处理多少用户）
-CONCURRENT_USERS=100
-
-# ============================================================================
-# 🛡️ 管理员配置
-# ============================================================================
-ADMIN_TELEGRAM_IDS=123456789     # 管理员 Telegram ID（多个用逗号分隔）
-WHITELIST_ENABLED=true           # 白名单开关（true=仅白名单用户可用）
-
-# ============================================================================
-# 🗄️ 数据保留配置
-# ============================================================================
-# 超过保留天数后自动清理，每日 00:30 执行
-RAW_CONTENT_RETENTION_DAYS=7     # 原始抓取内容保留天数
-DAILY_STATS_RETENTION_DAYS=30    # 每日统计保留天数
-FEEDBACK_RETENTION_DAYS=30       # 反馈记录保留天数
-
-# ============================================================================
-# 💬 AI 对话配置
-# ============================================================================
-CHAT_CONTEXT_DAYS=1              # 对话上下文保留天数 (0=当天, 1=昨天, 2=前天)
-
-# ============================================================================
-# 📝 日志配置
-# ============================================================================
-LOG_ROTATE_DAYS=1                # 日志轮转间隔（天）
-LOG_BACKUP_COUNT=30              # 日志备份保留数量
-
-# ============================================================================
-# 🌐 默认信息源（新用户注册时使用）
-# ============================================================================
-DEFAULT_WEBSITE_SOURCES=Cointelegraph|https://cointelegraph.com/rss,CoinDesk|https://www.coindesk.com/arc/outboundfeeds/rss/,The Block Beats|https://api.theblockbeats.news/v1/open-api/home-xml,TechFlow Post|https://techflowpost.substack.com/feed
-DEFAULT_TWITTER_SOURCES=Twitter Bundle 1|https://rss.app/feeds/G6dip9YSp1NzQMls.xml,Twitter Bundle 2|https://rss.app/feeds/HVg722x6SI7tChWQ.xml
+# --- 方案 B: 使用 Gemini ---
+# LLM=gemini
+# GEMINI_API_KEY=your_gemini_api_key
 ```
 
-### 3. Docker 部署 (推荐)
+> 完整配置项参考 `bot/.env.example`
+
+### 3. Docker 部署
 
 ```bash
-# 创建数据目录
-mkdir -p data
-
 # 启动服务
-docker-compose up -d
-```
+docker compose up -d
 
-查看日志:
-
-```bash
-docker-compose logs -f
+# 查看日志
+docker compose logs -f
 ```
 
 ### 4. 本地开发
