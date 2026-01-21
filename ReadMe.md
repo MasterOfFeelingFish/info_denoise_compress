@@ -140,8 +140,8 @@ info_denoise_compress/
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/your-username/web3-daily-digest.git
-cd web3-daily-digest
+git clone https://github.com/your-username/info_denoise_compress.git
+cd info_denoise_compress
 ```
 
 ### 2. 配置环境变量
@@ -215,13 +215,17 @@ LOG_BACKUP_COUNT=30              # 日志备份保留数量
 # ============================================================================
 # 🌐 默认信息源（新用户注册时使用）
 # ============================================================================
-DEFAULT_WEBSITE_SOURCES=The Block|https://www.theblock.co/rss.xml,CoinDesk|https://www.coindesk.com/arc/outboundfeeds/rss/,Decrypt|https://decrypt.co/feed,Cointelegraph|https://cointelegraph.com/rss
-DEFAULT_TWITTER_SOURCES=@VitalikButerin,@lookonchain,@whale_alert
+DEFAULT_WEBSITE_SOURCES=Cointelegraph|https://cointelegraph.com/rss,CoinDesk|https://www.coindesk.com/arc/outboundfeeds/rss/,The Block Beats|https://api.theblockbeats.news/v1/open-api/home-xml,TechFlow Post|https://techflowpost.substack.com/feed
+DEFAULT_TWITTER_SOURCES=Twitter Bundle 1|https://rss.app/feeds/G6dip9YSp1NzQMls.xml,Twitter Bundle 2|https://rss.app/feeds/HVg722x6SI7tChWQ.xml
 ```
 
 ### 3. Docker 部署 (推荐)
 
 ```bash
+# 创建数据目录
+mkdir -p data
+
+# 启动服务
 docker-compose up -d
 ```
 
@@ -253,12 +257,16 @@ Twitter 不提供公开 RSS，需要使用 [RSS.app](https://rss.app) 服务转�
 
 ### 网站 RSS 源
 
-预置 4 个 Web3 媒体:
+预置 8 个 Web3 媒体:
 
-- The Block: `https://www.theblock.co/rss.xml`
-- CoinDesk: `https://www.coindesk.com/arc/outboundfeeds/rss/`
-- Decrypt: `https://decrypt.co/feed`
 - Cointelegraph: `https://cointelegraph.com/rss`
+- CoinDesk: `https://www.coindesk.com/arc/outboundfeeds/rss/`
+- The Block Beats: `https://api.theblockbeats.news/v1/open-api/home-xml`
+- TechFlow Post: `https://techflowpost.substack.com/feed`
+- DeFi Rate: `https://defirate.com/feed`
+- Prediction News: `https://predictionnews.com/rss/`
+- Event Horizon: `https://nexteventhorizon.substack.com/feed`
+- un.Block (吴说): `https://unblock256.substack.com/feed`
 
 可通过 `/sources` 命令添加更多。
 

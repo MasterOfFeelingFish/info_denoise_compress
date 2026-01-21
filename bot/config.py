@@ -131,10 +131,10 @@ _DEFAULT_SOURCES = {
     "twitter": {
         # These are bundled Twitter feeds from RSS.app
         # The actual feeds are aggregated through these URLs:
-        # 1. https://rss.app/feeds/IsgW5eIWYB1aKRPi.xml
-        # 2. https://rss.app/feeds/JvRpA2NIzhBNRtUp.xml
-        "Twitter Bundle 1": "https://rss.app/feeds/IsgW5eIWYB1aKRPi.xml",
-        "Twitter Bundle 2": "https://rss.app/feeds/JvRpA2NIzhBNRtUp.xml",
+        # 1. https://rss.app/feeds/G6dip9YSp1NzQMls.xml
+        # 2. https://rss.app/feeds/HVg722x6SI7tChWQ.xml
+        "Twitter Bundle 1": "https://rss.app/feeds/G6dip9YSp1NzQMls.xml",
+        "Twitter Bundle 2": "https://rss.app/feeds/HVg722x6SI7tChWQ.xml",
     },
     "websites": {
         # Web3 news sites with verified RSS feeds
