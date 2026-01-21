@@ -329,6 +329,67 @@ def get_source_list() -> Dict[str, List[str]]:
     }
 
 
+async def prefetch_all_user_sources() -> Dict[str, Any]:
+    """
+    预抓取所有用户的 RSS 源内容并保存到缓存。
+
+    此函数会：
+    1. 收集所有用户的 RSS 源
+    2. 抓取所有源的内容
+    3. 保存到预抓取缓存（自动去重）
+
+    Returns:
+        统计信息 {"sources_count": N, "new_items": M, "total_items": T, ...}
+    """
+    from utils.json_storage import get_users, get_user_sources, save_prefetch_cache
+
+    logger.info("Starting prefetch job...")
+
+    # 1. 收集所有用户的 RSS 源
+    users = get_users()
+    if not users:
+        logger.warning("No users registered, skipping prefetch")
+        return {"sources_count": 0, "new_items": 0, "total_items": 0}
+
+    all_sources = {}  # {category: {name: url}}
+
+    for user in users:
+        telegram_id = user.get("telegram_id")
+        if not telegram_id:
+            continue
+
+        user_sources = get_user_sources(telegram_id)
+        for category, sources in user_sources.items():
+            if category not in all_sources:
+                all_sources[category] = {}
+            for name, url in sources.items():
+                if url and name not in all_sources[category]:
+                    all_sources[category][name] = url
+
+    sources_count = sum(len(s) for s in all_sources.values())
+    logger.info(f"Prefetching from {sources_count} unique sources across {len(users)} users")
+
+    # 2. 抓取所有源
+    items = await fetch_all_sources(
+        hours_back=24,  # 获取 24 小时内的内容
+        sources=all_sources
+    )
+
+    logger.info(f"Fetched {len(items)} items from RSS sources")
+
+    # 3. 保存到缓存（自动去重）
+    stats = save_prefetch_cache(items)
+    stats["sources_count"] = sources_count
+    stats["users_count"] = len(users)
+
+    logger.info(
+        f"Prefetch complete: {stats['new_items']} new items, "
+        f"{stats['duplicates']} duplicates, {stats['total_items']} total cached"
+    )
+
+    return stats
+
+
 async def validate_twitter_handle(handle: str) -> Dict[str, Any]:
     """
     Validate a Twitter handle format.

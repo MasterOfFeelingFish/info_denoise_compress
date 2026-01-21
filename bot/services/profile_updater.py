@@ -183,11 +183,10 @@ async def update_user_profile_from_feedback(
         feedback_context += f"\nReason: {reason}"
 
     # Create focused prompt for real-time update
-    system_instruction = f"""You are a user preference profile manager.
+    system_instruction = f"""You are a user preference profile optimizer.
 
 ## Task
-Make a FOCUSED, MINIMAL update to the user profile based on this single feedback event.
-Do NOT accumulate or add new sections - REPLACE/MODIFY existing preferences.
+REFINE the user profile based on this feedback. Fixed length, higher precision.
 
 ## Current Profile
 {current_profile}
@@ -195,19 +194,38 @@ Do NOT accumulate or add new sections - REPLACE/MODIFY existing preferences.
 ## New Feedback Event
 {feedback_context}
 
-## CRITICAL Rules
-1. If feedback is "like": The user likes this topic/content, strengthen similar topics in preferences
-2. If feedback is "dislike": The user dislikes this topic/content, add to [明确不喜欢/Explicitly Dislikes] section
-3. If feedback is "negative" with reason: Adjust based on the reason
-4. If feedback is "positive": The digest was good, no major changes needed
-5. PRESERVE the language preference field
-6. Do NOT add new sections
-7. Do NOT accumulate - update in place
-8. Keep the profile concise (max 500 chars)
-9. Write in the user's original language
+## ⚠️ HARD LIMIT: 800 characters max (excluding section headers)
+
+## Update Logic
+
+### For "like" feedback:
+- This is EVIDENCE that user likes this type of content
+- REFINE the related preference to be more specific
+- Example: "关注DeFi" + liked Aave content → "关注DeFi借贷，尤其Aave"
+- Do NOT add new lines, UPDATE existing descriptions
+
+### For "dislike" feedback:
+- User explicitly doesn't want this type
+- Add to [明确不喜欢] section briefly
+- OR correct a wrong assumption in [关注领域]
+
+### For "positive" overall:
+- Profile is working well, minimal changes
+- Maybe slightly refine based on what was liked
+
+### For "negative" overall:
+- Something is wrong with current understanding
+- Adjust based on the reason provided
+
+## Key Rules
+1. REPLACE, don't accumulate - update existing text, don't append
+2. REFINE, don't expand - more precise ≠ more words
+3. Preserve language preference
+4. Keep same structure
+5. Maximize information density
 
 ## Output
-Output the updated profile. Keep same structure, just update relevant parts."""
+The updated profile only. Same structure, refined content."""
 
     prompt = "Update the profile based on this feedback event. Output only the updated profile text."
 

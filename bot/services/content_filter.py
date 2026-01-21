@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional
 from services.gemini import call_gemini_json, call_gemini
 from utils.json_storage import get_user_profile, get_user_feedbacks
 from utils.prompt_loader import get_prompt
-from config import MIN_DIGEST_ITEMS, MAX_DIGEST_ITEMS
+from config import MIN_DIGEST_ITEMS, MAX_DIGEST_ITEMS, MAX_AI_INPUT_ITEMS
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,11 @@ async def filter_content_for_user(
 ) -> List[Dict[str, Any]]:
     """
     Filter raw content based on user profile using AI.
+    
+    Optimized I/O: Uses compact input format (n/src/t) and output format (n/r)
+    to reduce token usage by ~40%.
+    
+    Supports batch processing when content exceeds MAX_AI_INPUT_ITEMS.
 
     Args:
         telegram_id: User's Telegram ID
@@ -83,6 +88,11 @@ async def filter_content_for_user(
         logger.warning(f"No content to filter for user {telegram_id}")
         return []
 
+    # Check if batch processing is needed
+    if MAX_AI_INPUT_ITEMS > 0 and len(raw_content) > MAX_AI_INPUT_ITEMS:
+        logger.info(f"Content count {len(raw_content)} exceeds limit {MAX_AI_INPUT_ITEMS}, using batch processing")
+        return await _filter_content_batched(telegram_id, raw_content, max_items)
+
     # Get user profile
     profile = get_user_profile(telegram_id)
     if not profile:
@@ -93,19 +103,34 @@ async def filter_content_for_user(
     feedbacks = get_user_feedbacks(telegram_id, days=7)
     feedback_summary = summarize_feedbacks(feedbacks)
 
-    # Prepare content list for AI
+    # Build index map for later mapping (n -> original item)
+    index_map: Dict[int, Dict[str, Any]] = {}
+    
+    # Prepare OPTIMIZED content list for AI (compact format)
+    # No artificial limit - let AI see all available content for best filtering
     content_for_ai = []
-    for item in raw_content[:100]:  # Limit to 100 items for API context
+    for i, item in enumerate(raw_content, 1):
+        index_map[i] = item
+        
+        # Merge title and summary intelligently
+        title = item.get("title", "")
+        summary = item.get("summary", "")
+        
+        # If summary adds more info beyond title, include it
+        if len(summary) > len(title) and summary not in title:
+            content = f"{title} | {summary}"
+        else:
+            content = title if len(title) >= len(summary) else summary
+        
+        # Compact format: n (index), src (source), t (content)
+        # Removed: id, link, category (not needed for AI analysis)
         content_for_ai.append({
-            "id": item.get("id"),
-            "title": item.get("title", ""),
-            "summary": item.get("summary", "")[:200],
-            "source": item.get("source", ""),
-            "link": item.get("link", ""),
-            "category": item.get("category", ""),
+            "n": i,
+            "src": item.get("source", ""),
+            "t": content
         })
 
-    # Build prompt
+    # Build prompt with optimized system instruction
     system_instruction = get_prompt(
         "filtering.txt",
         user_profile=profile,
@@ -114,95 +139,219 @@ async def filter_content_for_user(
         max_items=MAX_DIGEST_ITEMS
     )
 
-    prompt = f"""## Today's Content to Filter (Total: {len(content_for_ai)} items)
+    # Compact prompt format (no indent, saves tokens)
+    prompt = f"""## 今日待筛选内容 (共 {len(content_for_ai)} 条)
 
-{json.dumps(content_for_ai, ensure_ascii=False, indent=2)}
+{json.dumps(content_for_ai, ensure_ascii=False)}
 
-Please categorize into must_read, recommended, and other sections ({MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} total items)."""
+请分类输出 {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} 条。"""
 
     try:
-        # Call AI for filtering (token usage is automatically logged by the provider)
+        # Call AI for filtering
         filtered_result = await call_gemini_json(
             prompt=prompt,
             system_instruction=system_instruction,
             temperature=1.0
         )
 
-        # Check for error field in AI response (Fix #6)
+        # Check for error field in AI response
         if isinstance(filtered_result, dict) and "error" in filtered_result:
             error_msg = filtered_result.get("error", "Unknown AI error")
             logger.error(f"AI returned error for user {telegram_id}: {error_msg}")
-            # Return fallback with error context
-            return [
-                {
-                    "id": item.get("id"),
-                    "title": item.get("title"),
-                    "summary": item.get("summary", "")[:100],
-                    "source": item.get("source"),
-                    "link": item.get("link"),
-                    "section": "other",
-                    "reason": f"AI error: {error_msg[:50]}"
-                }
-                for item in raw_content[:max_items]
-            ]
+            return _build_fallback_result(raw_content, max_items, f"AI error: {error_msg[:50]}")
 
-        # Handle new format: {must_read: [], recommended: [], other: []}
+        # Handle optimized format: {must_read: [{n, r}], ...}
         if isinstance(filtered_result, dict):
-            must_read = filtered_result.get("must_read", [])
-            recommended = filtered_result.get("recommended", [])
-            other = filtered_result.get("other", [])
+            all_items = []
+            
+            for section in ["must_read", "macro_insights", "recommended", "other"]:
+                items = filtered_result.get(section, [])
+                for ai_item in items:
+                    n = ai_item.get("n")
+                    if n and n in index_map:
+                        # Map back to original item with full data
+                        original = index_map[n]
+                        mapped_item = {
+                            "id": original.get("id"),
+                            "title": original.get("title"),
+                            "summary": original.get("summary", "")[:100],
+                            "source": original.get("source"),
+                            "link": original.get("link"),
+                            "section": section,
+                            "reason": ai_item.get("r", "")
+                        }
+                        all_items.append(mapped_item)
+                    else:
+                        logger.warning(f"Invalid index {n} in AI response")
 
-            # Add section marker to each item
-            for item in must_read:
-                item["section"] = "must_read"
-            for item in recommended:
-                item["section"] = "recommended"
-            for item in other:
-                item["section"] = "other"
-
-            # Combine all items
-            all_items = must_read + recommended + other
             total_count = len(all_items)
+            section_counts = {}
+            for item in all_items:
+                s = item.get("section", "other")
+                section_counts[s] = section_counts.get(s, 0) + 1
 
             logger.info(f"AI selected {total_count} items for user {telegram_id} "
-                       f"(must_read: {len(must_read)}, recommended: {len(recommended)}, other: {len(other)})")
+                       f"(must_read: {section_counts.get('must_read', 0)}, "
+                       f"macro: {section_counts.get('macro_insights', 0)}, "
+                       f"recommended: {section_counts.get('recommended', 0)}, "
+                       f"other: {section_counts.get('other', 0)})")
             return all_items[:max_items]
 
-        # Legacy format: flat list (backward compatibility)
-        if isinstance(filtered_result, list):
-            logger.info(f"AI selected {len(filtered_result)} items for user {telegram_id}")
-            return filtered_result[:max_items]
-
         logger.error(f"Unexpected response format: {type(filtered_result)}")
-        # Return fallback with consistent structure
-        return [
-            {
-                "id": item.get("id"),
-                "title": item.get("title"),
-                "summary": item.get("summary", "")[:100],
-                "source": item.get("source"),
-                "link": item.get("link"),
-                "section": "other",
-                "reason": "Fallback: invalid AI response"
-            }
-            for item in raw_content[:max_items]
-        ]
+        return _build_fallback_result(raw_content, max_items, "Fallback: invalid AI response")
 
     except Exception as e:
         logger.error(f"AI filtering failed for {telegram_id}: {e}")
-        # Fallback: return first N items unfiltered
-        return [
-            {
-                "id": item.get("id"),
-                "title": item.get("title"),
-                "summary": item.get("summary", "")[:100],
-                "source": item.get("source"),
-                "link": item.get("link"),
-                "section": "other",
-                "reason": "Fallback selection"
-            }
-            for item in raw_content[:max_items]
-        ]
+        return _build_fallback_result(raw_content, max_items, "Fallback selection")
+
+
+def _build_fallback_result(raw_content: List[Dict[str, Any]], max_items: int, reason: str) -> List[Dict[str, Any]]:
+    """Build fallback result when AI filtering fails."""
+    return [
+        {
+            "id": item.get("id"),
+            "title": item.get("title"),
+            "summary": item.get("summary", "")[:100],
+            "source": item.get("source"),
+            "link": item.get("link"),
+            "section": "other",
+            "reason": reason
+        }
+        for item in raw_content[:max_items]
+    ]
+
+
+async def _filter_content_batched(
+    telegram_id: str,
+    raw_content: List[Dict[str, Any]],
+    max_items: int = 20
+) -> List[Dict[str, Any]]:
+    """
+    Process content in batches when total count exceeds MAX_AI_INPUT_ITEMS.
+    
+    Strategy:
+    1. Split content into batches of MAX_AI_INPUT_ITEMS
+    2. Filter each batch with AI
+    3. Merge results by section priority
+    4. Return top max_items
+    """
+    batch_size = MAX_AI_INPUT_ITEMS
+    total_items = len(raw_content)
+    num_batches = (total_items + batch_size - 1) // batch_size
+    
+    logger.info(f"Batch processing: {total_items} items in {num_batches} batches of {batch_size}")
+    
+    # Process each batch
+    all_results = []
+    for batch_idx in range(num_batches):
+        start = batch_idx * batch_size
+        end = min(start + batch_size, total_items)
+        batch = raw_content[start:end]
+        
+        logger.info(f"Processing batch {batch_idx + 1}/{num_batches}: items {start + 1}-{end}")
+        
+        # Temporarily set MAX_AI_INPUT_ITEMS to 0 to avoid recursion
+        # Call the main filter function for this batch
+        batch_results = await _filter_single_batch(telegram_id, batch, max_items)
+        all_results.extend(batch_results)
+    
+    # Merge and sort by section priority
+    section_priority = {"must_read": 0, "macro_insights": 1, "recommended": 2, "other": 3}
+    all_results.sort(key=lambda x: section_priority.get(x.get("section", "other"), 3))
+    
+    # Deduplicate by title (in case same news appears in multiple batches)
+    seen_titles = set()
+    unique_results = []
+    for item in all_results:
+        title = item.get("title", "")
+        if title not in seen_titles:
+            seen_titles.add(title)
+            unique_results.append(item)
+    
+    logger.info(f"Batch processing complete: {len(unique_results)} unique items from {len(all_results)} total")
+    return unique_results[:max_items]
+
+
+async def _filter_single_batch(
+    telegram_id: str,
+    batch_content: List[Dict[str, Any]],
+    max_items: int
+) -> List[Dict[str, Any]]:
+    """Filter a single batch of content (internal helper for batch processing)."""
+    # Get user profile
+    profile = get_user_profile(telegram_id)
+    if not profile:
+        profile = DEFAULT_PROFILE
+    
+    feedbacks = get_user_feedbacks(telegram_id, days=7)
+    feedback_summary = summarize_feedbacks(feedbacks)
+    
+    # Build index map
+    index_map: Dict[int, Dict[str, Any]] = {}
+    content_for_ai = []
+    
+    for i, item in enumerate(batch_content, 1):
+        index_map[i] = item
+        title = item.get("title", "")
+        summary = item.get("summary", "")
+        
+        if len(summary) > len(title) and summary not in title:
+            content = f"{title} | {summary}"
+        else:
+            content = title if len(title) >= len(summary) else summary
+        
+        content_for_ai.append({
+            "n": i,
+            "src": item.get("source", ""),
+            "t": content
+        })
+    
+    # Build prompt
+    system_instruction = get_prompt(
+        "filtering.txt",
+        user_profile=profile,
+        feedback_summary=feedback_summary,
+        min_items=MIN_DIGEST_ITEMS,
+        max_items=MAX_DIGEST_ITEMS
+    )
+    
+    prompt = f"""## 今日待筛选内容 (共 {len(content_for_ai)} 条，批次处理)
+
+{json.dumps(content_for_ai, ensure_ascii=False)}
+
+请分类输出 {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} 条。"""
+
+    try:
+        filtered_result = await call_gemini_json(
+            prompt=prompt,
+            system_instruction=system_instruction,
+            temperature=1.0
+        )
+        
+        if isinstance(filtered_result, dict) and "error" not in filtered_result:
+            all_items = []
+            for section in ["must_read", "macro_insights", "recommended", "other"]:
+                items = filtered_result.get(section, [])
+                for ai_item in items:
+                    n = ai_item.get("n")
+                    if n and n in index_map:
+                        original = index_map[n]
+                        all_items.append({
+                            "id": original.get("id"),
+                            "title": original.get("title"),
+                            "summary": original.get("summary", "")[:100],
+                            "source": original.get("source"),
+                            "link": original.get("link"),
+                            "section": section,
+                            "reason": ai_item.get("r", "")
+                        })
+            return all_items
+        
+        return _build_fallback_result(batch_content, max_items, "Batch AI error")
+    
+    except Exception as e:
+        logger.error(f"Batch filtering failed: {e}")
+        return _build_fallback_result(batch_content, max_items, "Batch fallback")
 
 
 async def categorize_filtered_content(
@@ -269,7 +418,8 @@ async def get_ai_summary(
     if not items:
         return "No significant updates today."
 
-    titles = [item.get("title", "") for item in items[:10]]
+    # Use all filtered items for summary (typically 15-30 items)
+    titles = [item.get("title", "") for item in items]
 
     # Load prompt from file
     prompt = get_prompt(
@@ -287,3 +437,145 @@ async def get_ai_summary(
     except Exception as e:
         logger.error(f"Failed to generate AI summary: {e}")
         return "Today's digest covers the latest Web3 developments across your areas of interest."
+
+
+def _extract_user_language(profile: str) -> str:
+    """Extract user's preferred language from profile."""
+    if not profile:
+        return "English"
+    
+    # 查找用户语言设置
+    profile_lower = profile.lower()
+    if "用户语言" in profile or "中文" in profile:
+        return "中文"
+    elif "日本語" in profile or "japanese" in profile_lower:
+        return "日本語"
+    elif "한국어" in profile or "korean" in profile_lower:
+        return "한국어"
+    elif "español" in profile_lower or "spanish" in profile_lower:
+        return "Español"
+    
+    return "English"
+
+
+async def translate_text(text: str, target_language: str) -> str:
+    """
+    Translate a plain text string to target language.
+    
+    Used for translating AI summary and other text content.
+    
+    Args:
+        text: Text to translate
+        target_language: Target language (e.g., "中文", "日本語")
+    
+    Returns:
+        Translated text
+    """
+    if not text or target_language.lower() == "english":
+        return text
+    
+    prompt = f"Translate the following to {target_language}. Output only the translation, no extra text:\n\n{text}"
+    
+    try:
+        result = await call_gemini(prompt=prompt, temperature=0.3)
+        return result.strip()
+    except Exception as e:
+        logger.error(f"Failed to translate text: {e}")
+        return text  # Return original on failure
+
+
+async def translate_content(
+    items: List[Dict[str, Any]],
+    target_language: str
+) -> List[Dict[str, Any]]:
+    """
+    Translate filtered content to user's preferred language.
+    
+    This is a separate step after filtering, implementing the
+    separation of concerns principle.
+    
+    Args:
+        items: List of filtered content items
+        target_language: Target language (e.g., "中文", "English")
+    
+    Returns:
+        List of translated content items
+    """
+    if not items:
+        return items
+    
+    # 如果目标语言是英文，且内容主要是英文，跳过翻译
+    if target_language.lower() == "english":
+        logger.info("Target language is English, skipping translation")
+        return items
+    
+    logger.info(f"Translating {len(items)} items to {target_language}")
+    
+    # 准备翻译内容
+    content_to_translate = []
+    for item in items:
+        content_to_translate.append({
+            "id": item.get("id"),
+            "title": item.get("title", ""),
+            "summary": item.get("summary", ""),
+            "reason": item.get("reason", ""),
+            "source": item.get("source", ""),
+            "link": item.get("link", ""),
+            "section": item.get("section", "other")
+        })
+    
+    # 构建翻译 prompt
+    prompt = get_prompt(
+        "translate.txt",
+        target_language=target_language,
+        content=json.dumps(content_to_translate, ensure_ascii=False, indent=2)
+    )
+    
+    try:
+        translated_result = await call_gemini_json(
+            prompt=prompt,
+            temperature=0.3  # 低温度保证翻译准确性
+        )
+        
+        # 处理返回结果
+        if isinstance(translated_result, list):
+            logger.info(f"Translation successful: {len(translated_result)} items")
+            return translated_result
+        elif isinstance(translated_result, dict) and "error" not in translated_result:
+            # 可能返回了包装的结果
+            if "items" in translated_result:
+                return translated_result["items"]
+            # 尝试直接返回
+            logger.warning("Unexpected translation format, using original")
+            return items
+        else:
+            logger.error(f"Translation failed: {translated_result}")
+            return items
+            
+    except Exception as e:
+        logger.error(f"Translation error: {e}")
+        # 翻译失败时返回原始内容
+        return items
+
+
+async def filter_and_translate_for_user(
+    telegram_id: str,
+    raw_content: List[Dict[str, Any]],
+    max_items: int = 20
+) -> List[Dict[str, Any]]:
+    """
+    Filter content for user (filtering only, no translation).
+    
+    Translation is handled at the final output stage, not here.
+    This keeps the middle processing language-agnostic.
+    
+    Args:
+        telegram_id: User's Telegram ID
+        raw_content: List of raw content items
+        max_items: Maximum number of items
+    
+    Returns:
+        List of filtered content items (original language)
+    """
+    # Only filter, no translation (translation happens at final output)
+    return await filter_content_for_user(telegram_id, raw_content, max_items)

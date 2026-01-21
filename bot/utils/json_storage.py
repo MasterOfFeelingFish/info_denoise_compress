@@ -19,6 +19,7 @@ from config import (
     DAILY_STATS_DIR,
     RAW_CONTENT_DIR,
     USER_SOURCES_DIR,
+    PREFETCH_CACHE_DIR,
     DEFAULT_USER_SOURCES,
     RAW_CONTENT_RETENTION_DAYS,
     DAILY_STATS_RETENTION_DAYS,
@@ -674,3 +675,224 @@ def cleanup_old_data() -> Dict[str, int]:
         )
 
     return results
+
+
+# ============ Prefetch Cache Management ============
+
+def get_prefetch_cache(date: Optional[str] = None) -> Dict[str, Any]:
+    """
+    获取指定日期的预抓取缓存。
+
+    Args:
+        date: 日期字符串 (YYYY-MM-DD)，默认为今天
+
+    Returns:
+        缓存数据字典，包含 seen_ids 和 items
+    """
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    _ensure_dir(PREFETCH_CACHE_DIR)
+    cache_path = os.path.join(PREFETCH_CACHE_DIR, f"{date}.json")
+
+    data = _read_json(cache_path)
+    if not data:
+        # 初始化空缓存
+        data = {
+            "date": date,
+            "seen_ids": [],
+            "items": [],
+            "fetch_count": 0,
+            "last_fetch": None,
+        }
+
+    return data
+
+
+def save_prefetch_cache(
+    items: List[Dict[str, Any]],
+    date: Optional[str] = None
+) -> Dict[str, int]:
+    """
+    保存预抓取的内容到缓存，自动去重。
+
+    Args:
+        items: 新抓取的内容列表
+        date: 日期字符串 (YYYY-MM-DD)，默认为今天
+
+    Returns:
+        统计信息 {"new_items": N, "total_items": M, "duplicates": D}
+    """
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    # 读取现有缓存
+    cache = get_prefetch_cache(date)
+    seen_ids = set(cache.get("seen_ids", []))
+    existing_items = cache.get("items", [])
+
+    # 去重添加新内容
+    new_count = 0
+    duplicate_count = 0
+
+    for item in items:
+        item_id = item.get("id")
+        if item_id and item_id not in seen_ids:
+            seen_ids.add(item_id)
+            existing_items.append(item)
+            new_count += 1
+        else:
+            duplicate_count += 1
+
+    # 更新缓存
+    cache["seen_ids"] = list(seen_ids)
+    cache["items"] = existing_items
+    cache["fetch_count"] = cache.get("fetch_count", 0) + 1
+    cache["last_fetch"] = datetime.now().isoformat()
+
+    # 保存
+    _ensure_dir(PREFETCH_CACHE_DIR)
+    cache_path = os.path.join(PREFETCH_CACHE_DIR, f"{date}.json")
+    _write_json(cache_path, cache)
+
+    stats = {
+        "new_items": new_count,
+        "total_items": len(existing_items),
+        "duplicates": duplicate_count,
+    }
+
+    logger.info(
+        f"Prefetch cache updated: +{new_count} new, {duplicate_count} duplicates, "
+        f"{len(existing_items)} total items"
+    )
+
+    return stats
+
+
+def get_prefetch_items(date: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    获取指定日期的所有预抓取内容（已去重）。
+
+    Args:
+        date: 日期字符串 (YYYY-MM-DD)，默认为今天
+
+    Returns:
+        内容列表
+    """
+    cache = get_prefetch_cache(date)
+    return cache.get("items", [])
+
+
+def clear_prefetch_cache(date: Optional[str] = None) -> bool:
+    """
+    清除指定日期的预抓取缓存。
+
+    Args:
+        date: 日期字符串 (YYYY-MM-DD)，默认为今天
+
+    Returns:
+        是否成功
+    """
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    cache_path = os.path.join(PREFETCH_CACHE_DIR, f"{date}.json")
+
+    try:
+        if os.path.exists(cache_path):
+            os.remove(cache_path)
+            logger.info(f"Cleared prefetch cache for {date}")
+        return True
+    except Exception as e:
+        logger.error(f"Error clearing prefetch cache: {e}")
+        return False
+
+
+def cleanup_prefetch_cache(retention_days: int = 2) -> int:
+    """
+    清理过期的预抓取缓存（默认保留 2 天）。
+
+    Args:
+        retention_days: 保留天数
+
+    Returns:
+        删除的文件数
+    """
+    return _cleanup_old_files_in_dir(PREFETCH_CACHE_DIR, retention_days)
+
+
+# ============ Whitelist Management ============
+
+def get_whitelist() -> List[int]:
+    """Get whitelisted user IDs."""
+    from config import WHITELIST_FILE
+    
+    data = _read_json(WHITELIST_FILE)
+    return data.get("whitelisted_ids", [])
+
+
+def add_to_whitelist(telegram_id: int) -> bool:
+    """Add user to whitelist."""
+    from config import WHITELIST_FILE
+    
+    data = _read_json(WHITELIST_FILE)
+    if "whitelisted_ids" not in data:
+        data["whitelisted_ids"] = []
+        
+    if telegram_id not in data["whitelisted_ids"]:
+        data["whitelisted_ids"].append(telegram_id)
+        return _write_json(WHITELIST_FILE, data)
+    
+    return True
+
+
+def remove_from_whitelist(telegram_id: int) -> bool:
+    """Remove user from whitelist."""
+    from config import WHITELIST_FILE
+    
+    data = _read_json(WHITELIST_FILE)
+    if "whitelisted_ids" not in data:
+        return False
+        
+    if telegram_id in data["whitelisted_ids"]:
+        data["whitelisted_ids"].remove(telegram_id)
+        return _write_json(WHITELIST_FILE, data)
+        
+    return False
+
+# ============ Whitelist Settings ============
+
+def get_whitelist_enabled() -> bool:
+    """Get whitelist enabled status. Reads from settings file or defaults to env config."""
+    from config import WHITELIST_SETTINGS_FILE, WHITELIST_ENABLED_DEFAULT
+    
+    data = _read_json(WHITELIST_SETTINGS_FILE)
+    if "enabled" in data:
+        return data["enabled"]
+    return WHITELIST_ENABLED_DEFAULT
+
+
+def set_whitelist_enabled(enabled: bool) -> bool:
+    """Set whitelist enabled status. Saves to settings file."""
+    from config import WHITELIST_SETTINGS_FILE
+    
+    data = _read_json(WHITELIST_SETTINGS_FILE)
+    data["enabled"] = enabled
+    return _write_json(WHITELIST_SETTINGS_FILE, data)
+
+
+def is_whitelisted(telegram_id: int) -> bool:
+    """Check if user is whitelisted (considering whitelist enabled status)."""
+    from config import ADMIN_TELEGRAM_IDS
+    
+    # Admins are always allowed
+    if str(telegram_id) in ADMIN_TELEGRAM_IDS:
+        return True
+    
+    # If whitelist is disabled, everyone is allowed
+    if not get_whitelist_enabled():
+        return True
+        
+    # Check whitelist
+    whitelist = get_whitelist()
+    return telegram_id in whitelist

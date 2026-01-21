@@ -12,8 +12,9 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
-from services.content_filter import categorize_filtered_content, get_ai_summary
+from services.content_filter import categorize_filtered_content, get_ai_summary, translate_text, translate_content, _extract_user_language
 from utils.json_storage import get_user_profile
+from config import MAX_DIGEST_ITEMS
 
 # Separator characters for visual hierarchy
 DIVIDER_HEAVY = '━'
@@ -116,21 +117,25 @@ LOCALE_STRINGS = {
 CATEGORY_NAMES = {
     "zh": {
         "must_read": "今日必看",
+        "macro_insights": "行业大局",
         "recommended": "推荐",
         "other": "其他",
     },
     "en": {
         "must_read": "MUST READ",
+        "macro_insights": "Industry Context",
         "recommended": "Recommended",
         "other": "Other",
     },
     "ja": {
         "must_read": "今日の必読",
+        "macro_insights": "業界概況",
         "recommended": "おすすめ",
         "other": "その他",
     },
     "ko": {
         "must_read": "필독",
+        "macro_insights": "업계 동향",
         "recommended": "추천",
         "other": "기타",
     },
@@ -260,19 +265,30 @@ def format_top_stories(items: List[Dict[str, Any]], lang: str = "zh") -> str:
     return "\n".join(lines)
 
 
-def format_category_section(category: str, items: List[Dict[str, Any]], lang: str = "zh") -> str:
-    """Format a category section with compact layout."""
+def format_category_section(category: str, items: List[Dict[str, Any]], lang: str = "zh", max_items: int = None) -> str:
+    """Format a category section with compact layout.
+    
+    Args:
+        category: Category name
+        items: List of items in this category
+        lang: Language for display
+        max_items: Max items to display (None = show all)
+    """
     if not items:
         return ""
 
     category_names = get_category_names(lang)
     display_name = category_names.get(category, category.title())
+    
+    # Apply max_items limit if specified
+    display_items = items[:max_items] if max_items else items
+    
     lines = [
-        f"{display_name} ({len(items)})",
+        f"{display_name} ({len(display_items)})",
         ""
     ]
 
-    for item in items[:5]:  # Max 5 items per category
+    for item in display_items:
         title = item.get("title", "Untitled")[:55]
         source = item.get("source", "")
         link = item.get("link", "")
@@ -335,10 +351,17 @@ async def generate_daily_report(
     lang = detect_user_language(profile)
     locale = get_locale(lang)
 
-    # Generate AI summary
+    # Generate AI summary (in English)
     ai_summary = await get_ai_summary(filtered_items, profile)
+    
+    # === Final output translation (all at once) ===
+    target_language = _extract_user_language(profile)
+    if target_language != "English":
+        # Translate both items and summary before output
+        filtered_items = await translate_content(filtered_items, target_language)
+        ai_summary = await translate_text(ai_summary, target_language)
 
-    # Categorize content
+    # Categorize content (after translation)
     categories = await categorize_filtered_content(filtered_items)
 
     # Build report with clear visual hierarchy
@@ -352,17 +375,51 @@ async def generate_daily_report(
 {ai_summary}
 """)
 
-    # Top stories
+    # Top stories (separate from quota)
     top_stories = categories.pop("top_stories", [])
     if top_stories:
         report_parts.append(format_top_stories(top_stories, lang))
         report_parts.append(DIVIDER_LIGHT * SEPARATOR_LENGTH)
         report_parts.append("")
 
-    # Other categories
-    for category, items in categories.items():
-        if items:
-            report_parts.append(format_category_section(category, items, lang))
+    # Dynamic allocation for other categories
+    # Total quota for non-top-stories items
+    total_quota = MAX_DIGEST_ITEMS
+    
+    # Get categories with items
+    active_categories = {k: v for k, v in categories.items() if v}
+    
+    if active_categories:
+        # Calculate total items across all categories
+        total_items = sum(len(items) for items in active_categories.values())
+        
+        # Allocate proportionally, with minimum 1 per category
+        category_limits = {}
+        remaining_quota = total_quota
+        
+        for category, items in active_categories.items():
+            if total_items > 0:
+                # Proportional allocation
+                proportion = len(items) / total_items
+                allocated = max(1, int(proportion * total_quota))
+                # Don't allocate more than available items
+                category_limits[category] = min(allocated, len(items))
+            else:
+                category_limits[category] = len(items)
+        
+        # Adjust if over quota
+        while sum(category_limits.values()) > total_quota:
+            # Reduce from largest category
+            largest = max(category_limits, key=category_limits.get)
+            if category_limits[largest] > 1:
+                category_limits[largest] -= 1
+            else:
+                break
+        
+        # Render categories with dynamic limits
+        for category, items in active_categories.items():
+            max_items = category_limits.get(category, len(items))
+            report_parts.append(format_category_section(category, items, lang, max_items))
 
     # Divider before metrics
     report_parts.append(DIVIDER_LIGHT * SEPARATOR_LENGTH)
@@ -532,13 +589,14 @@ def prepare_digest_messages(
     locale = get_locale(lang)
     category_names = get_category_names(lang)
 
-    # Group items by section
+    # Group items by section (4 categories now)
     must_read = [item for item in filtered_items if item.get("section") == "must_read"]
+    macro_insights = [item for item in filtered_items if item.get("section") == "macro_insights"]
     recommended = [item for item in filtered_items if item.get("section") == "recommended"]
     other = [item for item in filtered_items if item.get("section") == "other"]
 
     # Fallback for legacy format (importance-based)
-    if not must_read and not recommended and not other:
+    if not must_read and not macro_insights and not recommended and not other:
         must_read = [item for item in filtered_items if item.get("importance") == "high"]
         other = [item for item in filtered_items if item.get("importance") != "high"]
 
@@ -577,7 +635,19 @@ def prepare_digest_messages(
             item_messages.append((msg, item_id))
             item_index += 1
 
-    # Section 2: Recommended (推荐) - Matching user preferences
+    # Section 2: Macro Insights (行业大局) - Industry context, implicit needs
+    if macro_insights:
+        section_name = category_names.get("macro_insights", "Industry Context")
+        section_header = f"\n<b>{DIVIDER_LIGHT * 8} {section_name} {DIVIDER_LIGHT * 8}</b>\n"
+        item_messages.append((section_header, "section_macro_insights"))
+
+        for item in macro_insights:
+            msg = format_single_item(item, item_index, lang)
+            item_id = item.get("id", f"item_{item_index}")
+            item_messages.append((msg, item_id))
+            item_index += 1
+
+    # Section 3: Recommended (推荐) - Matching user preferences
     if recommended:
         section_name = category_names.get("recommended", "Recommended")
         section_header = f"\n<b>{DIVIDER_LIGHT * 8} {section_name} {DIVIDER_LIGHT * 8}</b>\n"
@@ -589,7 +659,7 @@ def prepare_digest_messages(
             item_messages.append((msg, item_id))
             item_index += 1
 
-    # Section 3: Other (其他)
+    # Section 4: Other (其他)
     if other:
         section_name = category_names.get("other", "Other")
         section_header = f"\n<b>{DIVIDER_LIGHT * 8} {section_name} {DIVIDER_LIGHT * 8}</b>\n"

@@ -43,6 +43,9 @@ nul
 .env
 bot/.env
 
+# Runtime data
+data/
+
 # Claude Code
 .claude/
 CLAUDE.md

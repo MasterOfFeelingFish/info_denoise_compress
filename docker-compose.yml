@@ -9,6 +9,7 @@ services:
       - ./bot/.env
     volumes:
       - ./data:/app/data
+      - ./bot:/app
     networks:
       - web3-digest
 

@@ -35,7 +35,7 @@ async def process_single_user(
         Dict with status info: {"user": telegram_id, "status": "success|error", ...}
     """
     from services.rss_fetcher import fetch_user_sources, get_user_source_list
-    from services.content_filter import filter_content_for_user, get_ai_summary
+    from services.content_filter import filter_and_translate_for_user, get_ai_summary, translate_text, translate_content, _extract_user_language
     from services.report_generator import (
         generate_empty_report,
         detect_user_language,
@@ -45,6 +45,7 @@ async def process_single_user(
         get_user_profile,
         save_user_raw_content,
         save_user_daily_stats,
+        get_prefetch_items,
     )
     from handlers.feedback import create_feedback_keyboard, create_item_feedback_keyboard
 
@@ -58,27 +59,43 @@ async def process_single_user(
         user_sources = get_user_source_list(telegram_id)
         sources_count = sum(len(s) for s in user_sources.values())
 
-        # ===== Pre-fetch optimization: Filter from global data if available =====
-        if global_raw_content is not None:
-            # Filter global data by user's subscribed sources
-            user_source_names = set()
-            for category_sources in user_sources.values():
-                user_source_names.update(category_sources)
+        # 获取用户订阅的源名称集合
+        user_source_names = set()
+        for category_sources in user_sources.values():
+            user_source_names.update(category_sources)
 
-            # Filter items that match user's sources
+        # ===== 数据获取优先级：预抓取缓存 > 传入的全局数据 > 实时抓取 =====
+
+        # 尝试从预抓取缓存获取（包含多次抓取累积的去重数据）
+        prefetch_items = get_prefetch_items(today)
+
+        if prefetch_items:
+            # 从预抓取缓存中过滤用户订阅的内容
+            raw_content = [
+                item for item in prefetch_items
+                if item.get("source") in user_source_names
+            ]
+            logger.info(
+                f"User {telegram_id}: Got {len(raw_content)} items from prefetch cache "
+                f"(total cached: {len(prefetch_items)}, user sources: {sources_count})"
+            )
+
+        elif global_raw_content is not None:
+            # 从传入的全局数据中过滤（兼容旧逻辑）
             raw_content = [
                 item for item in global_raw_content
                 if item.get("source") in user_source_names
             ]
-
             logger.info(f"User {telegram_id}: Filtered {len(raw_content)} items "
                        f"from global data ({sources_count} sources)")
+
         else:
-            # Fallback: Individual fetch (used for /test command and first digest)
+            # Fallback: 实时抓取（用于 /test 命令或首次推送）
             raw_content = await fetch_user_sources(telegram_id, hours_back=24)
             logger.info(f"User {telegram_id}: Fetched {len(raw_content)} items "
-                       f"from {sources_count} sources")
-        # ===== Filtering complete =====
+                       f"from {sources_count} sources (realtime)")
+
+        # ===== 数据获取完成 =====
 
         # Save raw content for this user
         save_user_raw_content(telegram_id, today, raw_content, user_id=user_id)
@@ -87,8 +104,8 @@ async def process_single_user(
         profile = get_user_profile(telegram_id) or ""
         user_lang = detect_user_language(profile)
 
-        # 2. Filter content for user
-        filtered_items = await filter_content_for_user(
+        # 2. Filter content for user (filtering only, no translation)
+        filtered_items = await filter_and_translate_for_user(
             telegram_id=telegram_id,
             raw_content=raw_content,
             max_items=MAX_DIGEST_ITEMS
@@ -98,8 +115,15 @@ async def process_single_user(
         report_id = f"{today}_{telegram_id}"
 
         if filtered_items:
-            # Generate AI summary
+            # Generate AI summary (in English)
             ai_summary = await get_ai_summary(filtered_items, profile)
+            
+            # === Final output translation (all at once) ===
+            target_language = _extract_user_language(profile)
+            if target_language != "English":
+                # Translate both items and summary before sending to user
+                filtered_items = await translate_content(filtered_items, target_language)
+                ai_summary = await translate_text(ai_summary, target_language)
 
             # Prepare messages: header + individual items
             header, item_messages = prepare_digest_messages(

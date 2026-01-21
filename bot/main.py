@@ -27,13 +27,18 @@ from telegram.ext import (
     filters,
 )
 
-from config import TELEGRAM_BOT_TOKEN, PUSH_HOUR, PUSH_MINUTE, DATA_DIR, LOG_ROTATE_DAYS, LOG_BACKUP_COUNT, MAX_DIGEST_ITEMS, CONCURRENT_USERS
+from config import (
+    TELEGRAM_BOT_TOKEN, PUSH_HOUR, PUSH_MINUTE, DATA_DIR,
+    LOG_ROTATE_DAYS, LOG_BACKUP_COUNT, MAX_DIGEST_ITEMS, CONCURRENT_USERS,
+    PREFETCH_INTERVAL_HOURS, PREFETCH_START_HOUR, ADMIN_TELEGRAM_IDS
+)
 from services.digest_processor import process_single_user
 from utils.telegram_utils import safe_answer_callback_query
 from handlers.start import get_start_handler, get_start_callbacks
 from handlers.feedback import get_feedback_handlers
 from handlers.settings import get_settings_handler, get_settings_callbacks
 from handlers.sources import get_sources_handler, get_sources_callbacks
+from handlers.admin import get_admin_handlers
 
 
 # ============ Logging Configuration ============
@@ -98,6 +103,21 @@ logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+# Force reload environment variables and update config
+from dotenv import load_dotenv
+import config
+
+env_path = os.path.join(os.path.dirname(__file__), '.env')
+if os.path.exists(env_path):
+    load_dotenv(env_path, override=True)
+    logger.info(f"Force reloaded .env from {env_path}")
+
+# Update config variable (support multiple admins)
+_admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "") or os.getenv("ADMIN_TELEGRAM_ID", "")
+config.ADMIN_TELEGRAM_IDS = [id.strip() for id in _admin_ids_str.split(",") if id.strip()]
+config.ADMIN_TELEGRAM_ID = config.ADMIN_TELEGRAM_IDS[0] if config.ADMIN_TELEGRAM_IDS else ""
+logger.info(f"Admin IDs configured: {len(config.ADMIN_TELEGRAM_IDS)} admin(s)")
 
 
 async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -215,6 +235,48 @@ async def test_profile_command(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.error(f"Test profile update failed: {e}")
         await update.message.reply_text(f"更新失败: {str(e)[:100]}")
+
+
+async def test_prefetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Hidden /testprefetch command - manually trigger prefetch and show stats."""
+    from services.rss_fetcher import prefetch_all_user_sources
+    from utils.json_storage import get_prefetch_cache
+    from datetime import datetime
+
+    await update.message.reply_text("🔄 正在执行预抓取测试...")
+
+    try:
+        # 执行预抓取
+        stats = await prefetch_all_user_sources()
+
+        # 获取缓存状态
+        today = datetime.now().strftime("%Y-%m-%d")
+        cache = get_prefetch_cache(today)
+
+        result_text = f"""✅ 预抓取测试完成
+
+📊 本次抓取统计：
+• 用户数: {stats.get('users_count', 0)}
+• 信息源数: {stats.get('sources_count', 0)}
+• 新增条目: {stats.get('new_items', 0)}
+• 重复跳过: {stats.get('duplicates', 0)}
+
+📦 当日缓存状态：
+• 累计条目: {len(cache.get('items', []))}
+• 去重 ID 数: {len(cache.get('seen_ids', []))}
+• 抓取次数: {cache.get('fetch_count', 0)}
+• 最后抓取: {cache.get('last_fetch', 'N/A')[:19] if cache.get('last_fetch') else 'N/A'}
+
+💡 提示：
+• 如果"新增条目"为 0 且"重复跳过"有数值，说明去重正常工作
+• 多次执行此命令，观察"累计条目"是否增加（有新推文时）
+• 使用 /test 命令可测试完整推送流程"""
+
+        await update.message.reply_text(result_text)
+
+    except Exception as e:
+        logger.error(f"Test prefetch failed: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ 预抓取失败: {str(e)[:200]}")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -373,6 +435,48 @@ async def post_init(application: Application) -> None:
 
     logger.info("Scheduled data cleanup at 00:30 Beijing Time")
 
+    # Schedule prefetch jobs (if enabled)
+    # 预抓取任务：每隔 PREFETCH_INTERVAL_HOURS 小时执行一次
+    if PREFETCH_INTERVAL_HOURS > 0:
+        # 计算预抓取时间点
+        prefetch_times = []
+        hour = PREFETCH_START_HOUR
+        while hour < 24:
+            prefetch_times.append(hour)
+            hour += PREFETCH_INTERVAL_HOURS
+
+        # 为每个时间点创建定时任务
+        for i, prefetch_hour in enumerate(prefetch_times):
+            prefetch_time = time(hour=prefetch_hour, minute=0, tzinfo=beijing_tz)
+            application.job_queue.run_daily(
+                callback=prefetch_job,
+                time=prefetch_time,
+                name=f"prefetch_{prefetch_hour:02d}"
+            )
+
+        # 同时在推送前 30 分钟也执行一次预抓取，确保数据最新
+        pre_push_hour = (PUSH_HOUR - 1) % 24 if PUSH_HOUR > 0 else 23
+        pre_push_time = time(hour=pre_push_hour, minute=30, tzinfo=beijing_tz)
+        application.job_queue.run_daily(
+            callback=prefetch_job,
+            time=pre_push_time,
+            name="prefetch_pre_push"
+        )
+
+        logger.info(
+            f"Scheduled prefetch jobs at hours: {prefetch_times} + {pre_push_hour:02d}:30 (pre-push) Beijing Time"
+        )
+
+        # 启动时立即执行一次预抓取（异步）
+        application.job_queue.run_once(
+            callback=prefetch_job,
+            when=10,  # 10 秒后执行
+            name="prefetch_startup"
+        )
+        logger.info("Scheduled startup prefetch in 10 seconds")
+    else:
+        logger.info("Prefetch disabled (PREFETCH_INTERVAL_HOURS=0)")
+
 
 async def profile_update_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Scheduled job to update user profiles based on feedback."""
@@ -394,22 +498,50 @@ async def data_cleanup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     - raw_content: 保留 RAW_CONTENT_RETENTION_DAYS 天
     - daily_stats: 保留 DAILY_STATS_RETENTION_DAYS 天
     - feedback: 保留 FEEDBACK_RETENTION_DAYS 天
+    - prefetch_cache: 保留 2 天
     """
-    from utils.json_storage import cleanup_old_data
+    from utils.json_storage import cleanup_old_data, cleanup_prefetch_cache
 
     logger.info("Running scheduled data cleanup...")
     try:
         results = cleanup_old_data()
+        # 清理预抓取缓存（保留 2 天）
+        prefetch_deleted = cleanup_prefetch_cache(retention_days=2)
+        results["prefetch_cache"] = prefetch_deleted
+
         total = sum(results.values())
         if total > 0:
             logger.info(
                 f"Data cleanup complete: deleted {results['raw_content']} raw_content, "
-                f"{results['daily_stats']} daily_stats, {results['feedback']} feedback files"
+                f"{results['daily_stats']} daily_stats, {results['feedback']} feedback, "
+                f"{results['prefetch_cache']} prefetch_cache files"
             )
         else:
             logger.info("Data cleanup complete: no expired files to delete")
     except Exception as e:
         logger.error(f"Data cleanup failed: {e}")
+
+
+async def prefetch_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    定时预抓取任务。
+
+    每隔 PREFETCH_INTERVAL_HOURS 小时执行一次，
+    抓取所有用户的 RSS 源并保存到缓存（自动去重）。
+
+    解决 RSS.app 只返回最近 25 条内容的问题。
+    """
+    from services.rss_fetcher import prefetch_all_user_sources
+
+    logger.info("Running scheduled prefetch job...")
+    try:
+        stats = await prefetch_all_user_sources()
+        logger.info(
+            f"Prefetch job complete: {stats.get('new_items', 0)} new items, "
+            f"{stats.get('total_items', 0)} total cached from {stats.get('sources_count', 0)} sources"
+        )
+    except Exception as e:
+        logger.error(f"Prefetch job failed: {e}", exc_info=True)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -494,7 +626,13 @@ def main() -> None:
     )
 
     # Add handlers
-    # Start/onboarding conversation handler
+    
+    # 1. Admin handlers (Priority: Highest - always handle admin commands first)
+    for handler in get_admin_handlers():
+        application.add_handler(handler)
+    logger.info("Admin handlers registered")
+
+    # 2. Start/onboarding conversation handler
     application.add_handler(get_start_handler())
 
     # Start menu callbacks
@@ -520,6 +658,7 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("test", test_fetch_command))
     application.add_handler(CommandHandler("testprofile", test_profile_command))
+    application.add_handler(CommandHandler("testprefetch", test_prefetch_command))
     application.add_handler(CommandHandler("stats", stats_command))
 
     # Callback for help from unknown message
@@ -548,6 +687,7 @@ def main() -> None:
     atexit.register(on_shutdown)
 
     # Start the bot
+    logger.info(f"Admin IDs: {len(ADMIN_TELEGRAM_IDS)} configured")
     logger.info("Starting Web3 Daily Digest Bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 

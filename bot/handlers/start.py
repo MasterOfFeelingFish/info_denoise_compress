@@ -27,6 +27,7 @@ from utils.json_storage import (
     save_user_profile,
     get_user_profile,
 )
+from utils.auth import whitelist_required
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 ONBOARDING_ROUND_1, ONBOARDING_ROUND_2, ONBOARDING_ROUND_3, CONFIRM_PROFILE, SOURCE_CHOICE, ADDING_SOURCES = range(6)
 
 
+@whitelist_required
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Handle /start command.
@@ -47,6 +49,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     if existing_user:
         # Existing user - show main menu with clear visual hierarchy
+        from handlers.admin import is_admin
+        
         keyboard = [
             [InlineKeyboardButton("查看今日简报", callback_data="view_digest")],
             [
@@ -57,6 +61,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                 InlineKeyboardButton("查看统计", callback_data="view_stats"),
             ],
         ]
+        
+        # Add admin panel button for admins only
+        if is_admin(user.id):
+            keyboard.append([InlineKeyboardButton("🛡️ 管理员控制台", callback_data="admin_panel")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.message.reply_text(
@@ -119,6 +128,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ONBOARDING_ROUND_1
 
 
+@whitelist_required
 async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Begin the AI-driven preference collection (3 rounds)."""
     query = update.callback_query
@@ -456,6 +466,8 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     existing_user = get_user(telegram_id)
 
     if existing_user:
+        from handlers.admin import is_admin
+        
         keyboard = [
             [InlineKeyboardButton("查看今日简报", callback_data="view_digest")],
             [
@@ -464,6 +476,11 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             ],
             [InlineKeyboardButton("查看统计", callback_data="view_stats")],
         ]
+        
+        # Add admin panel button for admins only
+        if is_admin(user.id):
+            keyboard.append([InlineKeyboardButton("🛡️ 管理员控制台", callback_data="admin_panel")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
@@ -539,6 +556,14 @@ async def view_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not ai_summary and filtered_items:
         from services.content_filter import get_ai_summary
         ai_summary = await get_ai_summary(filtered_items, profile)
+    
+    # === Final output translation (all at once) ===
+    from services.content_filter import translate_text, translate_content, _extract_user_language
+    target_language = _extract_user_language(profile)
+    if target_language != "English":
+        # Translate both items and summary before output
+        filtered_items = await translate_content(filtered_items, target_language)
+        ai_summary = await translate_text(ai_summary, target_language)
 
     # Prepare messages
     header, item_messages = prepare_digest_messages(

@@ -46,6 +46,9 @@ class OpenAIProvider(LLMProvider):
             "Content-Type": "application/json"
         }
 
+        # 检测是否为 Kimi/Moonshot API
+        is_kimi_api = "moonshot" in self.api_url.lower()
+
         # Build messages array
         messages = []
         if system_instruction:
@@ -59,6 +62,9 @@ class OpenAIProvider(LLMProvider):
             "max_tokens": max_tokens
         }
 
+        # Kimi K2 Thinking 模型需要更长的超时时间
+        timeout_seconds = 300.0 if is_kimi_api else 120.0
+
         last_error = None
         for attempt in range(MAX_RETRIES):
             try:
@@ -67,7 +73,7 @@ class OpenAIProvider(LLMProvider):
                         self.api_url,
                         json=payload,
                         headers=headers,
-                        timeout=120.0
+                        timeout=timeout_seconds
                     )
                     response.raise_for_status()
                     result = response.json()
@@ -137,29 +143,42 @@ class OpenAIProvider(LLMProvider):
             "Content-Type": "application/json"
         }
 
+        # 检测是否为 Kimi/Moonshot API（不支持 response_format 参数）
+        is_kimi_api = "moonshot" in self.api_url.lower()
+
         # Build messages array
         messages = []
         if system_instruction:
+            # 对 Kimi API，在 system instruction 中强调 JSON 输出要求
+            if is_kimi_api:
+                system_instruction = system_instruction + "\n\nIMPORTANT: You MUST respond with valid JSON only. No markdown, no code blocks, no extra text. Start with { and end with }."
             messages.append({"role": "system", "content": system_instruction})
         messages.append({"role": "user", "content": prompt})
 
+        # 构建 payload
         payload = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": 8192,
-            "response_format": {"type": "json_object"}  # OpenAI JSON mode
         }
+
+        # 只有非 Kimi API 才使用 response_format（Kimi 不支持此参数）
+        if not is_kimi_api:
+            payload["response_format"] = {"type": "json_object"}
 
         last_error = None
         for attempt in range(MAX_RETRIES):
             try:
+                # Kimi K2 Thinking 模型需要更长的超时时间（思考过程耗时）
+                timeout_seconds = 300.0 if is_kimi_api else 120.0
+                
                 async with httpx.AsyncClient() as client:
                     response = await client.post(
                         self.api_url,
                         json=payload,
                         headers=headers,
-                        timeout=120.0
+                        timeout=timeout_seconds
                     )
                     response.raise_for_status()
                     result = response.json()
