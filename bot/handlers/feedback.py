@@ -54,12 +54,32 @@ def create_reason_keyboard(report_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
-def create_item_feedback_keyboard(item_id: str) -> InlineKeyboardMarkup:
-    """Create simple like/dislike feedback buttons for individual items."""
+def create_item_feedback_keyboard(item_id: str, lang: str = "zh") -> InlineKeyboardMarkup:
+    """
+    Create feedback buttons for individual items.
+    
+    Buttons:
+    - 👍 (Like)
+    - "不感兴趣" / "Not interested" (instead of 👎)
+    
+    Args:
+        item_id: Item identifier for callback data
+        lang: Language code for button text
+    
+    Returns:
+        InlineKeyboardMarkup with feedback buttons
+    """
+    # Get localized button text
+    from services.report_generator import get_locale
+    locale = get_locale(lang)
+    
+    like_text = locale.get("btn_like", "👍")
+    not_interested_text = locale.get("btn_not_interested", "不感兴趣")
+    
     keyboard = [
         [
-            InlineKeyboardButton("👍", callback_data=f"item_like_{item_id}"),
-            InlineKeyboardButton("👎", callback_data=f"item_dislike_{item_id}"),
+            InlineKeyboardButton(like_text, callback_data=f"item_like_{item_id}"),
+            InlineKeyboardButton(not_interested_text, callback_data=f"item_dislike_{item_id}"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)

@@ -4,6 +4,12 @@ AI Content Filter Service
 Uses Gemini 3 to intelligently filter content based on user profiles.
 Selects relevant items from raw content and ranks by importance.
 
+Features:
+- Automatic retry with model switching for improved reliability
+- Primary model failure -> retry with lower temperature
+- Primary model multiple failures -> switch to fallback model
+- All AI outputs in English, translation at final stage
+
 Reference: Plan specification for content filtering with Gemini 3
 """
 import json
@@ -11,6 +17,7 @@ import logging
 from typing import List, Dict, Any, Optional
 
 from services.gemini import call_gemini_json, call_gemini
+from services.llm_factory import call_llm_json, call_llm_text
 from utils.json_storage import get_user_profile, get_user_feedbacks
 from utils.prompt_loader import get_prompt
 from config import MIN_DIGEST_ITEMS, MAX_DIGEST_ITEMS, MAX_AI_INPUT_ITEMS
@@ -140,69 +147,64 @@ async def filter_content_for_user(
     )
 
     # Compact prompt format (no indent, saves tokens)
-    prompt = f"""## 今日待筛选内容 (共 {len(content_for_ai)} 条)
+    prompt = f"""## Content to filter today ({len(content_for_ai)} items)
 
 {json.dumps(content_for_ai, ensure_ascii=False)}
 
-请分类输出 {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} 条。"""
+Please categorize and output {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} items."""
 
-    try:
-        # Call AI for filtering
-        filtered_result = await call_gemini_json(
-            prompt=prompt,
-            system_instruction=system_instruction,
-            temperature=1.0
-        )
+    # Call AI with automatic retry and model switching
+    filtered_result, model_used = await call_llm_json(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        context=f"filtering-{telegram_id}"
+    )
+    
+    # Check if all attempts failed
+    if filtered_result is None:
+        logger.error(f"All AI attempts failed for user {telegram_id}, using fallback")
+        return _build_fallback_result(raw_content, max_items, "Fallback: AI unavailable")
 
-        # Check for error field in AI response
-        if isinstance(filtered_result, dict) and "error" in filtered_result:
-            error_msg = filtered_result.get("error", "Unknown AI error")
-            logger.error(f"AI returned error for user {telegram_id}: {error_msg}")
-            return _build_fallback_result(raw_content, max_items, f"AI error: {error_msg[:50]}")
+    # Handle optimized format: {must_read: [{n, r}], ...}
+    if isinstance(filtered_result, dict):
+        all_items = []
+        
+        for section in ["must_read", "macro_insights", "recommended", "other"]:
+            items = filtered_result.get(section, [])
+            for ai_item in items:
+                n = ai_item.get("n")
+                if n and n in index_map:
+                    # Map back to original item with full data
+                    original = index_map[n]
+                    mapped_item = {
+                        "id": original.get("id"),
+                        "title": original.get("title"),
+                        "summary": original.get("summary", "")[:100],
+                        "source": original.get("source"),
+                        "link": original.get("link"),
+                        "section": section,
+                        "reason": ai_item.get("r", ""),
+                        "author": original.get("author", "")  # Keep author for Twitter
+                    }
+                    all_items.append(mapped_item)
+                else:
+                    logger.warning(f"Invalid index {n} in AI response")
 
-        # Handle optimized format: {must_read: [{n, r}], ...}
-        if isinstance(filtered_result, dict):
-            all_items = []
-            
-            for section in ["must_read", "macro_insights", "recommended", "other"]:
-                items = filtered_result.get(section, [])
-                for ai_item in items:
-                    n = ai_item.get("n")
-                    if n and n in index_map:
-                        # Map back to original item with full data
-                        original = index_map[n]
-                        mapped_item = {
-                            "id": original.get("id"),
-                            "title": original.get("title"),
-                            "summary": original.get("summary", "")[:100],
-                            "source": original.get("source"),
-                            "link": original.get("link"),
-                            "section": section,
-                            "reason": ai_item.get("r", "")
-                        }
-                        all_items.append(mapped_item)
-                    else:
-                        logger.warning(f"Invalid index {n} in AI response")
+        total_count = len(all_items)
+        section_counts = {}
+        for item in all_items:
+            s = item.get("section", "other")
+            section_counts[s] = section_counts.get(s, 0) + 1
 
-            total_count = len(all_items)
-            section_counts = {}
-            for item in all_items:
-                s = item.get("section", "other")
-                section_counts[s] = section_counts.get(s, 0) + 1
+        logger.info(f"AI selected {total_count} items for user {telegram_id} using {model_used} "
+                   f"(must_read: {section_counts.get('must_read', 0)}, "
+                   f"macro: {section_counts.get('macro_insights', 0)}, "
+                   f"recommended: {section_counts.get('recommended', 0)}, "
+                   f"other: {section_counts.get('other', 0)})")
+        return all_items[:max_items]
 
-            logger.info(f"AI selected {total_count} items for user {telegram_id} "
-                       f"(must_read: {section_counts.get('must_read', 0)}, "
-                       f"macro: {section_counts.get('macro_insights', 0)}, "
-                       f"recommended: {section_counts.get('recommended', 0)}, "
-                       f"other: {section_counts.get('other', 0)})")
-            return all_items[:max_items]
-
-        logger.error(f"Unexpected response format: {type(filtered_result)}")
-        return _build_fallback_result(raw_content, max_items, "Fallback: invalid AI response")
-
-    except Exception as e:
-        logger.error(f"AI filtering failed for {telegram_id}: {e}")
-        return _build_fallback_result(raw_content, max_items, "Fallback selection")
+    logger.error(f"Unexpected response format: {type(filtered_result)}")
+    return _build_fallback_result(raw_content, max_items, "Fallback: invalid AI response")
 
 
 def _build_fallback_result(raw_content: List[Dict[str, Any]], max_items: int, reason: str) -> List[Dict[str, Any]]:
@@ -315,43 +317,43 @@ async def _filter_single_batch(
         max_items=MAX_DIGEST_ITEMS
     )
     
-    prompt = f"""## 今日待筛选内容 (共 {len(content_for_ai)} 条，批次处理)
+    prompt = f"""## Content to filter (batch, {len(content_for_ai)} items)
 
 {json.dumps(content_for_ai, ensure_ascii=False)}
 
-请分类输出 {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} 条。"""
+Please categorize and output {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} items."""
 
-    try:
-        filtered_result = await call_gemini_json(
-            prompt=prompt,
-            system_instruction=system_instruction,
-            temperature=1.0
-        )
-        
-        if isinstance(filtered_result, dict) and "error" not in filtered_result:
-            all_items = []
-            for section in ["must_read", "macro_insights", "recommended", "other"]:
-                items = filtered_result.get(section, [])
-                for ai_item in items:
-                    n = ai_item.get("n")
-                    if n and n in index_map:
-                        original = index_map[n]
-                        all_items.append({
-                            "id": original.get("id"),
-                            "title": original.get("title"),
-                            "summary": original.get("summary", "")[:100],
-                            "source": original.get("source"),
-                            "link": original.get("link"),
-                            "section": section,
-                            "reason": ai_item.get("r", "")
-                        })
-            return all_items
-        
-        return _build_fallback_result(batch_content, max_items, "Batch AI error")
+    # Use retry logic for batch processing too
+    filtered_result, model_used = await call_llm_json(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        context=f"batch-filtering-{telegram_id}"
+    )
     
-    except Exception as e:
-        logger.error(f"Batch filtering failed: {e}")
-        return _build_fallback_result(batch_content, max_items, "Batch fallback")
+    if filtered_result is None:
+        return _build_fallback_result(batch_content, max_items, "Batch AI failed")
+    
+    if isinstance(filtered_result, dict):
+        all_items = []
+        for section in ["must_read", "macro_insights", "recommended", "other"]:
+            items = filtered_result.get(section, [])
+            for ai_item in items:
+                n = ai_item.get("n")
+                if n and n in index_map:
+                    original = index_map[n]
+                    all_items.append({
+                        "id": original.get("id"),
+                        "title": original.get("title"),
+                        "summary": original.get("summary", "")[:100],
+                        "source": original.get("source"),
+                        "author": original.get("author", ""),
+                        "link": original.get("link"),
+                        "section": section,
+                        "reason": ai_item.get("r", "")
+                    })
+        return all_items
+    
+    return _build_fallback_result(batch_content, max_items, "Batch AI error")
 
 
 async def categorize_filtered_content(
@@ -407,6 +409,8 @@ async def get_ai_summary(
 ) -> str:
     """
     Generate a brief AI summary of today's key themes.
+    
+    Uses unified retry mechanism with model switching.
 
     Args:
         items: List of filtered items
@@ -428,45 +432,105 @@ async def get_ai_summary(
         headlines=json.dumps(titles, ensure_ascii=False)
     )
 
-    try:
-        summary = await call_gemini(
-            prompt=prompt,
-            temperature=0.7
-        )
+    # Use unified retry mechanism
+    summary, model_used = await call_llm_text(
+        prompt=prompt,
+        temperature=0.7,
+        context="ai-summary"
+    )
+    
+    if summary:
         return summary.strip()
-    except Exception as e:
-        logger.error(f"Failed to generate AI summary: {e}")
-        return "Today's digest covers the latest Web3 developments across your areas of interest."
+    
+    logger.error("Failed to generate AI summary, using fallback")
+    return "Today's digest covers the latest Web3 developments across your areas of interest."
 
 
-def _extract_user_language(profile: str) -> str:
-    """Extract user's preferred language from profile."""
+def get_user_target_language(profile: str) -> str:
+    """
+    Get user's target language from profile for final translation.
+    
+    This function determines what language the final output should be in.
+    Default is Chinese as most users are Chinese-speaking.
+    
+    Args:
+        profile: User's profile text
+        
+    Returns:
+        Target language name (e.g., "Chinese", "English", "Japanese")
+    """
     if not profile:
+        return "Chinese"  # Default to Chinese
+    
+    profile_lower = profile.lower()
+    
+    # Check for explicit language markers
+    # Chinese
+    if any(marker in profile for marker in ["用户语言", "中文", "简体", "繁體"]):
+        return "Chinese"
+    if "chinese" in profile_lower:
+        return "Chinese"
+    
+    # English
+    if any(marker in profile_lower for marker in ["english", "英文", "英语"]):
         return "English"
     
-    # 查找用户语言设置
-    profile_lower = profile.lower()
-    if "用户语言" in profile or "中文" in profile:
-        return "中文"
-    elif "日本語" in profile or "japanese" in profile_lower:
-        return "日本語"
-    elif "한국어" in profile or "korean" in profile_lower:
-        return "한국어"
-    elif "español" in profile_lower or "spanish" in profile_lower:
-        return "Español"
+    # Japanese
+    if any(marker in profile for marker in ["日本語", "日语"]):
+        return "Japanese"
+    if "japanese" in profile_lower:
+        return "Japanese"
     
-    return "English"
+    # Korean
+    if any(marker in profile for marker in ["한국어", "韩语", "韓語"]):
+        return "Korean"
+    if "korean" in profile_lower:
+        return "Korean"
+    
+    # Spanish
+    if any(marker in profile_lower for marker in ["español", "spanish", "西班牙语"]):
+        return "Spanish"
+    
+    # Detect by character ranges in profile
+    for char in profile[:200]:  # Check first 200 chars
+        # Chinese characters
+        if '\u4e00' <= char <= '\u9fff':
+            return "Chinese"
+        # Japanese Hiragana/Katakana
+        if '\u3040' <= char <= '\u30ff':
+            return "Japanese"
+        # Korean Hangul
+        if '\uac00' <= char <= '\ud7af' or '\u1100' <= char <= '\u11ff':
+            return "Korean"
+    
+    return "Chinese"  # Default to Chinese
+
+
+# Backward compatibility alias
+def _extract_user_language(profile: str) -> str:
+    """Deprecated: Use get_user_target_language() instead."""
+    lang = get_user_target_language(profile)
+    # Map to old format for compatibility
+    lang_map = {
+        "Chinese": "中文",
+        "Japanese": "日本語",
+        "Korean": "한국어",
+        "Spanish": "Español",
+        "English": "English"
+    }
+    return lang_map.get(lang, lang)
 
 
 async def translate_text(text: str, target_language: str) -> str:
     """
     Translate a plain text string to target language.
     
+    Uses unified retry mechanism with model switching for reliability.
     Used for translating AI summary and other text content.
     
     Args:
         text: Text to translate
-        target_language: Target language (e.g., "中文", "日本語")
+        target_language: Target language (e.g., "Chinese", "Japanese")
     
     Returns:
         Translated text
@@ -476,12 +540,35 @@ async def translate_text(text: str, target_language: str) -> str:
     
     prompt = f"Translate the following to {target_language}. Output only the translation, no extra text:\n\n{text}"
     
-    try:
-        result = await call_gemini(prompt=prompt, temperature=0.3)
+    # Use unified retry mechanism
+    result, model_used = await call_llm_text(
+        prompt=prompt,
+        temperature=0.3,
+        context="text-translation"
+    )
+    
+    if result:
         return result.strip()
-    except Exception as e:
-        logger.error(f"Failed to translate text: {e}")
-        return text  # Return original on failure
+    
+    logger.error("Text translation failed, returning original")
+    return text
+
+
+def _has_non_english_content(items: List[Dict[str, Any]]) -> bool:
+    """Check if items contain non-English content (e.g., Chinese)."""
+    for item in items:
+        text = (item.get("title", "") + item.get("summary", ""))[:500]
+        for char in text:
+            # Chinese characters
+            if '\u4e00' <= char <= '\u9fff':
+                return True
+            # Japanese Hiragana/Katakana
+            if '\u3040' <= char <= '\u30ff':
+                return True
+            # Korean Hangul
+            if '\uac00' <= char <= '\ud7af':
+                return True
+    return False
 
 
 async def translate_content(
@@ -491,12 +578,13 @@ async def translate_content(
     """
     Translate filtered content to user's preferred language.
     
-    This is a separate step after filtering, implementing the
-    separation of concerns principle.
+    This is the final translation step before sending to user.
+    Translates: title, summary, reason fields.
+    Keeps unchanged: id, source, link, section, author.
     
     Args:
         items: List of filtered content items
-        target_language: Target language (e.g., "中文", "English")
+        target_language: Target language (e.g., "Chinese", "English", "Japanese")
     
     Returns:
         List of translated content items
@@ -504,14 +592,19 @@ async def translate_content(
     if not items:
         return items
     
-    # 如果目标语言是英文，且内容主要是英文，跳过翻译
-    if target_language.lower() == "english":
-        logger.info("Target language is English, skipping translation")
-        return items
+    # Normalize target language
+    target_lower = target_language.lower()
     
-    logger.info(f"Translating {len(items)} items to {target_language}")
+    # If target is English, only translate if there's non-English content
+    if target_lower == "english":
+        if not _has_non_english_content(items):
+            logger.info("Target is English and content is already English, skipping translation")
+            return items
+        logger.info(f"Target is English but content has non-English, translating {len(items)} items")
+    else:
+        logger.info(f"Translating {len(items)} items to {target_language}")
     
-    # 准备翻译内容
+    # Prepare content for translation
     content_to_translate = []
     for item in items:
         content_to_translate.append({
@@ -521,40 +614,41 @@ async def translate_content(
             "reason": item.get("reason", ""),
             "source": item.get("source", ""),
             "link": item.get("link", ""),
-            "section": item.get("section", "other")
+            "section": item.get("section", "other"),
+            "author": item.get("author", "")  # Keep author field
         })
     
-    # 构建翻译 prompt
+    # Build translation prompt
     prompt = get_prompt(
         "translate.txt",
         target_language=target_language,
         content=json.dumps(content_to_translate, ensure_ascii=False, indent=2)
     )
     
-    try:
-        translated_result = await call_gemini_json(
-            prompt=prompt,
-            temperature=0.3  # 低温度保证翻译准确性
-        )
-        
-        # 处理返回结果
-        if isinstance(translated_result, list):
-            logger.info(f"Translation successful: {len(translated_result)} items")
-            return translated_result
-        elif isinstance(translated_result, dict) and "error" not in translated_result:
-            # 可能返回了包装的结果
-            if "items" in translated_result:
-                return translated_result["items"]
-            # 尝试直接返回
-            logger.warning("Unexpected translation format, using original")
-            return items
-        else:
-            logger.error(f"Translation failed: {translated_result}")
-            return items
-            
-    except Exception as e:
-        logger.error(f"Translation error: {e}")
-        # 翻译失败时返回原始内容
+    # Use unified retry mechanism with model switching for translation
+    translated_result, model_used = await call_llm_json(
+        prompt=prompt,
+        system_instruction="You are a professional translator. Output valid JSON only.",
+        temperature=0.3,  # Low temperature for accurate translation
+        context="translation"
+    )
+    
+    if translated_result is None:
+        logger.error(f"All translation attempts failed, returning original")
+        return items
+    
+    # Process result
+    if isinstance(translated_result, list):
+        logger.info(f"Translation successful using {model_used}: {len(translated_result)} items")
+        return translated_result
+    elif isinstance(translated_result, dict) and "error" not in translated_result:
+        # May return wrapped result
+        if "items" in translated_result:
+            return translated_result["items"]
+        logger.warning("Unexpected translation format, using original")
+        return items
+    else:
+        logger.error(f"Translation failed: {translated_result}")
         return items
 
 

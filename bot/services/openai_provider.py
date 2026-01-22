@@ -122,7 +122,13 @@ class OpenAIProvider(LLMProvider):
                     raise
 
             except httpx.TimeoutException as e:
-                raise LLMTimeoutError(f"OpenAI request timeout: {e}")
+                last_error = e
+                if attempt < MAX_RETRIES - 1:
+                    logger.warning(f"OpenAI timeout (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                    await asyncio.sleep(RETRY_DELAY * (attempt + 1))
+                else:
+                    logger.error(f"OpenAI timeout after {MAX_RETRIES} attempts: {e}")
+                    raise LLMTimeoutError(f"OpenAI request timeout: {e}")
 
             except Exception as e:
                 logger.error(f"Unexpected OpenAI error: {e}")
@@ -239,6 +245,15 @@ class OpenAIProvider(LLMProvider):
                 else:
                     logger.error(f"OpenAI JSON HTTP error: {status_code} - {response_text}")
                     raise
+
+            except httpx.TimeoutException as e:
+                last_error = e
+                if attempt < MAX_RETRIES - 1:
+                    logger.warning(f"OpenAI JSON timeout (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                    await asyncio.sleep(RETRY_DELAY * (attempt + 1))
+                else:
+                    logger.error(f"OpenAI JSON timeout after {MAX_RETRIES} attempts: {e}")
+                    raise LLMTimeoutError(f"OpenAI JSON request timeout: {e}")
 
             except Exception as e:
                 logger.error(f"Unexpected OpenAI JSON error: {e}")

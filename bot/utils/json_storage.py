@@ -223,6 +223,41 @@ def set_user_setting(telegram_id: str, key: str, value: Any) -> bool:
     return False
 
 
+def get_user_last_push_time(telegram_id: str) -> Optional[str]:
+    """
+    获取用户上次推送时间。
+    
+    Returns:
+        ISO 格式的时间字符串，如果没有记录则返回 None
+    """
+    user = get_user(telegram_id)
+    if not user:
+        return None
+    return user.get("last_push_time")
+
+
+def set_user_last_push_time(telegram_id: str, push_time: Optional[str] = None) -> bool:
+    """
+    记录用户本次推送时间。
+    
+    Args:
+        telegram_id: 用户 Telegram ID
+        push_time: ISO 格式的时间字符串，默认为当前时间
+    
+    Returns:
+        是否保存成功
+    """
+    if not push_time:
+        push_time = datetime.now().isoformat()
+    
+    data = _read_json(USERS_FILE)
+    for user in data.get("users", []):
+        if user.get("telegram_id") == telegram_id:
+            user["last_push_time"] = push_time
+            return _write_json(USERS_FILE, data)
+    return False
+
+
 # ============ User Profile Management ============
 
 def get_user_profile(telegram_id: str) -> Optional[str]:

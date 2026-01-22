@@ -45,12 +45,21 @@ Users often can't fully express their real needs. Even if they say "I only care 
 Each item: {{"n": index, "src": "source", "t": "content"}}
 
 ## Output Format
-Pure JSON. Each item only needs n (index) and r (brief reason, <30 chars):
+Pure JSON. Each item only needs n (index) and r (user-centric reason, <30 chars).
+
+**IMPORTANT about "r" (reason)**:
+1. Write in ENGLISH (translation happens later)
+2. Be USER-CENTRIC: explain why THIS matters to the USER, not just what the news is
+3. Use "you/your" perspective, e.g., "Affects your ETH holdings", "Relevant to your DeFi interest"
+4. Bad: "Major hack event" (describes news)
+5. Good: "May impact your portfolio" (explains relevance to user)
+
+Example:
 {{
-  "must_read": [{{"n": 5, "r": "Major regulatory event"}}],
-  "macro_insights": [{{"n": 12, "r": "KOL cycle view"}}],
-  "recommended": [{{"n": 3, "r": "Matches user preference"}}],
-  "other": [{{"n": 8, "r": "Related update"}}]
+  "must_read": [{{"n": 5, "r": "May affect your holdings"}}],
+  "macro_insights": [{{"n": 12, "r": "Shapes your market outlook"}}],
+  "recommended": [{{"n": 3, "r": "Matches your DeFi focus"}}],
+  "other": [{{"n": 8, "r": "Related to your watchlist"}}]
 }}
 
 Output valid JSON only, no markdown code blocks.

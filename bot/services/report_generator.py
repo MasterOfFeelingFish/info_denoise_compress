@@ -46,6 +46,11 @@ LOCALE_STRINGS = {
         "sample_preview": "示例预览",
         "preview_desc": "以下是你每日简报的样式预览。",
         "preview_footer": "你的真实简报将于明天 9:00 推送。",
+        # New strings for item display
+        "reason_prefix": "💡 ",
+        "source_prefix": "来源: ",
+        "btn_like": "👍",
+        "btn_not_interested": "不感兴趣",
     },
     "en": {
         "title": "Web3 Daily Digest",
@@ -67,6 +72,11 @@ LOCALE_STRINGS = {
         "sample_preview": "SAMPLE PREVIEW",
         "preview_desc": "This is how your daily digest will look.",
         "preview_footer": "Your real digest arrives tomorrow at 9:00 AM.",
+        # New strings for item display
+        "reason_prefix": "💡 ",
+        "source_prefix": "Source: ",
+        "btn_like": "👍",
+        "btn_not_interested": "Not interested",
     },
     "ja": {
         "title": "Web3 デイリーダイジェスト",
@@ -88,6 +98,11 @@ LOCALE_STRINGS = {
         "sample_preview": "サンプルプレビュー",
         "preview_desc": "これがデイリーダイジェストの表示例です。",
         "preview_footer": "実際のダイジェストは明日9:00に届きます。",
+        # New strings for item display
+        "reason_prefix": "💡 ",
+        "source_prefix": "ソース: ",
+        "btn_like": "👍",
+        "btn_not_interested": "興味なし",
     },
     "ko": {
         "title": "Web3 데일리 다이제스트",
@@ -109,8 +124,35 @@ LOCALE_STRINGS = {
         "sample_preview": "샘플 미리보기",
         "preview_desc": "데일리 다이제스트는 이렇게 보입니다.",
         "preview_footer": "실제 다이제스트는 내일 오전 9시에 도착합니다.",
+        # New strings for item display
+        "reason_prefix": "💡 ",
+        "source_prefix": "출처: ",
+        "btn_like": "👍",
+        "btn_not_interested": "관심없음",
     },
 }
+
+
+# Language code to full name mapping (for translation API)
+LANG_CODE_TO_NAME = {
+    "zh": "Chinese",
+    "en": "English",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "ru": "Russian",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "pt": "Portuguese",
+    "ar": "Arabic",
+    "vi": "Vietnamese",
+    "th": "Thai",
+}
+
+
+def get_translation_language(lang_code: str) -> str:
+    """Convert language code to full language name for translation API."""
+    return LANG_CODE_TO_NAME.get(lang_code, "Chinese")
 
 
 # Category display names per language
@@ -483,6 +525,12 @@ def format_single_item(item: Dict[str, Any], index: int, lang: str = "zh") -> st
     """
     Format a single news item for individual message with feedback buttons.
 
+    New format:
+    🔴 1. Title (clickable)
+    Summary text...
+    💡 Recommendation reason
+    Source: @author
+
     Args:
         item: Content item dict
         index: Item index number
@@ -491,21 +539,31 @@ def format_single_item(item: Dict[str, Any], index: int, lang: str = "zh") -> st
     Returns:
         Formatted message string
     """
+    locale = get_locale(lang)
+    
     title = item.get("title", "Untitled")
     summary = item.get("summary", "")
     link = item.get("link", "")
-    importance = item.get("importance", "medium")
+    reason = item.get("reason", "")
+    source = item.get("source", "")
+    author = item.get("author", "")  # Twitter author if available
+    section = item.get("section", "other")
 
-    # Priority indicator
-    priority = "🔴" if importance == "high" else "🔵"
+    # Priority indicator based on section
+    if section == "must_read":
+        priority = "🔴"
+    elif section == "macro_insights":
+        priority = "🟠"
+    else:
+        priority = "🔵"
 
     # Escape HTML special characters to prevent format breaking
     title_escaped = html.escape(title)
     summary_escaped = html.escape(summary) if summary else ""
+    reason_escaped = html.escape(reason) if reason else ""
 
     # Make title clickable if link exists
     if link:
-        # Escape link URL for HTML attribute safety
         link_escaped = html.escape(link, quote=True)
         title_html = f'<a href="{link_escaped}">{title_escaped}</a>'
     else:
@@ -513,10 +571,16 @@ def format_single_item(item: Dict[str, Any], index: int, lang: str = "zh") -> st
 
     lines = [f"{priority} <b>{index}. {title_html}</b>"]
 
-    if summary_escaped:
+    # Add summary if present and not duplicate of title
+    if summary_escaped and summary_escaped.strip() != title_escaped.strip():
         lines.append(f"{summary_escaped}")
 
-    # Source line removed - link is now in title
+    # Add recommendation reason (user-centric explanation)
+    if reason_escaped:
+        reason_prefix = locale.get("reason_prefix", "💡 ")
+        lines.append(f"{reason_prefix}{reason_escaped}")
+
+    # Note: Source line removed per user feedback - considered redundant
 
     return "\n".join(lines)
 

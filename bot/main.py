@@ -208,18 +208,53 @@ async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def test_fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Hidden /test command - manually trigger data fetch and digest."""
+    """Hidden /test command - manually trigger digest for the current user only."""
+    from utils.json_storage import get_user, get_user_sources
+    from services.rss_fetcher import fetch_all_sources
+    
     user = update.effective_user
     telegram_id = str(user.id)
+    today = datetime.now().strftime("%Y-%m-%d")
 
-    await update.message.reply_text("正在抓取数据...")
+    await update.message.reply_text("正在为你生成简报...")
 
     try:
-        # Run the daily digest job manually
-        await daily_digest_job(context)
-        await update.message.reply_text("抓取完成。")
+        # Get current user's data
+        user_data = get_user(telegram_id)
+        if not user_data:
+            await update.message.reply_text("未找到你的用户数据，请先完成 /start 设置。")
+            return
+        
+        # Fetch sources for this user only
+        user_sources = get_user_sources(telegram_id)
+        if not user_sources:
+            await update.message.reply_text("你还没有配置信息源，请使用 /sources 添加。")
+            return
+        
+        # Add sources to user_data for process_single_user
+        user_data["sources"] = user_sources
+        
+        logger.info(f"Test command: Processing user {telegram_id}")
+        
+        # Fetch RSS content for this user
+        raw_content = await fetch_all_sources(
+            hours_back=24,
+            sources=user_sources
+        )
+        logger.info(f"Test command: Fetched {len(raw_content)} items for user {telegram_id}")
+        
+        # Process single user
+        result = await process_single_user(context, user_data, today, raw_content)
+        
+        if result.get("status") == "success":
+            await update.message.reply_text("简报已发送！")
+        elif result.get("status") == "skipped":
+            await update.message.reply_text(f"跳过: {result.get('reason', '未知原因')}")
+        else:
+            await update.message.reply_text(f"处理失败: {result.get('error', '未知错误')[:100]}")
+            
     except Exception as e:
-        logger.error(f"Test fetch failed: {e}")
+        logger.error(f"Test fetch failed for user {telegram_id}: {e}", exc_info=True)
         await update.message.reply_text(f"抓取失败: {str(e)[:100]}")
 
 
@@ -416,13 +451,17 @@ async def post_init(application: Application) -> None:
 
     logger.info(f"Scheduled daily digest at {PUSH_HOUR:02d}:{PUSH_MINUTE:02d} Beijing Time")
 
-    # Optional: Run profile updates at midnight
-    midnight = time(hour=0, minute=0, tzinfo=beijing_tz)
+    # Run profile updates 30 minutes before daily digest push
+    # This ensures the latest feedback is incorporated into today's filtering
+    profile_update_hour = PUSH_HOUR if PUSH_MINUTE >= 30 else (PUSH_HOUR - 1) % 24
+    profile_update_minute = (PUSH_MINUTE - 30) % 60
+    profile_update_time = time(hour=profile_update_hour, minute=profile_update_minute, tzinfo=beijing_tz)
     application.job_queue.run_daily(
         callback=profile_update_job,
-        time=midnight,
+        time=profile_update_time,
         name="profile_update"
     )
+    logger.info(f"Scheduled profile update at {profile_update_hour:02d}:{profile_update_minute:02d} Beijing Time (30 min before push)")
 
     # Run data cleanup at 00:30 daily
     # 每日 00:30 清理过期数据文件

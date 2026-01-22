@@ -42,6 +42,13 @@ nul
 # Sensitive files
 .env
 bot/.env
+*.env.local
+*.env.production
+**/secrets/
+*.key
+*.pem
+*.p12
+credentials*.json
 
 # Runtime data
 data/
@@ -50,3 +57,6 @@ data/
 .claude/
 CLAUDE.md
 tmpclaude-*
+
+# Internal docs (not for git)
+信息过滤服务流程与Prompt文档总结.md

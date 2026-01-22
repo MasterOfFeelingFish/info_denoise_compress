@@ -126,6 +126,49 @@ def extract_summary(entry: Dict[str, Any], max_length: int = 500) -> str:
     return summary
 
 
+def extract_twitter_author(link: str) -> str:
+    """
+    Extract Twitter/X author handle from a tweet link.
+    
+    Examples:
+    - https://x.com/VitalikButerin/status/123 -> @VitalikButerin
+    - https://twitter.com/elonmusk/status/456 -> @elonmusk
+    - https://example.com/article -> "" (not a Twitter link)
+    
+    Args:
+        link: URL to parse
+        
+    Returns:
+        Twitter handle with @ prefix, or empty string if not a Twitter link
+    """
+    if not link:
+        return ""
+    
+    # Check if it's a Twitter/X link
+    link_lower = link.lower()
+    if "x.com/" not in link_lower and "twitter.com/" not in link_lower:
+        return ""
+    
+    try:
+        # Parse URL path: https://x.com/username/status/id
+        # or https://twitter.com/username/status/id
+        parts = link.split("/")
+        
+        for i, part in enumerate(parts):
+            part_lower = part.lower()
+            if part_lower in ("x.com", "twitter.com") and i + 1 < len(parts):
+                username = parts[i + 1]
+                # Skip special paths
+                if username.lower() in ("i", "search", "hashtag", "explore", "settings"):
+                    return ""
+                # Validate username format (alphanumeric and underscore, 1-15 chars)
+                if username and len(username) <= 15 and username.replace("_", "").isalnum():
+                    return f"@{username}"
+        return ""
+    except Exception:
+        return ""
+
+
 async def fetch_single_source(
     client: httpx.AsyncClient,
     name: str,
@@ -162,12 +205,20 @@ async def fetch_single_source(
                 if published < cutoff_time:
                     continue
 
+            link = entry.get("link", "")
+            
+            # Extract Twitter author if this is a Twitter source
+            author = ""
+            if category == "twitter" or "twitter" in name.lower():
+                author = extract_twitter_author(link)
+            
             item = {
                 "id": generate_item_id(entry, name),
                 "title": entry.get("title", "Untitled"),
                 "summary": extract_summary(entry),
-                "link": entry.get("link", ""),
+                "link": link,
                 "source": name,
+                "author": author,  # Twitter author handle (e.g., @VitalikButerin)
                 "category": category,
                 "published": published.isoformat() if published else None,
                 "fetched_at": datetime.now().isoformat(),
