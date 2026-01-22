@@ -14,7 +14,7 @@
 
 ### 智能反馈闭环
 - 整体反馈（有帮助/没帮助）
-- 单条反馈（👍/👎 按钮）
+- 单条反馈（👍/不感兴趣 按钮）
 - 动态更新用户画像（固定篇幅，精细化描述），用户越用越精准
 - 反馈趋势分析（近 30 天）
 
@@ -104,7 +104,7 @@ info_denoise_compress/
 │   │   └── admin.py              # 管理员控制台（白名单管理）
 │   ├── services/                 # 业务逻辑层
 │   │   ├── llm_provider.py       # LLM 抽象接口
-│   │   ├── llm_factory.py        # LLM 工厂（选择提供商）
+│   │   ├── llm_factory.py        # LLM 工厂 + 统一重试机制
 │   │   ├── gemini_provider.py    # Gemini API 实现
 │   │   ├── openai_provider.py    # OpenAI API 实现
 │   │   ├── digest_processor.py   # 简报处理（单用户）
@@ -328,7 +328,7 @@ Bot 自动检测用户语言并翻译简报内容，支持：
                                     ↓
                     Telegram 推送（分条发送）
                                     ↓
-    用户反馈（👍/👎）→ 每日更新画像 ──┘
+    用户反馈（👍/不感兴趣）→ 每日更新画像 ──┘
 ```
 
 ---
