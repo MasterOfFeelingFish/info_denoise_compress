@@ -26,6 +26,7 @@ from utils.json_storage import (
     create_user,
     save_user_profile,
     get_user_profile,
+    track_event,
 )
 from utils.auth import whitelist_required
 
@@ -43,6 +44,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     user = update.effective_user
     telegram_id = str(user.id)
+
+    # 埋点：会话开始
+    track_event(telegram_id, "session_start", {"command": "start"})
 
     # Check if user already registered
     existing_user = get_user(telegram_id)

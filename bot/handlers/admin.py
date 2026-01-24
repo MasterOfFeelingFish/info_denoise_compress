@@ -8,8 +8,9 @@ from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, Con
 
 from utils.json_storage import (
     get_whitelist, add_to_whitelist, remove_from_whitelist, get_users,
-    get_whitelist_enabled, set_whitelist_enabled
+    get_whitelist_enabled, set_whitelist_enabled, get_events_summary
 )
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     toggle_emoji = "🔴" if wl_enabled else "🟢"
 
     keyboard = [
+        [InlineKeyboardButton("📊 数据分析", callback_data="admin_analytics")],
         [InlineKeyboardButton(f"{toggle_emoji} {toggle_text}", callback_data="admin_wl_toggle")],
         [InlineKeyboardButton("📋 查看白名单", callback_data="admin_wl_list")],
         [
@@ -66,9 +68,11 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     whitelist = get_whitelist()
+    users = get_users()
     text = (
         "🛡️ <b>管理员控制台</b>\n"
         f"{'─' * 24}\n\n"
+        f"注册用户: {len(users)} 人\n"
         f"白名单状态: {wl_status}\n"
         f"白名单人数: {len(whitelist)} 人\n\n"
         "请选择操作："
@@ -307,6 +311,266 @@ async def wl_del_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ ID 必须是数字。")
 
 
+# ============ Analytics (数据分析) ============
+
+async def admin_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show analytics dashboard."""
+    query = update.callback_query
+    await query.answer()
+    
+    if not is_admin(query.from_user.id):
+        await query.answer("🔒 无权限", show_alert=True)
+        return
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("今日", callback_data="analytics_1"),
+            InlineKeyboardButton("7天", callback_data="analytics_7"),
+            InlineKeyboardButton("30天", callback_data="analytics_30"),
+        ],
+        [InlineKeyboardButton("« 返回控制台", callback_data="admin_panel")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "📊 <b>数据分析</b>\n"
+        f"{'─' * 24}\n\n"
+        "选择统计周期：",
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
+
+
+async def show_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show analytics for selected period."""
+    query = update.callback_query
+    await query.answer()
+    
+    if not is_admin(query.from_user.id):
+        await query.answer("🔒 无权限", show_alert=True)
+        return
+    
+    # 解析天数
+    days = int(query.data.replace("analytics_", ""))
+    period_name = {1: "今日", 7: "近7天", 30: "近30天"}.get(days, f"近{days}天")
+    
+    # 获取汇总数据
+    summary = get_events_summary(days)
+    users = get_users()
+    
+    # 构建报表文本
+    lines = []
+    lines.append(f"📊 <b>数据分析 - {period_name}</b>")
+    lines.append(f"{'─' * 24}")
+    lines.append("")
+    
+    # 概览
+    lines.append("<b>📈 概览</b>")
+    lines.append(f"• 总事件数: {summary['total_events']}")
+    lines.append(f"• 活跃用户: {summary['active_users']}/{len(users)}")
+    if summary['active_users'] > 0:
+        avg = summary['total_events'] / summary['active_users']
+        lines.append(f"• 人均事件: {avg:.1f}")
+    lines.append("")
+    
+    # 事件分布
+    if summary['event_counts']:
+        lines.append("<b>📋 事件分布</b>")
+        event_names = {
+            "session_start": "会话",
+            "feedback_positive": "👍正面",
+            "feedback_negative": "👎负面",
+            "item_like": "单条👍",
+            "item_dislike": "单条👎",
+            "settings_changed": "设置变更",
+            "source_added": "添加源",
+            "source_removed": "删除源",
+        }
+        for event_type, count in sorted(summary['event_counts'].items(), key=lambda x: -x[1]):
+            name = event_names.get(event_type, event_type)
+            lines.append(f"• {name}: {count}")
+        lines.append("")
+    
+    # 反馈分析
+    positive = summary['event_counts'].get('feedback_positive', 0)
+    negative = summary['event_counts'].get('feedback_negative', 0)
+    item_like = summary['event_counts'].get('item_like', 0)
+    item_dislike = summary['event_counts'].get('item_dislike', 0)
+    
+    total_feedback = positive + negative
+    total_item = item_like + item_dislike
+    
+    if total_feedback > 0 or total_item > 0:
+        lines.append("<b>💬 反馈分析</b>")
+        if total_feedback > 0:
+            rate = positive / total_feedback * 100
+            lines.append(f"• 整体满意度: {rate:.0f}% ({positive}👍/{negative}👎)")
+        if total_item > 0:
+            rate = item_like / total_item * 100
+            lines.append(f"• 内容满意度: {rate:.0f}% ({item_like}👍/{item_dislike}👎)")
+        lines.append("")
+    
+    # 活跃用户 Top 5
+    if summary['top_users']:
+        lines.append("<b>🏆 活跃用户 Top 5</b>")
+        user_map = {str(u.get("telegram_id")): u for u in users}
+        for i, (uid, count) in enumerate(summary['top_users'][:5], 1):
+            user_info = user_map.get(uid, {})
+            name = user_info.get("first_name", "未知")
+            lines.append(f"{i}. {name}: {count}次")
+        lines.append("")
+    
+    # 不活跃预警
+    inactive_count = 0
+    for user in users:
+        last_active = user.get("last_active") or user.get("created")
+        if last_active:
+            try:
+                last_time = datetime.fromisoformat(last_active.replace("Z", "+00:00").replace("+00:00", ""))
+                days_inactive = (datetime.now() - last_time).days
+                if days_inactive >= 3:
+                    inactive_count += 1
+            except:
+                pass
+    
+    if inactive_count > 0:
+        lines.append(f"⚠️ <b>{inactive_count} 位用户超过3天未活跃</b>")
+    else:
+        lines.append("✅ 所有用户近3天内都有活动")
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("今日", callback_data="analytics_1"),
+            InlineKeyboardButton("7天", callback_data="analytics_7"),
+            InlineKeyboardButton("30天", callback_data="analytics_30"),
+        ],
+        [InlineKeyboardButton("📋 详细报表", callback_data="analytics_detail")],
+        [InlineKeyboardButton("« 返回控制台", callback_data="admin_panel")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "\n".join(lines),
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
+
+
+async def show_analytics_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show detailed analytics with actionable insights."""
+    query = update.callback_query
+    await query.answer()
+    
+    if not is_admin(query.from_user.id):
+        await query.answer("🔒 无权限", show_alert=True)
+        return
+    
+    summary = get_events_summary(7)
+    users = get_users()
+    
+    lines = []
+    lines.append("📋 <b>详细报表 & 运营建议</b>")
+    lines.append(f"{'─' * 24}")
+    lines.append("")
+    
+    # 计算关键指标
+    positive = summary['event_counts'].get('feedback_positive', 0)
+    negative = summary['event_counts'].get('feedback_negative', 0)
+    item_like = summary['event_counts'].get('item_like', 0)
+    item_dislike = summary['event_counts'].get('item_dislike', 0)
+    source_added = summary['event_counts'].get('source_added', 0)
+    source_removed = summary['event_counts'].get('source_removed', 0)
+    settings_changed = summary['event_counts'].get('settings_changed', 0)
+    
+    total_feedback = positive + negative
+    total_item = item_like + item_dislike
+    
+    # 运营建议
+    lines.append("<b>💡 运营洞察</b>")
+    lines.append("")
+    
+    # 1. 满意度分析
+    if total_feedback > 0:
+        rate = positive / total_feedback * 100
+        if rate >= 80:
+            lines.append(f"✅ 整体满意度 {rate:.0f}%，表现优秀")
+        elif rate >= 60:
+            lines.append(f"⚠️ 整体满意度 {rate:.0f}%，需关注负面反馈原因")
+        else:
+            lines.append(f"❌ 整体满意度仅 {rate:.0f}%，建议：")
+            lines.append("  • 检查内容筛选质量")
+            lines.append("  • 分析负面反馈具体原因")
+    else:
+        lines.append("📭 暂无整体反馈数据")
+    lines.append("")
+    
+    # 2. 内容质量分析
+    if total_item > 0:
+        rate = item_like / total_item * 100
+        if rate >= 70:
+            lines.append(f"✅ 内容点赞率 {rate:.0f}%，筛选算法有效")
+        else:
+            lines.append(f"⚠️ 内容点赞率 {rate:.0f}%，建议：")
+            lines.append("  • 优化 prompt 筛选逻辑")
+            lines.append("  • 收集用户 dislike 原因")
+    lines.append("")
+    
+    # 3. 信息源变化
+    if source_added or source_removed:
+        lines.append("<b>📡 信息源变化</b>")
+        lines.append(f"• 新增: {source_added}  删除: {source_removed}")
+        if source_removed > source_added:
+            lines.append("⚠️ 删除多于新增，需关注信息源质量")
+        lines.append("")
+    
+    # 4. 设置变更
+    if settings_changed > 0:
+        lines.append(f"<b>⚙️ 偏好设置</b>")
+        lines.append(f"• {settings_changed} 次偏好变更")
+        lines.append("提示: 频繁变更可能说明初始匹配不准")
+        lines.append("")
+    
+    # 5. 用户活跃度建议
+    inactive_users = []
+    for user in users:
+        last_active = user.get("last_active") or user.get("created")
+        if last_active:
+            try:
+                last_time = datetime.fromisoformat(last_active.replace("Z", "+00:00").replace("+00:00", ""))
+                days_inactive = (datetime.now() - last_time).days
+                if days_inactive >= 3:
+                    inactive_users.append({
+                        "name": user.get("first_name", "未知"),
+                        "username": user.get("username"),
+                        "days": days_inactive,
+                    })
+            except:
+                pass
+    
+    if inactive_users:
+        inactive_users.sort(key=lambda x: -x["days"])
+        lines.append(f"<b>⚠️ 流失预警 ({len(inactive_users)}人)</b>")
+        for u in inactive_users[:5]:
+            username = f"@{u['username']}" if u['username'] else ""
+            lines.append(f"• {u['name']} {username} - {u['days']}天未活跃")
+        if len(inactive_users) > 5:
+            lines.append(f"  ... 还有 {len(inactive_users)-5} 人")
+        lines.append("")
+        lines.append("建议: 主动联系了解原因，或推送召回消息")
+    
+    keyboard = [
+        [InlineKeyboardButton("« 返回分析", callback_data="admin_analytics")],
+        [InlineKeyboardButton("« 返回控制台", callback_data="admin_panel")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "\n".join(lines),
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
+
+
 # ============ Handler Registration ============
 
 def get_admin_handlers():
@@ -333,6 +597,10 @@ def get_admin_handlers():
         CallbackQueryHandler(admin_panel, pattern="^admin_panel$"),
         CallbackQueryHandler(admin_wl_toggle_callback, pattern="^admin_wl_toggle$"),
         CallbackQueryHandler(admin_wl_list_callback, pattern="^admin_wl_list$"),
+        # Analytics handlers (数据分析)
+        CallbackQueryHandler(admin_analytics, pattern="^admin_analytics$"),
+        CallbackQueryHandler(show_analytics, pattern="^analytics_[0-9]+$"),
+        CallbackQueryHandler(show_analytics_detail, pattern="^analytics_detail$"),
         admin_conv,
         # Command handlers (legacy, still work)
         CommandHandler("admin", admin_panel),

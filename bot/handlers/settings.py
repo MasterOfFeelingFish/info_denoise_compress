@@ -25,6 +25,7 @@ from utils.json_storage import (
     get_user,
     get_user_profile,
     save_user_profile,
+    track_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,9 @@ async def handle_profile_update(update: Update, context: ContextTypes.DEFAULT_TY
         # Save updated profile
         save_user_profile(telegram_id, updated_profile)
 
+        # 埋点：设置变更
+        track_event(telegram_id, "settings_changed", {"action": "update", "input": user_input[:100]})
+
         await update.message.reply_text(
             f"偏好已更新\n"
             f"{'─' * 24}\n\n"
@@ -237,6 +241,9 @@ Web3 新用户，通用兴趣
 - 暂无"""
 
     save_user_profile(telegram_id, default_profile)
+
+    # 埋点：设置重置
+    track_event(telegram_id, "settings_changed", {"action": "reset"})
 
     await query.edit_message_text(
         f"偏好已重置\n"

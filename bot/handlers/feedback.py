@@ -17,7 +17,7 @@ from telegram.ext import (
 )
 
 from utils.telegram_utils import safe_answer_callback_query
-from utils.json_storage import save_feedback, get_user
+from utils.json_storage import save_feedback, get_user, track_event
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,9 @@ async def handle_feedback_positive(update: Update, context: ContextTypes.DEFAULT
         item_feedbacks=item_feedbacks,
     )
 
+    # 埋点：正面反馈
+    track_event(telegram_id, "feedback_positive", {"report_id": report_id})
+
     # Clear item feedbacks after saving
     context.user_data.pop("item_feedbacks", None)
 
@@ -223,6 +226,9 @@ async def handle_reason_selection(update: Update, context: ContextTypes.DEFAULT_
             item_feedbacks=item_feedbacks,
         )
 
+        # 埋点：负面反馈
+        track_event(telegram_id, "feedback_negative", {"reason": selected_reason})
+
         # Clear item feedbacks after saving
         context.user_data.pop("item_feedbacks", None)
 
@@ -256,6 +262,9 @@ async def handle_custom_reason(update: Update, context: ContextTypes.DEFAULT_TYP
         reason_text=custom_text,
         item_feedbacks=item_feedbacks,
     )
+
+    # 埋点：负面反馈（自定义原因）
+    track_event(telegram_id, "feedback_negative", {"reason": "custom", "text": custom_text[:100]})
 
     await update.message.reply_text(
         f"已收到反馈\n"
@@ -330,6 +339,9 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
             "title": item_title,
         }]
     )
+
+    # 埋点：单条内容反馈
+    track_event(telegram_id, f"item_{feedback_type}", {"item_id": item_id, "title": item_title[:50]})
 
     # Show visual confirmation with indicator
     await safe_answer_callback_query(query, f"{response}", show_alert=False)

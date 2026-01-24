@@ -22,6 +22,10 @@
 - 白名单管理（增删查 + 开关）
 - 多管理员支持（环境变量配置）
 - AI 筛选分批处理（大数据量自动分批，避免超限）
+- **📊 数据分析面板**（v1.4.0 新增）
+  - 用户行为埋点（反馈、设置变更、信息源增删等）
+  - 统计概览（事件数、活跃用户、满意度）
+  - 运营洞察（优化建议 + 流失预警）
 
 ### 多信息源聚合
 - Twitter 账号监控（通过 RSS 转换）
@@ -70,6 +74,7 @@
 | `/testprofile` | 手动触发画像更新（调试用） |
 
 **管理员功能**（通过主菜单「管理员控制台」按钮访问）：
+- 📊 数据分析（用户行为统计 + 运营建议）
 - 白名单开关（启用/禁用访问控制）
 - 查询白名单（显示用户详细信息）
 - 添加/删除白名单用户
@@ -101,7 +106,7 @@ info_denoise_compress/
 │   │   ├── feedback.py           # 反馈收集（整体+单条）
 │   │   ├── sources.py            # 信息源管理（增删查）
 │   │   ├── settings.py           # 偏好设置管理
-│   │   └── admin.py              # 管理员控制台（白名单管理）
+│   │   └── admin.py              # 管理员控制台（白名单+数据分析）
 │   ├── services/                 # 业务逻辑层
 │   │   ├── llm_provider.py       # LLM 抽象接口
 │   │   ├── llm_factory.py        # LLM 工厂 + 统一重试机制
@@ -113,7 +118,7 @@ info_denoise_compress/
 │   │   ├── report_generator.py   # 简报生成（多语言）
 │   │   └── profile_updater.py    # 反馈学习闭环（每日更新）
 │   ├── utils/                    # 工具层
-│   │   ├── json_storage.py       # 数据存储（多用户隔离）+ 白名单管理
+│   │   ├── json_storage.py       # 数据存储 + 白名单管理 + 埋点追踪
 │   │   ├── telegram_utils.py     # Telegram 工具（限流器等）
 │   │   ├── prompt_loader.py      # Prompt 模板加载
 │   │   └── auth.py               # 白名单权限装饰器
@@ -125,6 +130,8 @@ info_denoise_compress/
 │   │   └── *_update.txt          # 画像/设置更新
 │   ├── tests/
 │   │   └── test_all_modules.py   # 自动化测试
+│   ├── scripts/
+│   │   └── generate_analytics_report.py  # 运营报表生成脚本
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   ├── .env.example
@@ -138,6 +145,8 @@ info_denoise_compress/
 │   ├── daily_stats/              # 每日统计（每用户子目录）
 │   ├── raw_content/              # 原始抓取内容（每用户子目录）
 │   ├── prefetch_cache/           # 预抓取缓存（解决 RSS 时效问题）
+│   ├── events/                   # 用户行为事件（按月 JSONL 文件）
+│   ├── analytics/                # 运营报表输出
 │   └── logs/                     # 日志文件
 │
 ├── docker-compose.yml            # Docker 一键部署配置

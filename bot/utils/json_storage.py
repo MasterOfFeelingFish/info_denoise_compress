@@ -20,10 +20,12 @@ from config import (
     RAW_CONTENT_DIR,
     USER_SOURCES_DIR,
     PREFETCH_CACHE_DIR,
+    EVENTS_DIR,
     DEFAULT_USER_SOURCES,
     RAW_CONTENT_RETENTION_DAYS,
     DAILY_STATS_RETENTION_DAYS,
     FEEDBACK_RETENTION_DAYS,
+    EVENTS_RETENTION_DAYS,
 )
 
 logger = logging.getLogger(__name__)
@@ -931,3 +933,201 @@ def is_whitelisted(telegram_id: int) -> bool:
     # Check whitelist
     whitelist = get_whitelist()
     return telegram_id in whitelist
+
+
+# ============ User Events Tracking (埋点) ============
+
+def track_event(
+    telegram_id: str,
+    event_type: str,
+    data: Optional[Dict[str, Any]] = None
+) -> bool:
+    """
+    记录用户行为事件（埋点）
+    
+    Args:
+        telegram_id: 用户 Telegram ID
+        event_type: 事件类型，如 'feedback_positive', 'settings_changed' 等
+        data: 事件附加数据（可选）
+    
+    Returns:
+        是否记录成功
+    
+    事件类型说明:
+        - digest_read: 用户点击查看摘要详情
+        - feedback_positive: 正面反馈（点赞）
+        - feedback_negative: 负面反馈（踩）
+        - settings_changed: 设置变更
+        - source_added: 添加信息源
+        - source_removed: 删除信息源
+        - chat_command: 使用命令
+        - session_start: 会话开始（每日首次互动）
+    """
+    _ensure_dir(EVENTS_DIR)
+    
+    # 按月分文件，格式: events_2026-01.jsonl
+    month_str = datetime.now().strftime("%Y-%m")
+    events_file = os.path.join(EVENTS_DIR, f"events_{month_str}.jsonl")
+    
+    event = {
+        "ts": datetime.now().isoformat(),
+        "uid": telegram_id,
+        "event": event_type,
+    }
+    
+    if data:
+        event["data"] = data
+    
+    try:
+        # 追加写入 JSONL（每行一条 JSON）
+        with open(events_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to track event for {telegram_id}: {e}")
+        return False
+
+
+def get_user_events(
+    telegram_id: str,
+    days: int = 30,
+    event_types: Optional[List[str]] = None
+) -> List[Dict[str, Any]]:
+    """
+    获取指定用户的事件记录
+    
+    Args:
+        telegram_id: 用户 Telegram ID
+        days: 获取最近多少天的事件
+        event_types: 过滤特定事件类型（可选）
+    
+    Returns:
+        事件列表
+    """
+    events = []
+    cutoff_date = datetime.now() - timedelta(days=days)
+    
+    # 扫描相关月份的文件
+    for filename in os.listdir(EVENTS_DIR) if os.path.exists(EVENTS_DIR) else []:
+        if not filename.startswith("events_") or not filename.endswith(".jsonl"):
+            continue
+        
+        filepath = os.path.join(EVENTS_DIR, filename)
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                        # 过滤用户
+                        if event.get("uid") != telegram_id:
+                            continue
+                        # 过滤时间
+                        event_time = datetime.fromisoformat(event.get("ts", ""))
+                        if event_time < cutoff_date:
+                            continue
+                        # 过滤事件类型
+                        if event_types and event.get("event") not in event_types:
+                            continue
+                        events.append(event)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+        except Exception as e:
+            logger.error(f"Error reading events file {filename}: {e}")
+    
+    # 按时间排序
+    events.sort(key=lambda x: x.get("ts", ""))
+    return events
+
+
+def get_events_summary(days: int = 7) -> Dict[str, Any]:
+    """
+    获取事件汇总统计（运营报表用）
+    
+    Args:
+        days: 统计最近多少天
+    
+    Returns:
+        汇总数据
+    """
+    cutoff_date = datetime.now() - timedelta(days=days)
+    
+    # 统计数据
+    event_counts: Dict[str, int] = {}
+    user_events: Dict[str, int] = {}
+    daily_counts: Dict[str, int] = {}
+    
+    for filename in os.listdir(EVENTS_DIR) if os.path.exists(EVENTS_DIR) else []:
+        if not filename.startswith("events_") or not filename.endswith(".jsonl"):
+            continue
+        
+        filepath = os.path.join(EVENTS_DIR, filename)
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                        event_time = datetime.fromisoformat(event.get("ts", ""))
+                        if event_time < cutoff_date:
+                            continue
+                        
+                        # 按事件类型统计
+                        event_type = event.get("event", "unknown")
+                        event_counts[event_type] = event_counts.get(event_type, 0) + 1
+                        
+                        # 按用户统计
+                        uid = event.get("uid", "unknown")
+                        user_events[uid] = user_events.get(uid, 0) + 1
+                        
+                        # 按日期统计
+                        date_str = event_time.strftime("%Y-%m-%d")
+                        daily_counts[date_str] = daily_counts.get(date_str, 0) + 1
+                        
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+        except Exception as e:
+            logger.error(f"Error reading events file {filename}: {e}")
+    
+    return {
+        "period_days": days,
+        "total_events": sum(event_counts.values()),
+        "active_users": len(user_events),
+        "event_counts": event_counts,
+        "daily_counts": daily_counts,
+        "top_users": sorted(user_events.items(), key=lambda x: -x[1])[:10],
+    }
+
+
+def cleanup_old_events() -> int:
+    """
+    清理过期的事件文件
+    
+    Returns:
+        删除的文件数
+    """
+    if not os.path.exists(EVENTS_DIR):
+        return 0
+    
+    deleted = 0
+    cutoff_date = datetime.now() - timedelta(days=EVENTS_RETENTION_DAYS)
+    cutoff_month = cutoff_date.strftime("%Y-%m")
+    
+    for filename in os.listdir(EVENTS_DIR):
+        if not filename.startswith("events_") or not filename.endswith(".jsonl"):
+            continue
+        
+        # 从文件名提取月份: events_2026-01.jsonl -> 2026-01
+        try:
+            file_month = filename.replace("events_", "").replace(".jsonl", "")
+            if file_month < cutoff_month:
+                filepath = os.path.join(EVENTS_DIR, filename)
+                os.remove(filepath)
+                deleted += 1
+                logger.info(f"Deleted old events file: {filename}")
+        except Exception as e:
+            logger.error(f"Error deleting events file {filename}: {e}")
+    
+    return deleted
