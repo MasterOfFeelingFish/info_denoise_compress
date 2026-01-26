@@ -6,7 +6,11 @@ Uses ConversationHandler for AI-driven preference collection.
 
 Reference: python-telegram-bot v22.x official examples (Exa verified 2025-01-12)
 """
+import asyncio
 import logging
+
+# Timeout for digest generation (seconds)
+DIGEST_TIMEOUT = 180
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.ext import (
@@ -807,8 +811,24 @@ async def trigger_first_digest(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return
 
-        # Trigger digest generation
-        result = await process_single_user(context, user, today)
+        # Trigger digest generation with timeout protection
+        try:
+            result = await asyncio.wait_for(
+                process_single_user(context, user, today),
+                timeout=DIGEST_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Digest generation timeout for {telegram_id} (>{DIGEST_TIMEOUT}s)")
+            keyboard = [
+                [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                f"⏱️ 生成超时\n\n"
+                f"服务器繁忙，请稍后使用 /test 重试。",
+                reply_markup=reply_markup
+            )
+            return
 
         if result.get("status") == "success":
             items_count = result.get("items_sent", 0)
@@ -1095,8 +1115,24 @@ async def trigger_first_digest_internal(
             )
             return
 
-        # Trigger digest generation (no global_raw_content, will fetch individually)
-        result = await process_single_user(context, user, today)
+        # Trigger digest generation with timeout protection
+        try:
+            result = await asyncio.wait_for(
+                process_single_user(context, user, today),
+                timeout=DIGEST_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Digest generation timeout for {telegram_id} (>{DIGEST_TIMEOUT}s)")
+            keyboard = [
+                [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                f"⏱️ 生成超时\n\n"
+                f"服务器繁忙，请稍后使用 /test 重试。",
+                reply_markup=reply_markup
+            )
+            return
 
         if result.get("status") == "success":
             items_count = result.get("items_sent", 0)
