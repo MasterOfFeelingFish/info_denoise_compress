@@ -14,15 +14,46 @@ Reference: Plan specification for content filtering with Gemini 3
 """
 import json
 import logging
+import math
 from typing import List, Dict, Any, Optional
 
 from services.gemini import call_gemini_json, call_gemini
 from services.llm_factory import call_llm_json, call_llm_text
 from utils.json_storage import get_user_profile, get_user_feedbacks
 from utils.prompt_loader import get_prompt
-from config import MIN_DIGEST_ITEMS, MAX_DIGEST_ITEMS, MAX_AI_INPUT_ITEMS
+from config import MIN_DIGEST_ITEMS, MAX_DIGEST_ITEMS, MAX_AI_INPUT_ITEMS, OUTPUT_RATIO, BATCH_SIZE, STAGE1_RATIO
 
 logger = logging.getLogger(__name__)
+
+
+def smart_truncate(text: str, max_len: int = 200) -> str:
+    """
+    按完整句子截断文本，避免句子在中间断开。
+    
+    Args:
+        text: 原始文本
+        max_len: 最大长度
+    
+    Returns:
+        截断后的文本（保证句子完整）
+    """
+    if not text or len(text) <= max_len:
+        return text
+    
+    # 优先在句号处截断（中英文标点）
+    for sep in ['。', '！', '？', '. ', '! ', '? ']:
+        pos = text.rfind(sep, 0, max_len)
+        if pos > max_len // 2:  # 至少保留一半内容
+            return text[:pos + len(sep)].rstrip()
+    
+    # 没有句号，尝试在逗号处截断
+    for sep in ['，', ', ', '；', '; ']:
+        pos = text.rfind(sep, 0, max_len)
+        if pos > max_len * 0.6:  # 至少保留 60% 内容
+            return text[:pos] + '...'
+    
+    # 都没有，直接截断并加省略号
+    return text[:max_len].rstrip() + '...'
 
 
 DEFAULT_PROFILE = """This is a new user who hasn't set specific preferences yet.
@@ -179,7 +210,7 @@ Please categorize and output {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} items."""
                     mapped_item = {
                         "id": original.get("id"),
                         "title": original.get("title"),
-                        "summary": original.get("summary", "")[:100],
+                        "summary": smart_truncate(original.get("summary", ""), 200),
                         "source": original.get("source"),
                         "link": original.get("link"),
                         "section": section,
@@ -213,7 +244,7 @@ def _build_fallback_result(raw_content: List[Dict[str, Any]], max_items: int, re
         {
             "id": item.get("id"),
             "title": item.get("title"),
-            "summary": item.get("summary", "")[:100],
+            "summary": smart_truncate(item.get("summary", ""), 200),
             "source": item.get("source"),
             "link": item.get("link"),
             "section": "other",
@@ -271,6 +302,24 @@ async def _filter_content_batched(
             unique_results.append(item)
     
     logger.info(f"Batch processing complete: {len(unique_results)} unique items from {len(all_results)} total")
+    
+    # Stage 2: 如果候选池足够大，进行精选去重
+    if len(unique_results) > max_items * 1.5:
+        logger.info(f"Running Stage 2 selection: {len(unique_results)} -> {max_items}")
+        profile = get_user_profile(telegram_id)
+        if not profile:
+            profile = DEFAULT_PROFILE
+        
+        final_results = await _stage2_select(
+            candidate_pool=unique_results,
+            final_count=max_items,
+            user_profile=profile
+        )
+        
+        if final_results:
+            logger.info(f"Stage 2 complete: selected {len(final_results)} items")
+            return final_results
+    
     return unique_results[:max_items]
 
 
@@ -344,7 +393,7 @@ Please categorize and output {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} items."""
                     all_items.append({
                         "id": original.get("id"),
                         "title": original.get("title"),
-                        "summary": original.get("summary", "")[:100],
+                        "summary": smart_truncate(original.get("summary", ""), 200),
                         "source": original.get("source"),
                         "author": original.get("author", ""),
                         "link": original.get("link"),
@@ -354,6 +403,94 @@ Please categorize and output {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} items."""
         return all_items
     
     return _build_fallback_result(batch_content, max_items, "Batch AI error")
+
+
+async def _stage2_select(
+    candidate_pool: List[Dict[str, Any]],
+    final_count: int,
+    user_profile: str
+) -> List[Dict[str, Any]]:
+    """
+    Stage 2: 从候选池中精选最终结果。
+    
+    功能：
+    - 去重：相似信息只保留一条
+    - 价值平衡：覆盖显性/隐性/盲区三类价值
+    - 输出带有 Ve/Vi/Vb 评分
+    
+    Args:
+        candidate_pool: Stage 1 输出的候选池
+        final_count: 最终需要的条数
+        user_profile: 用户画像
+    
+    Returns:
+        精选后的信息列表
+    """
+    # 将候选池转换为 Stage 2 需要的格式
+    pool_for_ai = []
+    pool_map = {}  # n -> original item
+    
+    for i, item in enumerate(candidate_pool, 1):
+        pool_map[i] = item
+        pool_for_ai.append({
+            "n": i,
+            "src": item.get("source", ""),
+            "t": f"{item.get('title', '')} | {item.get('summary', '')}",
+            "value_judgment": item.get("reason", "")
+        })
+    
+    # 构建 Stage 2 Prompt
+    system_instruction = get_prompt(
+        "filtering_stage2.txt",
+        user_profile=user_profile,
+        pool_size=len(pool_for_ai),
+        candidate_pool_json=json.dumps(pool_for_ai, ensure_ascii=False, indent=2),
+        final_count=final_count
+    )
+    
+    prompt = f"请从候选池中选出最优的 {final_count} 条信息组合。"
+    
+    # 调用 AI
+    result, model_used = await call_llm_json(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        context="stage2-select"
+    )
+    
+    if result is None:
+        logger.warning("Stage 2 AI call failed, falling back to simple truncation")
+        return candidate_pool[:final_count]
+    
+    # 解析结果
+    if isinstance(result, dict) and "selected_news" in result:
+        selected = result["selected_news"]
+        final_items = []
+        
+        for s in selected:
+            n = s.get("n")
+            if n and n in pool_map:
+                original = pool_map[n]
+                # 合并 Stage 2 的评分和原始数据
+                final_items.append({
+                    "id": original.get("id"),
+                    "title": original.get("title"),
+                    "summary": smart_truncate(original.get("summary", ""), 200),
+                    "source": original.get("source"),
+                    "author": original.get("author", ""),
+                    "link": original.get("link"),
+                    "section": original.get("section", "recommended"),
+                    "reason": s.get("reason", original.get("reason", "")),
+                    # 新增：价值评分
+                    "Ve": s.get("Ve", 0),
+                    "Vi": s.get("Vi", 0),
+                    "Vb": s.get("Vb", 0)
+                })
+        
+        logger.info(f"Stage 2 selected {len(final_items)} items using {model_used}")
+        return final_items
+    
+    logger.warning(f"Stage 2 unexpected format: {type(result)}, falling back")
+    return candidate_pool[:final_count]
 
 
 async def categorize_filtered_content(

@@ -9,6 +9,7 @@ Reference: Plan specification for report format
 """
 import html
 import logging
+import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
@@ -24,11 +25,76 @@ SEPARATOR_LENGTH = 28
 logger = logging.getLogger(__name__)
 
 
+def is_summary_duplicate(title: str, summary: str) -> bool:
+    """
+    判断摘要是否与标题内容重复。
+    
+    常见情况：
+    - BlockBeats 等源的摘要以标题内容开头
+    - 摘要直接复制标题
+    - 摘要以"据xxx，[标题内容]..."开头
+    
+    Args:
+        title: 标题文本
+        summary: 摘要文本
+        
+    Returns:
+        True 如果认为是重复的，否则 False
+    """
+    if not title or not summary:
+        return False
+    
+    # 规范化：去除常见前缀如 "BlockBeats 消息，1月26日，"
+    summary_clean = re.sub(
+        r'^(BlockBeats\s*消息[，,]?\s*\d+\s*月\s*\d+\s*日[，,]?\s*'
+        r'|据.*?[，,]\s*'
+        r'|消息[，,]\s*'
+        r'|【.*?】\s*'
+        r'|\d+\s*月\s*\d+\s*日[，,]?\s*)',
+        '', 
+        summary,
+        flags=re.IGNORECASE
+    ).strip()
+    
+    title_clean = title.strip().rstrip('。，.!！?？')
+    
+    # 如果标题很短（少于5个字符），不做去重处理
+    if len(title_clean) < 5:
+        return False
+    
+    # 如果摘要核心内容以标题开头，认为是重复
+    if summary_clean.startswith(title_clean):
+        return True
+    
+    # 如果标题是摘要的子串（在前50字内），且占比超过 80%
+    if title_clean in summary_clean[:len(title_clean) + 30]:
+        # 检查重复比例
+        overlap_ratio = len(title_clean) / len(summary_clean) if summary_clean else 0
+        if overlap_ratio > 0.6:
+            return True
+    
+    # 检查标题和摘要的相似度（简单 Jaccard 相似度）
+    title_chars = set(title_clean)
+    summary_start_chars = set(summary_clean[:len(title_clean) + 20])
+    
+    if title_chars and summary_start_chars:
+        intersection = len(title_chars & summary_start_chars)
+        union = len(title_chars | summary_start_chars)
+        similarity = intersection / union if union > 0 else 0
+        
+        # 如果相似度超过 85%，认为是重复
+        if similarity > 0.85:
+            return True
+    
+    return False
+
+
 # Localized strings - extensible for any language
 LOCALE_STRINGS = {
     "zh": {
         "title": "Web3 每日简报",
         "must_read": "今日必看",
+        "top_stories": "今日必看",
         "recommended": "推荐",
         "stats": "统计",
         "sources": "信息源",
@@ -55,6 +121,7 @@ LOCALE_STRINGS = {
     "en": {
         "title": "Web3 Daily Digest",
         "must_read": "MUST READ",
+        "top_stories": "TOP STORIES",
         "recommended": "Recommended",
         "stats": "Stats",
         "sources": "Sources",
@@ -81,6 +148,7 @@ LOCALE_STRINGS = {
     "ja": {
         "title": "Web3 デイリーダイジェスト",
         "must_read": "今日の必読",
+        "top_stories": "今日の必読",
         "recommended": "おすすめ",
         "stats": "統計",
         "sources": "ソース",
@@ -107,6 +175,7 @@ LOCALE_STRINGS = {
     "ko": {
         "title": "Web3 데일리 다이제스트",
         "must_read": "필독",
+        "top_stories": "필독",
         "recommended": "추천",
         "stats": "통계",
         "sources": "소스",
@@ -572,7 +641,8 @@ def format_single_item(item: Dict[str, Any], index: int, lang: str = "zh") -> st
     lines = [f"{priority} <b>{index}. {title_html}</b>"]
 
     # Add summary if present and not duplicate of title
-    if summary_escaped and summary_escaped.strip() != title_escaped.strip():
+    # Use original text (not escaped) for duplicate detection
+    if summary_escaped and not is_summary_duplicate(title, summary):
         lines.append(f"{summary_escaped}")
 
     # Add recommendation reason (user-centric explanation)
