@@ -148,19 +148,34 @@ class GeminiProvider(LLMProvider):
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
-        temperature: float = 0.5
+        temperature: float = 0.5,
+        use_thinking: bool = False
     ) -> Dict[str, Any]:
-        """Generate structured JSON response with Gemini."""
+        """Generate structured JSON response with Gemini.
+        
+        Args:
+            prompt: The prompt text
+            system_instruction: Optional system instruction
+            temperature: Sampling temperature
+            use_thinking: Whether to use thinking mode. Default False for JSON 
+                         to maximize output token budget for structured content.
+        """
         headers = {"Content-Type": "application/json"}
+
+        generation_config = {
+            "temperature": temperature,
+            "maxOutputTokens": 16384,  # Increased for translation tasks with many items
+            "responseMimeType": "application/json",  # JSON mode
+        }
+        
+        # Only add thinking config if explicitly requested
+        # Thinking consumes output tokens, which can truncate JSON responses
+        if use_thinking:
+            generation_config["thinkingConfig"] = {"thinkingLevel": self.thinking_level}
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": 8192,
-                "responseMimeType": "application/json",  # JSON mode
-                "thinkingConfig": {"thinkingLevel": self.thinking_level}
-            }
+            "generationConfig": generation_config
         }
 
         if system_instruction:

@@ -30,7 +30,8 @@ from telegram.ext import (
 from config import (
     TELEGRAM_BOT_TOKEN, PUSH_HOUR, PUSH_MINUTE, DATA_DIR,
     LOG_ROTATE_DAYS, LOG_BACKUP_COUNT, MAX_DIGEST_ITEMS, CONCURRENT_USERS,
-    PREFETCH_INTERVAL_HOURS, PREFETCH_START_HOUR, ADMIN_TELEGRAM_IDS
+    PREFETCH_INTERVAL_HOURS, PREFETCH_START_HOUR, ADMIN_TELEGRAM_IDS,
+    PUSH_MODE, PUSH_INTERVAL_HOURS, PUSH_QUIET_START, PUSH_QUIET_END, PUSH_CHECK_INTERVAL
 )
 from services.digest_processor import process_single_user
 from utils.telegram_utils import safe_answer_callback_query
@@ -207,13 +208,146 @@ async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Daily digest job failed: {e}", exc_info=True)
 
 
+async def interval_digest_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Scheduled job for user_interval mode: check which users are due for push.
+    Runs every PUSH_CHECK_INTERVAL minutes and pushes users whose last push was >= PUSH_INTERVAL_HOURS ago.
+    Respects quiet hours (PUSH_QUIET_START to PUSH_QUIET_END).
+    """
+    from utils.json_storage import get_users, get_user_sources, get_user_last_push_time
+
+    beijing_tz = ZoneInfo("Asia/Shanghai")
+    now = datetime.now(beijing_tz)
+    current_hour = now.hour
+
+    # Check if we're in quiet hours
+    if PUSH_QUIET_START <= current_hour < PUSH_QUIET_END:
+        logger.debug(f"In quiet hours ({PUSH_QUIET_START}:00-{PUSH_QUIET_END}:00), skipping interval check")
+        return
+
+    logger.info("Running interval digest check...")
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    def parse_datetime(dt_str: str) -> datetime:
+        """Parse ISO format datetime string."""
+        # Handle ISO format with or without microseconds
+        dt_str = dt_str.replace("Z", "+00:00")
+        if "+" not in dt_str and "T" in dt_str:
+            # No timezone, assume Beijing time
+            dt = datetime.fromisoformat(dt_str)
+            dt = dt.replace(tzinfo=beijing_tz)
+        else:
+            dt = datetime.fromisoformat(dt_str)
+        return dt
+
+    try:
+        # Get all users
+        users = get_users()
+        if not users:
+            logger.debug("No users registered, skipping interval check")
+            return
+
+        # Find users who are due for push
+        due_users = []
+        interval_seconds = PUSH_INTERVAL_HOURS * 3600
+
+        for user in users:
+            telegram_id = user.get("telegram_id")
+            if not telegram_id:
+                continue
+
+            # Get last push time
+            last_push_str = user.get("last_push_time")
+            created_str = user.get("created")
+
+            if last_push_str:
+                # Parse last push time
+                try:
+                    last_push = parse_datetime(last_push_str)
+                    time_since_push = (now - last_push).total_seconds()
+
+                    if time_since_push >= interval_seconds:
+                        due_users.append(user)
+                except Exception as e:
+                    logger.warning(f"Failed to parse last_push_time for {telegram_id}: {e}")
+            elif created_str:
+                # New user: check if created >= interval ago
+                try:
+                    created = parse_datetime(created_str)
+                    time_since_created = (now - created).total_seconds()
+
+                    if time_since_created >= interval_seconds:
+                        due_users.append(user)
+                except Exception as e:
+                    logger.warning(f"Failed to parse created time for {telegram_id}: {e}")
+
+        if not due_users:
+            logger.debug("No users due for push this interval")
+            return
+
+        logger.info(f"Found {len(due_users)} users due for push")
+
+        # Collect all sources from due users
+        all_sources = {}
+        for user in due_users:
+            telegram_id = user.get("telegram_id")
+            user_sources = get_user_sources(telegram_id)
+            for category, sources in user_sources.items():
+                if category not in all_sources:
+                    all_sources[category] = {}
+                for name, url in sources.items():
+                    if url and name not in all_sources[category]:
+                        all_sources[category][name] = url
+
+        # Pre-fetch all sources
+        from services.rss_fetcher import fetch_all_sources
+        logger.info(f"Pre-fetching sources for {len(due_users)} due users...")
+        global_raw_content = await fetch_all_sources(
+            hours_back=24,
+            sources=all_sources
+        )
+        logger.info(f"Pre-fetched {len(global_raw_content)} items")
+
+        # Process due users with concurrency limit
+        semaphore = asyncio.Semaphore(CONCURRENT_USERS)
+
+        async def process_with_limit(user):
+            async with semaphore:
+                return await process_single_user(context, user, today, global_raw_content)
+
+        results = await asyncio.gather(
+            *[process_with_limit(user) for user in due_users],
+            return_exceptions=True
+        )
+
+        # Collect statistics
+        success_count = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "success")
+        error_count = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "error")
+        exception_count = sum(1 for r in results if isinstance(r, Exception))
+
+        logger.info(
+            f"Interval digest complete: {success_count} success, {error_count} errors, {exception_count} exceptions"
+        )
+
+    except Exception as e:
+        logger.error(f"Interval digest check failed: {e}", exc_info=True)
+
+
 async def test_fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Hidden /test command - manually trigger digest for the current user only."""
+    """Admin-only /test command - manually trigger digest for testing."""
     from utils.json_storage import get_user, get_user_sources
     from services.rss_fetcher import fetch_all_sources
+    from handlers.admin import is_admin
     
     user = update.effective_user
     telegram_id = str(user.id)
+    
+    # Admin check
+    if not is_admin(user.id):
+        await update.message.reply_text("此命令仅限管理员使用。")
+        return
+    
     today = datetime.now().strftime("%Y-%m-%d")
 
     await update.message.reply_text("正在为你生成简报...")
@@ -259,8 +393,14 @@ async def test_fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def test_profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Hidden /testprofile command - manually trigger profile update from feedback."""
+    """Admin-only /testprofile command - manually trigger profile update from feedback."""
     from services.profile_updater import update_all_user_profiles
+    from handlers.admin import is_admin
+
+    user = update.effective_user
+    if not is_admin(user.id):
+        await update.message.reply_text("此命令仅限管理员使用。")
+        return
 
     await update.message.reply_text("正在更新用户画像...")
 
@@ -273,10 +413,16 @@ async def test_profile_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def test_prefetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Hidden /testprefetch command - manually trigger prefetch and show stats."""
+    """Admin-only /testprefetch command - manually trigger prefetch and show stats."""
     from services.rss_fetcher import prefetch_all_user_sources
     from utils.json_storage import get_prefetch_cache
     from datetime import datetime
+    from handlers.admin import is_admin
+
+    user = update.effective_user
+    if not is_admin(user.id):
+        await update.message.reply_text("此命令仅限管理员使用。")
+        return
 
     await update.message.reply_text("🔄 正在执行预抓取测试...")
 
@@ -304,8 +450,7 @@ async def test_prefetch_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 💡 提示：
 • 如果"新增条目"为 0 且"重复跳过"有数值，说明去重正常工作
-• 多次执行此命令，观察"累计条目"是否增加（有新推文时）
-• 使用 /test 命令可测试完整推送流程"""
+• 多次执行此命令，观察"累计条目"是否增加（有新推文时）"""
 
         await update.message.reply_text(result_text)
 
@@ -340,7 +485,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 功能说明：
 
 每日简报
-  每天 {PUSH_HOUR:02d}:{PUSH_MINUTE:02d}（北京时间）自动推送。
+  每天自动推送（约 24 小时一次）。
   内容分为「今日必看」「推荐」「其他」三个板块。
   AI 根据你的偏好智能筛选 15-30 条精选内容。
 
@@ -440,28 +585,54 @@ async def post_init(application: Application) -> None:
     # Get timezone for Beijing
     beijing_tz = ZoneInfo("Asia/Shanghai")
 
-    # Schedule daily digest
-    push_time = time(hour=PUSH_HOUR, minute=PUSH_MINUTE, tzinfo=beijing_tz)
+    # Schedule digest based on PUSH_MODE
+    if PUSH_MODE == "fixed_time":
+        # Fixed time mode: push all users at the same time
+        push_time = time(hour=PUSH_HOUR, minute=PUSH_MINUTE, tzinfo=beijing_tz)
 
-    application.job_queue.run_daily(
-        callback=daily_digest_job,
-        time=push_time,
-        name="daily_digest"
-    )
+        application.job_queue.run_daily(
+            callback=daily_digest_job,
+            time=push_time,
+            name="daily_digest"
+        )
 
-    logger.info(f"Scheduled daily digest at {PUSH_HOUR:02d}:{PUSH_MINUTE:02d} Beijing Time")
+        logger.info(f"Scheduled daily digest at {PUSH_HOUR:02d}:{PUSH_MINUTE:02d} Beijing Time (fixed_time mode)")
 
-    # Run profile updates 30 minutes before daily digest push
-    # This ensures the latest feedback is incorporated into today's filtering
-    profile_update_hour = PUSH_HOUR if PUSH_MINUTE >= 30 else (PUSH_HOUR - 1) % 24
-    profile_update_minute = (PUSH_MINUTE - 30) % 60
-    profile_update_time = time(hour=profile_update_hour, minute=profile_update_minute, tzinfo=beijing_tz)
-    application.job_queue.run_daily(
-        callback=profile_update_job,
-        time=profile_update_time,
-        name="profile_update"
-    )
-    logger.info(f"Scheduled profile update at {profile_update_hour:02d}:{profile_update_minute:02d} Beijing Time (30 min before push)")
+        # Run profile updates 30 minutes before daily digest push
+        profile_update_hour = PUSH_HOUR if PUSH_MINUTE >= 30 else (PUSH_HOUR - 1) % 24
+        profile_update_minute = (PUSH_MINUTE - 30) % 60
+        profile_update_time = time(hour=profile_update_hour, minute=profile_update_minute, tzinfo=beijing_tz)
+        application.job_queue.run_daily(
+            callback=profile_update_job,
+            time=profile_update_time,
+            name="profile_update"
+        )
+        logger.info(f"Scheduled profile update at {profile_update_hour:02d}:{profile_update_minute:02d} Beijing Time")
+
+    else:
+        # User interval mode: check every PUSH_CHECK_INTERVAL minutes for due users
+        application.job_queue.run_repeating(
+            callback=interval_digest_check_job,
+            interval=PUSH_CHECK_INTERVAL * 60,  # Convert minutes to seconds
+            first=60,  # Start 60 seconds after boot
+            name="interval_digest_check"
+        )
+
+        logger.info(
+            f"Scheduled interval digest check every {PUSH_CHECK_INTERVAL} minutes "
+            f"(user_interval mode, {PUSH_INTERVAL_HOURS}h cycle, "
+            f"quiet hours {PUSH_QUIET_START:02d}:00-{PUSH_QUIET_END:02d}:00)"
+        )
+
+        # Profile updates run every 6 hours in interval mode
+        for update_hour in [2, 8, 14, 20]:
+            profile_update_time = time(hour=update_hour, minute=30, tzinfo=beijing_tz)
+            application.job_queue.run_daily(
+                callback=profile_update_job,
+                time=profile_update_time,
+                name=f"profile_update_{update_hour:02d}"
+            )
+        logger.info("Scheduled profile updates at 02:30, 08:30, 14:30, 20:30 Beijing Time")
 
     # Run data cleanup at 00:30 daily
     # 每日 00:30 清理过期数据文件
@@ -493,18 +664,20 @@ async def post_init(application: Application) -> None:
                 name=f"prefetch_{prefetch_hour:02d}"
             )
 
-        # 同时在推送前 30 分钟也执行一次预抓取，确保数据最新
-        pre_push_hour = (PUSH_HOUR - 1) % 24 if PUSH_HOUR > 0 else 23
-        pre_push_time = time(hour=pre_push_hour, minute=30, tzinfo=beijing_tz)
-        application.job_queue.run_daily(
-            callback=prefetch_job,
-            time=pre_push_time,
-            name="prefetch_pre_push"
-        )
-
-        logger.info(
-            f"Scheduled prefetch jobs at hours: {prefetch_times} + {pre_push_hour:02d}:30 (pre-push) Beijing Time"
-        )
+        # Only add pre-push prefetch in fixed_time mode
+        if PUSH_MODE == "fixed_time":
+            pre_push_hour = (PUSH_HOUR - 1) % 24 if PUSH_HOUR > 0 else 23
+            pre_push_time = time(hour=pre_push_hour, minute=30, tzinfo=beijing_tz)
+            application.job_queue.run_daily(
+                callback=prefetch_job,
+                time=pre_push_time,
+                name="prefetch_pre_push"
+            )
+            logger.info(
+                f"Scheduled prefetch jobs at hours: {prefetch_times} + {pre_push_hour:02d}:30 (pre-push) Beijing Time"
+            )
+        else:
+            logger.info(f"Scheduled prefetch jobs at hours: {prefetch_times} Beijing Time")
 
         # 启动时立即执行一次预抓取（异步）
         application.job_queue.run_once(
@@ -623,7 +796,7 @@ async def show_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 功能说明：
 
 每日简报
-  每天 {PUSH_HOUR:02d}:{PUSH_MINUTE:02d}（北京时间）自动推送。
+  每天自动推送（约 24 小时一次）。
   内容分为「今日必看」「推荐」「其他」三个板块。
   AI 根据你的偏好智能筛选 15-30 条精选内容。
 

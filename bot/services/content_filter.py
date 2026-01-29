@@ -21,7 +21,7 @@ from services.gemini import call_gemini_json, call_gemini
 from services.llm_factory import call_llm_json, call_llm_text
 from utils.json_storage import get_user_profile, get_user_feedbacks
 from utils.prompt_loader import get_prompt
-from config import MIN_DIGEST_ITEMS, MAX_DIGEST_ITEMS, MAX_AI_INPUT_ITEMS, OUTPUT_RATIO, BATCH_SIZE, STAGE1_RATIO
+from config import MAX_DIGEST_ITEMS, BATCH_SIZE, STAGE1_RATIO
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ async def filter_content_for_user(
     Optimized I/O: Uses compact input format (n/src/t) and output format (n/r)
     to reduce token usage by ~40%.
     
-    Supports batch processing when content exceeds MAX_AI_INPUT_ITEMS.
+    Supports batch processing when content exceeds BATCH_SIZE.
 
     Args:
         telegram_id: User's Telegram ID
@@ -127,8 +127,8 @@ async def filter_content_for_user(
         return []
 
     # Check if batch processing is needed
-    if MAX_AI_INPUT_ITEMS > 0 and len(raw_content) > MAX_AI_INPUT_ITEMS:
-        logger.info(f"Content count {len(raw_content)} exceeds limit {MAX_AI_INPUT_ITEMS}, using batch processing")
+    if BATCH_SIZE > 0 and len(raw_content) > BATCH_SIZE:
+        logger.info(f"Content count {len(raw_content)} exceeds batch size {BATCH_SIZE}, using batch processing")
         return await _filter_content_batched(telegram_id, raw_content, max_items)
 
     # Get user profile
@@ -173,7 +173,7 @@ async def filter_content_for_user(
         "filtering.txt",
         user_profile=profile,
         feedback_summary=feedback_summary,
-        min_items=MIN_DIGEST_ITEMS,
+        min_items=max(10, MAX_DIGEST_ITEMS // 2),
         max_items=MAX_DIGEST_ITEMS
     )
 
@@ -182,7 +182,7 @@ async def filter_content_for_user(
 
 {json.dumps(content_for_ai, ensure_ascii=False)}
 
-Please categorize and output {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} items."""
+Please select {MAX_DIGEST_ITEMS} most valuable items."""
 
     # Call AI with automatic retry and model switching
     filtered_result, model_used = await call_llm_json(
@@ -260,15 +260,15 @@ async def _filter_content_batched(
     max_items: int = 20
 ) -> List[Dict[str, Any]]:
     """
-    Process content in batches when total count exceeds MAX_AI_INPUT_ITEMS.
+    Process content in batches when total count exceeds BATCH_SIZE.
     
     Strategy:
-    1. Split content into batches of MAX_AI_INPUT_ITEMS
+    1. Split content into batches of BATCH_SIZE
     2. Filter each batch with AI
     3. Merge results by section priority
     4. Return top max_items
     """
-    batch_size = MAX_AI_INPUT_ITEMS
+    batch_size = BATCH_SIZE
     total_items = len(raw_content)
     num_batches = (total_items + batch_size - 1) // batch_size
     
@@ -283,7 +283,7 @@ async def _filter_content_batched(
         
         logger.info(f"Processing batch {batch_idx + 1}/{num_batches}: items {start + 1}-{end}")
         
-        # Temporarily set MAX_AI_INPUT_ITEMS to 0 to avoid recursion
+        # Call the main filter function for this batch (avoids recursion since batch < BATCH_SIZE)
         # Call the main filter function for this batch
         batch_results = await _filter_single_batch(telegram_id, batch, max_items)
         all_results.extend(batch_results)
@@ -362,7 +362,7 @@ async def _filter_single_batch(
         "filtering.txt",
         user_profile=profile,
         feedback_summary=feedback_summary,
-        min_items=MIN_DIGEST_ITEMS,
+        min_items=max(10, MAX_DIGEST_ITEMS // 2),
         max_items=MAX_DIGEST_ITEMS
     )
     
@@ -370,7 +370,7 @@ async def _filter_single_batch(
 
 {json.dumps(content_for_ai, ensure_ascii=False)}
 
-Please categorize and output {MIN_DIGEST_ITEMS}-{MAX_DIGEST_ITEMS} items."""
+Please select {MAX_DIGEST_ITEMS} most valuable items."""
 
     # Use retry logic for batch processing too
     filtered_result, model_used = await call_llm_json(

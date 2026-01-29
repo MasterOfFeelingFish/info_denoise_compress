@@ -422,28 +422,71 @@ def get_raw_content(date: Optional[str] = None) -> Dict[str, Any]:
 
 
 # ============ User Sources Management ============
+# 
+# 设计原则：
+# 1. 默认源（DEFAULT_USER_SOURCES）：全局配置，修改后所有用户即时生效
+# 2. 用户自定义源（custom_sources）：用户单独添加的源
+# 3. 最终源 = 默认源 + 用户自定义源（合并）
+#
 
 
 def get_user_sources(telegram_id: str) -> Dict[str, Dict[str, str]]:
-    """Get user's RSS source configuration."""
+    """Get user's RSS source configuration.
+    
+    Returns merged sources: DEFAULT_USER_SOURCES + user's custom sources.
+    Default sources always apply globally; user custom sources are additive.
+    """
+    import copy
+    
+    # Start with default sources (always included)
+    merged = copy.deepcopy(DEFAULT_USER_SOURCES)
+    
     user = get_user(telegram_id)
     if not user:
-        return DEFAULT_USER_SOURCES.copy()
+        return merged
 
     _ensure_dir(USER_SOURCES_DIR)
     sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
 
     if not os.path.exists(sources_path):
-        # Initialize with default sources
-        save_user_sources(telegram_id, DEFAULT_USER_SOURCES)
-        return DEFAULT_USER_SOURCES.copy()
+        # No custom sources yet, just return defaults
+        return merged
 
     data = _read_json(sources_path)
-    return data.get("sources", DEFAULT_USER_SOURCES.copy())
+    custom_sources = data.get("custom_sources", {})
+    
+    # Merge custom sources into defaults
+    for category, sources in custom_sources.items():
+        if category not in merged:
+            merged[category] = {}
+        merged[category].update(sources)
+    
+    return merged
+
+
+def get_user_custom_sources(telegram_id: str) -> Dict[str, Dict[str, str]]:
+    """Get only user's custom (non-default) sources."""
+    user = get_user(telegram_id)
+    if not user:
+        return {}
+
+    _ensure_dir(USER_SOURCES_DIR)
+    sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
+
+    if not os.path.exists(sources_path):
+        return {}
+
+    data = _read_json(sources_path)
+    return data.get("custom_sources", {})
 
 
 def save_user_sources(telegram_id: str, sources: Dict[str, Dict[str, str]]) -> bool:
-    """Save user's RSS source configuration."""
+    """Save user's custom RSS source configuration.
+    
+    Note: This saves ALL sources passed in. For the new architecture,
+    use save_user_custom_sources() to save only custom sources.
+    This function is kept for backward compatibility during migration.
+    """
     user = get_user(telegram_id)
     if not user:
         logger.error(f"Cannot save sources: user {telegram_id} not found")
@@ -452,37 +495,69 @@ def save_user_sources(telegram_id: str, sources: Dict[str, Dict[str, str]]) -> b
     _ensure_dir(USER_SOURCES_DIR)
     sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
 
+    # Extract custom sources (sources not in defaults)
+    custom_sources = {}
+    for category, cat_sources in sources.items():
+        default_cat = DEFAULT_USER_SOURCES.get(category, {})
+        custom_cat = {}
+        for name, url in cat_sources.items():
+            # Keep if not in defaults OR has different URL
+            if name not in default_cat or (url and url != default_cat.get(name)):
+                custom_cat[name] = url
+        if custom_cat:
+            custom_sources[category] = custom_cat
+
     data = {
         "user_id": user["id"],
         "telegram_id": telegram_id,
         "updated": datetime.now().isoformat(),
-        "sources": sources,
+        "custom_sources": custom_sources,
     }
 
     result = _write_json(sources_path, data)
     if result:
-        logger.info(f"Saved sources for user {user['id']}")
+        logger.info(f"Saved custom sources for user {user['id']}: {len(custom_sources)} categories")
     return result
 
 
 def add_user_source(telegram_id: str, category: str, name: str, url: str) -> bool:
-    """Add a source to user's configuration."""
-    sources = get_user_sources(telegram_id)
+    """Add a custom source to user's configuration."""
+    custom = get_user_custom_sources(telegram_id)
 
-    if category not in sources:
-        sources[category] = {}
+    if category not in custom:
+        custom[category] = {}
 
-    sources[category][name] = url
-    return save_user_sources(telegram_id, sources)
+    custom[category][name] = url
+    
+    # Rebuild full sources for save (which will extract custom again)
+    full_sources = get_user_sources(telegram_id)
+    full_sources.setdefault(category, {})[name] = url
+    return save_user_sources(telegram_id, full_sources)
 
 
 def remove_user_source(telegram_id: str, category: str, name: str) -> bool:
-    """Remove a source from user's configuration."""
-    sources = get_user_sources(telegram_id)
+    """Remove a source from user's configuration.
+    
+    Note: Cannot remove default sources. Only custom sources can be removed.
+    """
+    # Check if it's a default source
+    if category in DEFAULT_USER_SOURCES and name in DEFAULT_USER_SOURCES[category]:
+        logger.warning(f"Cannot remove default source: {category}/{name}")
+        return False
+    
+    custom = get_user_custom_sources(telegram_id)
 
-    if category in sources and name in sources[category]:
-        del sources[category][name]
-        return save_user_sources(telegram_id, sources)
+    if category in custom and name in custom[category]:
+        del custom[category][name]
+        # Clean up empty categories
+        if not custom[category]:
+            del custom[category]
+        
+        # Rebuild and save
+        full_sources = get_user_sources(telegram_id)
+        if category in full_sources and name in full_sources[category]:
+            del full_sources[category][name]
+        return save_user_sources(telegram_id, full_sources)
     return False
 
 

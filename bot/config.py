@@ -37,7 +37,7 @@ elif LLM == "gemini":
     # Google Gemini (default)
     LLM_PROVIDER = "gemini"
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-pro-preview")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
     GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "HIGH")
 
     # Build Gemini API URL: supports both base URL and full URL
@@ -56,7 +56,7 @@ else:
     logger.warning(f"⚠️ Unknown LLM: {LLM}, falling back to Gemini")
     LLM_PROVIDER = "gemini"
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-pro-preview")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
     GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "HIGH")
     GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
@@ -69,7 +69,7 @@ if LLM_PROVIDER == "gemini":
 else:
     # Set dummy Gemini vars
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-pro-preview")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
     GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "HIGH")
     GEMINI_API_URL = ""
 
@@ -97,6 +97,22 @@ def _parse_int_env(key: str, default: int) -> int:
 
 PUSH_HOUR = _parse_int_env("PUSH_HOUR", 9)
 PUSH_MINUTE = _parse_int_env("PUSH_MINUTE", 0)
+
+# ============ Push Strategy Configuration ============
+# 推送策略配置
+
+# 推送模式: "fixed_time" (固定时间推送所有用户) / "user_interval" (按用户注册时间循环)
+PUSH_MODE = os.getenv("PUSH_MODE", "user_interval")
+
+# 用户间隔模式的周期（小时），默认24小时
+PUSH_INTERVAL_HOURS = _parse_int_env("PUSH_INTERVAL_HOURS", 24)
+
+# 静默时段（北京时间），此时段内不推送，延迟到静默结束后
+PUSH_QUIET_START = _parse_int_env("PUSH_QUIET_START", 0)   # 00:00 开始静默
+PUSH_QUIET_END = _parse_int_env("PUSH_QUIET_END", 7)       # 07:00 结束静默
+
+# 检查频率（分钟），用于 user_interval 模式，每隔多少分钟检查一次到期用户
+PUSH_CHECK_INTERVAL = _parse_int_env("PUSH_CHECK_INTERVAL", 30)
 
 # Data Directory
 DATA_DIR = os.getenv("DATA_DIR", "./data")
@@ -130,22 +146,14 @@ EVENTS_DIR = os.path.join(DATA_DIR, "events")
 
 # Digest Configuration
 # 简报配置
-MIN_DIGEST_ITEMS = _parse_int_env("MIN_DIGEST_ITEMS", 15)  # 每日精选最少条数
-MAX_DIGEST_ITEMS = _parse_int_env("MAX_DIGEST_ITEMS", 30)  # 每日精选最多条数
-MAX_AI_INPUT_ITEMS = _parse_int_env("MAX_AI_INPUT_ITEMS", 0)  # AI单次输入最大条数（0=不限制，超过则分批处理）
+MAX_DIGEST_ITEMS = _parse_int_env("MAX_DIGEST_ITEMS", 20)  # 每日精选输出条数
 
-# Two-stage filtering configuration (v2.1 升级新增)
+# Two-stage filtering configuration (v2.1)
 # 两阶段筛选配置
-def _parse_float_env(key: str, default: float) -> float:
-    """Parse a float environment variable with fallback."""
-    try:
-        return float(os.getenv(key, str(default)))
-    except ValueError:
-        return default
-
-OUTPUT_RATIO = _parse_float_env("OUTPUT_RATIO", 0.05)  # 最终输出比例（5% = 从1000条中选50条）
 BATCH_SIZE = _parse_int_env("BATCH_SIZE", 100)  # 每批处理的新闻数量
-STAGE1_RATIO = OUTPUT_RATIO * 2  # 粗筛比例（自动推导，无需配置）
+# Stage 1 粗筛比例：自动计算，确保候选池 = 最终输出的 3-5 倍
+# 例如：BATCH_SIZE=100, MAX_DIGEST_ITEMS=20 → STAGE1_RATIO=0.10 (每批选10条)
+STAGE1_RATIO = min(0.15, max(0.05, MAX_DIGEST_ITEMS / BATCH_SIZE * 0.5))
 
 # Concurrency Configuration
 # 并发配置

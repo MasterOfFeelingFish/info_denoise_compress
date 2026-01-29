@@ -62,8 +62,8 @@ class OpenAIProvider(LLMProvider):
             "max_tokens": max_tokens
         }
 
-        # Kimi K2 Thinking 模型需要更长的超时时间
-        timeout_seconds = 300.0 if is_kimi_api else 120.0
+        # Kimi K2 Thinking 模型需要更长的超时时间，普通模型使用较短超时
+        timeout_seconds = 180.0 if is_kimi_api else 60.0
 
         last_error = None
         for attempt in range(MAX_RETRIES):
@@ -176,8 +176,8 @@ class OpenAIProvider(LLMProvider):
         last_error = None
         for attempt in range(MAX_RETRIES):
             try:
-                # Kimi K2 Thinking 模型需要更长的超时时间（思考过程耗时）
-                timeout_seconds = 300.0 if is_kimi_api else 120.0
+                # Kimi K2 Thinking 模型需要更长的超时时间，普通模型使用较短超时
+                timeout_seconds = 180.0 if is_kimi_api else 60.0
                 
                 async with httpx.AsyncClient() as client:
                     response = await client.post(

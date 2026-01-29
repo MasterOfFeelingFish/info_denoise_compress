@@ -400,19 +400,48 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     default_sources_preview = ", ".join(list(DEFAULT_USER_SOURCES.get("websites", {}).keys())[:2])
 
     keyboard = [
-        [InlineKeyboardButton("🎯 配置我自己的信息源", callback_data="source_custom")],
-        [InlineKeyboardButton("📡 使用默认推荐源", callback_data="source_default")],
-        [InlineKeyboardButton("⏰ 稍后，明天 09:00 再看", callback_data="source_skip")],
+        [InlineKeyboardButton("📡 使用默认推荐源", callback_data="source_default_no_push")],
+        [InlineKeyboardButton("🎯 配置我自己的信息源", callback_data="source_custom_no_push")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
         "✅ 偏好保存成功！\n\n"
-        "你的个性化 Web3 简报已配置完成。\n\n"
-        f"📰 接下来，选择你的信息源：\n\n"
-        f"🔹 默认源：{default_sources_preview}...\n\n"
-        "你希望：",
-        reply_markup=reply_markup
+        "你的兴趣画像已记录完成。\n\n"
+        "📅 <b>推送时间：每天自动推送（约 24 小时一次）</b>\n\n"
+        "💡 <b>为什么是每天一次？</b>\n"
+        "系统会持续监控你订阅的信息源，积攒一整天的内容后，\n"
+        "由 AI 集中筛选出最符合你画像的精华，\n"
+        "避免碎片化打扰，一次看完当天最值得关注的信息。\n\n"
+        "━━━━━━ 📋 你将收到的简报示例 ━━━━━━\n\n"
+        "┌─────────────────────────────┐\n"
+        "│     <b>Web3 每日简报</b>            │\n"
+        "│  ━━━━━━━━━━━━━━━━━━━━━━━━━  │\n"
+        "│                             │\n"
+        "│  📊 监控 11 个源 · 扫描 1026 条 │\n"
+        "│     为你精选 25 条            │\n"
+        "│                             │\n"
+        "│  🤖 AI 摘要：今日市场关注...   │\n"
+        "│                             │\n"
+        "│  ──── <b>今日必看</b> ────          │\n"
+        "│  🔴 1. 白宫召集加密行业高管会议 │\n"
+        "│  💡 影响稳定币套利边界...      │\n"
+        "│    [👍 有用] [👎 不感兴趣]    │\n"
+        "│                             │\n"
+        "│  ──── <b>推荐</b> ────              │\n"
+        "│  🔵 2. Tether 每周买入黄金    │\n"
+        "│  🔵 3. 贵金属合约成交量激增    │\n"
+        "│  ...共 25 条精选...          │\n"
+        "│                             │\n"
+        "│  这份简报有帮助吗？            │\n"
+        "│    [👍 有用] [👎 一般]        │\n"
+        "└─────────────────────────────┘\n\n"
+        "💬 每条内容都有反馈按钮，你的反馈会让 AI 越来越懂你！\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📰 现在，选择你的信息源：\n"
+        f"🔹 默认源：{default_sources_preview}...",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
     )
 
     return SOURCE_CHOICE
@@ -716,7 +745,7 @@ DeFi (3)
 
 {'━' * 28}
 
-你的真实简报将于明天 9:00 推送。"""
+你的首次简报将于注册后约 24 小时内推送。"""
 
     await query.edit_message_text(
         sample_text,
@@ -825,7 +854,7 @@ async def trigger_first_digest(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
                 f"⏱️ 生成超时\n\n"
-                f"服务器繁忙，请稍后使用 /test 重试。",
+                f"服务器繁忙，请等待下次自动推送（约 24 小时后）。",
                 reply_markup=reply_markup
             )
             return
@@ -845,7 +874,7 @@ async def trigger_first_digest(update: Update, context: ContextTypes.DEFAULT_TYP
                      f"💡 提示：\n"
                      f"  • 每条内容都有反馈按钮（👍/👎）\n"
                      f"  • 你的反馈会让简报更懂你\n"
-                     f"  • 下次自动推送：明天 09:00\n\n"
+                     f"  • 下次推送：约 24 小时后\n\n"
                      f"使用 /help 查看更多功能。",
                 reply_markup=reply_markup
             )
@@ -861,8 +890,7 @@ async def trigger_first_digest(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.edit_message_text(
                 f"推送失败\n\n"
                 f"原因：{error_msg[:100]}\n\n"
-                f"你可以稍后使用 /test 命令重试，\n"
-                f"或等待明天 09:00 的自动推送。",
+                f"请等待下次自动推送（约 24 小时后）。",
                 reply_markup=reply_markup
             )
 
@@ -872,8 +900,7 @@ async def trigger_first_digest(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            "推送失败，请稍后重试。\n\n"
-            "你可以使用 /test 命令手动触发推送。",
+            "推送失败，请等待下次自动推送（约 24 小时后）。",
             reply_markup=reply_markup
         )
 
@@ -896,7 +923,7 @@ async def skip_first_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     await query.edit_message_text(
         f"好的，{user.first_name}！\n\n"
-        f"你的首份简报将在明天 09:00 推送。\n\n"
+        f"你的首份简报将在约 24 小时后推送。\n\n"
         f"在此之前，你可以：\n"
         f"  • 调整偏好设置\n"
         f"  • 添加更多信息源\n\n"
@@ -1086,6 +1113,117 @@ async def use_default_sources(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
+async def use_default_sources_no_push(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Use default sources without triggering immediate digest - wait for scheduled push."""
+    query = update.callback_query
+    await safe_answer_callback_query(query)
+
+    user = update.effective_user
+
+    keyboard = [
+        [
+            InlineKeyboardButton("偏好设置", callback_data="update_preferences"),
+            InlineKeyboardButton("信息源", callback_data="manage_sources"),
+        ],
+        [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        f"✅ 设置完成！\n\n"
+        f"{user.first_name}，你已成功订阅默认信息源。\n\n"
+        f"📅 你的首份简报将在约 <b>24 小时后</b>自动推送。\n\n"
+        f"系统会持续监控信息源，为你积攒一整天的内容后集中筛选。",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+
+    return ConversationHandler.END
+
+
+async def add_custom_sources_no_push(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Enter custom sources mode without immediate digest trigger."""
+    query = update.callback_query
+    await safe_answer_callback_query(query)
+
+    # Initialize adding counters
+    context.user_data["added_sources_count"] = 0
+    context.user_data["added_sources_list"] = []
+    context.user_data["no_push_mode"] = True  # Flag to indicate no immediate push
+
+    keyboard = [
+        [InlineKeyboardButton("✅ 完成添加", callback_data="finish_sources_no_push")],
+        [InlineKeyboardButton("📡 使用默认源", callback_data="source_default_no_push")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        "🎯 添加你关注的信息源\n\n"
+        "请发送以下任一格式：\n\n"
+        "📱 Twitter: @VitalikButerin\n"
+        "📰 网站: https://example.com/rss\n\n"
+        "💡 可以连续发送多个，完成后点击按钮：",
+        reply_markup=reply_markup
+    )
+
+    return ADDING_SOURCES
+
+
+async def finish_sources_no_push(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Finish adding sources without triggering immediate digest."""
+    query = update.callback_query
+    await safe_answer_callback_query(query)
+
+    user = update.effective_user
+    added_count = context.user_data.get("added_sources_count", 0)
+
+    keyboard = [
+        [
+            InlineKeyboardButton("偏好设置", callback_data="update_preferences"),
+            InlineKeyboardButton("信息源", callback_data="manage_sources"),
+        ],
+        [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if added_count > 0:
+        msg = (
+            f"✅ 设置完成！\n\n"
+            f"{user.first_name}，你已添加 {added_count} 个信息源。\n\n"
+            f"📅 你的首份简报将在约 <b>24 小时后</b>自动推送。\n\n"
+            f"系统会持续监控信息源，为你积攒一整天的内容后集中筛选。"
+        )
+    else:
+        msg = (
+            f"✅ 设置完成！\n\n"
+            f"{user.first_name}，你将使用默认信息源。\n\n"
+            f"📅 你的首份简报将在约 <b>24 小时后</b>自动推送。\n\n"
+            f"系统会持续监控信息源，为你积攒一整天的内容后集中筛选。"
+        )
+
+    await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode="HTML")
+
+    # Clear user data
+    context.user_data.pop("no_push_mode", None)
+    context.user_data.pop("added_sources_count", None)
+    context.user_data.pop("added_sources_list", None)
+
+    return ConversationHandler.END
+
+
+async def test_digest_hint(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Redirect to main menu (test command is admin-only)."""
+    query = update.callback_query
+    await safe_answer_callback_query(query)
+
+    keyboard = [[InlineKeyboardButton("返回主菜单", callback_data="back_to_start")]]
+    await query.edit_message_text(
+        "📅 你的简报将在约 24 小时后自动推送。\n\n"
+        "届时请查看消息通知。",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
 async def trigger_first_digest_internal(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -1129,7 +1267,7 @@ async def trigger_first_digest_internal(
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
                 f"⏱️ 生成超时\n\n"
-                f"服务器繁忙，请稍后使用 /test 重试。",
+                f"服务器繁忙，请等待下次自动推送（约 24 小时后）。",
                 reply_markup=reply_markup
             )
             return
@@ -1148,7 +1286,7 @@ async def trigger_first_digest_internal(
                     text="暂时没有新内容。\n\n"
                          "💡 建议：\n"
                          "  • 添加更多信息源（/sources）\n"
-                         "  • 下次推送：明天 09:00",
+                         "  • 下次推送：约 24 小时后",
                     reply_markup=reply_markup
                 )
             else:
@@ -1164,7 +1302,7 @@ async def trigger_first_digest_internal(
                          f"💡 提示：\n"
                          f"  • 每条内容都有反馈按钮（👍/👎）\n"
                          f"  • 你的反馈会让简报更懂你\n"
-                         f"  • 下次自动推送：明天 09:00\n\n"
+                         f"  • 下次推送：约 24 小时后\n\n"
                          f"使用 /help 查看更多功能。",
                     reply_markup=reply_markup
                 )
@@ -1180,8 +1318,7 @@ async def trigger_first_digest_internal(
             await query.edit_message_text(
                 f"推送失败\n\n"
                 f"原因：{error_msg[:100]}\n\n"
-                f"你可以稍后使用 /test 命令重试，\n"
-                f"或等待明天 09:00 的自动推送。",
+                f"请等待下次自动推送（约 24 小时后）。",
                 reply_markup=reply_markup
             )
 
@@ -1191,8 +1328,7 @@ async def trigger_first_digest_internal(
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            "推送失败，请稍后重试。\n\n"
-            "你可以使用 /test 命令手动触发推送。",
+            "推送失败，请等待下次自动推送（约 24 小时后）。",
             reply_markup=reply_markup
         )
 
@@ -1207,6 +1343,7 @@ def get_start_callbacks():
         CallbackQueryHandler(view_sample, pattern="^view_sample$"),
         CallbackQueryHandler(view_stats, pattern="^view_stats$"),
         CallbackQueryHandler(learn_more, pattern="^learn_more$"),
+        CallbackQueryHandler(test_digest_hint, pattern="^test_digest_hint$"),
     ]
 
 
@@ -1233,12 +1370,18 @@ def get_start_handler() -> ConversationHandler:
                 CallbackQueryHandler(add_custom_sources, pattern="^source_custom$"),
                 CallbackQueryHandler(use_default_sources, pattern="^source_default$"),
                 CallbackQueryHandler(skip_first_digest, pattern="^source_skip$"),
+                # New handlers for no-push mode
+                CallbackQueryHandler(add_custom_sources_no_push, pattern="^source_custom_no_push$"),
+                CallbackQueryHandler(use_default_sources_no_push, pattern="^source_default_no_push$"),
             ],
             ADDING_SOURCES: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_source),
                 CallbackQueryHandler(finish_adding_sources, pattern="^finish_sources$"),
                 CallbackQueryHandler(finish_with_default, pattern="^finish_sources_default$"),
                 CallbackQueryHandler(skip_first_digest, pattern="^source_skip$"),
+                # New handlers for no-push mode
+                CallbackQueryHandler(finish_sources_no_push, pattern="^finish_sources_no_push$"),
+                CallbackQueryHandler(use_default_sources_no_push, pattern="^source_default_no_push$"),
             ],
         },
         fallbacks=[
