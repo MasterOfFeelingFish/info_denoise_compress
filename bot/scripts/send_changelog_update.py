@@ -39,8 +39,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Path to CHANGELOG.md (relative to bot directory)
-CHANGELOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "CHANGELOG.md")
+# Path to CHANGELOG.md
+# In Docker: mounted at /app/CHANGELOG.md
+# In dev: relative to bot directory (../CHANGELOG.md)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_bot_dir = os.path.dirname(_script_dir)
+CHANGELOG_PATH = os.path.join(_bot_dir, "CHANGELOG.md")  # /app/CHANGELOG.md in Docker
 
 # Cache for translated content
 _translation_cache: Dict[str, str] = {}

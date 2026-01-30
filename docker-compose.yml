@@ -10,6 +10,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./bot:/app
+      - ./CHANGELOG.md:/app/CHANGELOG.md:ro
     networks:
       - web3-digest
 
