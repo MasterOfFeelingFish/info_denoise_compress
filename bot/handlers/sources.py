@@ -20,7 +20,8 @@ from telegram.ext import (
 
 from services.rss_fetcher import get_user_source_list
 from utils.telegram_utils import safe_answer_callback_query
-from utils.json_storage import get_user, add_user_source, remove_user_source, track_event
+from utils.json_storage import get_user, add_user_source, remove_user_source, track_event, get_user_language
+from locales.ui_strings import get_ui_locale
 
 logger = logging.getLogger(__name__)
 
@@ -34,20 +35,21 @@ async def sources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     telegram_id = str(user.id)
 
     db_user = get_user(telegram_id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+    
     if not db_user:
-        await update.message.reply_text(
-            "你还没有注册。请使用 /start 开始。"
-        )
+        await update.message.reply_text(ui["not_registered"])
         return
 
     keyboard = [
         [
-            InlineKeyboardButton("Twitter", callback_data="sources_twitter"),
-            InlineKeyboardButton("网站", callback_data="sources_websites"),
+            InlineKeyboardButton(ui["sources_twitter"], callback_data="sources_twitter"),
+            InlineKeyboardButton(ui["sources_websites"], callback_data="sources_websites"),
         ],
-        [InlineKeyboardButton("批量导入", callback_data="sources_bulk_import")],
-        [InlineKeyboardButton("推荐信息源", callback_data="sources_suggest")],
-        [InlineKeyboardButton("返回", callback_data="back_to_start")],
+        [InlineKeyboardButton(ui["sources_bulk_import"], callback_data="sources_bulk_import")],
+        [InlineKeyboardButton(ui["sources_suggest"], callback_data="sources_suggest")],
+        [InlineKeyboardButton(ui["back"], callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -57,12 +59,12 @@ async def sources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     website_count = len(sources.get("websites", []))
 
     await update.message.reply_text(
-        f"信息源管理\n"
-        f"{'─' * 24}\n\n"
-        f"当前监控：\n"
-        f"  • Twitter 账号: {twitter_count}\n"
-        f"  • 网站 RSS: {website_count}\n\n"
-        "选择分类查看详情。",
+        f"{ui['sources_title']}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui['sources_current']}\n"
+        f"  • {ui['sources_twitter_count'].format(count=twitter_count)}\n"
+        f"  • {ui['sources_website_count'].format(count=website_count)}\n\n"
+        f"{ui['sources_choose_category']}",
         reply_markup=reply_markup
     )
 
@@ -73,32 +75,34 @@ async def view_twitter_sources(update: Update, context: ContextTypes.DEFAULT_TYP
     await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+    
     sources = get_user_source_list(telegram_id)
     twitter_sources = sources.get("twitter", [])
 
     if twitter_sources:
         lines = [
-            f"Twitter 信息源\n"
-            f"{'─' * 24}\n"
+            f"{ui['twitter_title']}\n"
+            f"{ui['divider']}\n"
         ]
         for i, source in enumerate(twitter_sources, 1):
             lines.append(f"  {i}. {source}")
-        lines.append(f"\n共 {len(twitter_sources)} 个账号")
+        lines.append(f"\n{ui['twitter_total'].format(count=len(twitter_sources))}")
         text = "\n".join(lines)
     else:
         text = (
-            f"Twitter 信息源\n"
-            f"{'─' * 24}\n\n"
-            "还没有配置 Twitter 信息源。\n\n"
-            "点击「添加 Twitter」添加账号。"
+            f"{ui['twitter_title']}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui['twitter_empty']}"
         )
 
     keyboard = [
-        [InlineKeyboardButton("添加 Twitter", callback_data="sources_add_twitter")],
+        [InlineKeyboardButton(ui["twitter_add"], callback_data="sources_add_twitter")],
     ]
     if twitter_sources:
-        keyboard.append([InlineKeyboardButton("删除 Twitter", callback_data="sources_del_twitter")])
-    keyboard.append([InlineKeyboardButton("返回", callback_data="sources_back")])
+        keyboard.append([InlineKeyboardButton(ui["twitter_delete"], callback_data="sources_del_twitter")])
+    keyboard.append([InlineKeyboardButton(ui["back"], callback_data="sources_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(text, reply_markup=reply_markup)
@@ -160,111 +164,151 @@ async def start_source_suggestion(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def start_add_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start adding a Twitter account."""
+    """Start adding a Twitter RSS feed."""
     query = update.callback_query
     await safe_answer_callback_query(query)
 
+    telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
+    keyboard = [
+        [InlineKeyboardButton(ui["btn_view_tutorial"], callback_data="twitter_tutorial")],
+        [InlineKeyboardButton(ui["cancel"], callback_data="sources_twitter")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await query.edit_message_text(
-        f"添加 Twitter 账号\n"
-        f"{'─' * 24}\n\n"
-        "请输入 Twitter 账号和 RSS 地址。\n\n"
-        "格式：\n"
-        "  账号名 | RSS 地址\n\n"
-        "示例：\n"
-        "  @VitalikButerin | https://rss.app/feeds/xxx\n"
-        "  lookonchain | https://nitter.net/lookonchain/rss\n\n"
-        "提示：可使用 rss.app 或 nitter 获取 RSS\n\n"
-        "请输入或 /cancel 取消："
+        f"{ui['twitter_add_title']}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui['twitter_add_intro']}\n\n"
+        f"{ui['twitter_step1_title']}\n\n"
+        f"{ui['twitter_step1_desc']}\n\n"
+        f"{ui['twitter_step1_example']}\n\n"
+        f"{ui['twitter_step1_tip']}\n\n"
+        f"{ui['twitter_step2_title']}\n\n"
+        f"{ui['twitter_step2_desc']}\n\n"
+        f"{ui['twitter_step3_title']}\n\n"
+        f"{ui['twitter_step3_desc']}\n\n"
+        f"{ui['divider']}\n"
+        f"{ui['twitter_future_hint']}\n\n"
+        f"{ui['twitter_input_prompt']}",
+        reply_markup=reply_markup,
+        disable_web_page_preview=True
     )
 
     return AWAITING_TWITTER_ADD
 
 
+async def show_twitter_tutorial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show Twitter RSS tutorial."""
+    query = update.callback_query
+    await safe_answer_callback_query(query)
+
+    telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
+    keyboard = [
+        [InlineKeyboardButton(ui["btn_back_to_add"], callback_data="sources_add_twitter")],
+        [InlineKeyboardButton(ui["cancel"], callback_data="sources_twitter")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        f"{ui['twitter_tutorial_title']}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui['twitter_tutorial_step1']}\n\n"
+        f"{ui['twitter_tutorial_step2']}\n\n"
+        f"{ui['twitter_tutorial_step3']}\n\n"
+        f"{ui['twitter_tutorial_step4']}\n\n"
+        f"{ui['twitter_tutorial_step5']}\n\n"
+        f"{ui['divider']}\n"
+        f"{ui['twitter_tutorial_tip']}\n\n"
+        f"{ui['twitter_tutorial_future']}",
+        reply_markup=reply_markup,
+        disable_web_page_preview=True
+    )
+
+
 async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle Twitter account addition."""
-    from services.rss_fetcher import validate_twitter_handle, validate_url
+    """Handle Twitter RSS feed addition - only accepts RSS URL."""
+    from services.rss_fetcher import validate_rss_url, add_source
 
     telegram_id = str(update.effective_user.id)
-    user_input = update.message.text.strip()
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+    url = update.message.text.strip()
 
-    # Parse input: "handle | URL" format
-    if "|" in user_input:
-        parts = user_input.split("|", 1)
-        handle = parts[0].strip()
-        url = parts[1].strip()
-    else:
-        # No URL provided
-        handle = user_input
-        url = ""
-
-    # Validate Twitter handle
-    validation = await validate_twitter_handle(handle)
-    if not validation["valid"]:
+    # Check if input looks like a URL
+    if not url.startswith("http"):
         keyboard = [
-            [InlineKeyboardButton("重试", callback_data="sources_add_twitter")],
-            [InlineKeyboardButton("返回", callback_data="sources_twitter")],
+            [InlineKeyboardButton(ui["btn_view_tutorial"], callback_data="twitter_tutorial")],
+            [InlineKeyboardButton(ui["btn_retry"], callback_data="sources_add_twitter")],
+            [InlineKeyboardButton(ui["back"], callback_data="sources_twitter")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            f"添加失败\n"
-            f"{'─' * 24}\n\n"
-            f"{html.escape(validation['error'])}\n\n"
-            "请重试。",
+            f"{ui['twitter_format_error']}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui['twitter_format_hint']}",
             reply_markup=reply_markup
         )
         return ConversationHandler.END
 
-    handle = validation["handle"]
+    # Validate RSS URL (checks accessibility and content format)
+    validation = await validate_rss_url(url)
+    
+    if not validation["valid"]:
+        keyboard = [
+            [InlineKeyboardButton(ui["btn_view_tutorial"], callback_data="twitter_tutorial")],
+            [InlineKeyboardButton(ui["btn_retry"], callback_data="sources_add_twitter")],
+            [InlineKeyboardButton(ui["back"], callback_data="sources_twitter")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            f"{ui['twitter_add_failed']}\n"
+            f"{ui['divider']}\n\n"
+            f"{html.escape(validation['error'])}\n\n"
+            f"{ui['twitter_check_retry']}",
+            reply_markup=reply_markup
+        )
+        return ConversationHandler.END
 
-    # Validate URL if provided
-    if url:
-        url_validation = await validate_url(url)
-        if not url_validation["valid"]:
-            keyboard = [
-                [InlineKeyboardButton("重试", callback_data="sources_add_twitter")],
-                [InlineKeyboardButton("返回", callback_data="sources_twitter")],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                f"添加失败\n"
-                f"{'─' * 24}\n\n"
-                f"RSS 地址无效：{html.escape(url_validation['error'])}\n\n"
-                "请重试。",
-                reply_markup=reply_markup
-            )
-            return ConversationHandler.END
-
-    # Add to user's sources
-    success = add_user_source(telegram_id, "twitter", handle, url)
+    # RSS validation passed, add to user's sources
+    feed_title = validation.get("title", "Twitter List RSS")
+    entries_count = validation.get("entries_count", 0)
+    
+    # Add to user's sources with the feed title as name
+    success = add_user_source(telegram_id, "twitter", feed_title, url)
 
     keyboard = [
-        [InlineKeyboardButton("添加更多", callback_data="sources_add_twitter")],
-        [InlineKeyboardButton("返回", callback_data="sources_twitter")],
+        [InlineKeyboardButton(ui["btn_add_more"], callback_data="sources_add_twitter")],
+        [InlineKeyboardButton(ui["back"], callback_data="sources_twitter")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if success:
         # 埋点：添加信息源
-        track_event(telegram_id, "source_added", {"category": "twitter", "name": handle})
+        track_event(telegram_id, "source_added", {"category": "twitter", "name": feed_title, "url": url})
         
-        message = f"已添加 {html.escape(handle)}。"
-        if not url:
-            message += "\n注意：需要配置 RSS 地址才能抓取。"
         await update.message.reply_text(
-            f"添加成功\n"
-            f"{'─' * 24}\n\n"
-            f"{message}",
+            f"{ui['twitter_add_success']}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui['twitter_added'].format(title=html.escape(feed_title))}\n"
+            f"{ui['twitter_entries_count'].format(count=entries_count)}\n\n"
+            f"{ui['twitter_next_digest']}",
             reply_markup=reply_markup
         )
-        logger.info(f"Added Twitter source for user {telegram_id}: {handle}")
+        logger.info(f"Added Twitter RSS for user {telegram_id}: {feed_title} ({url})")
     else:
         await update.message.reply_text(
-            f"添加失败\n"
-            f"{'─' * 24}\n\n"
-            "保存失败，请重试。",
+            f"{ui['twitter_add_failed']}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui['twitter_save_failed']}",
             reply_markup=reply_markup
         )
-        logger.warning(f"Failed to add Twitter source for user {telegram_id}: {handle}")
+        logger.warning(f"Failed to add Twitter RSS for user {telegram_id}: {url}")
 
     return ConversationHandler.END
 
@@ -748,4 +792,5 @@ def get_sources_callbacks():
         CallbackQueryHandler(handle_delete_twitter, pattern="^del_tw_"),
         CallbackQueryHandler(handle_delete_website, pattern="^del_web_"),
         CallbackQueryHandler(sources_back, pattern="^sources_back$"),
+        CallbackQueryHandler(show_twitter_tutorial, pattern="^twitter_tutorial$"),
     ]

@@ -252,6 +252,85 @@ class TestRSSFetcher:
         assert "<b>" not in summary
         assert "HTML" in summary
 
+    def test_extract_twitter_author(self):
+        """Test Twitter author extraction from tweet links"""
+        from services.rss_fetcher import extract_twitter_author
+
+        # Valid Twitter/X links
+        assert extract_twitter_author("https://x.com/VitalikButerin/status/123") == "@VitalikButerin"
+        assert extract_twitter_author("https://twitter.com/elonmusk/status/456") == "@elonmusk"
+        assert extract_twitter_author("https://x.com/caborunda") == "@caborunda"
+
+        # Non-Twitter links should return empty
+        assert extract_twitter_author("https://example.com/article") == ""
+        assert extract_twitter_author("https://coindesk.com/news/123") == ""
+
+        # Edge cases
+        assert extract_twitter_author("") == ""
+        assert extract_twitter_author("https://x.com/i/status/123") == ""  # 'i' is a special path
+        assert extract_twitter_author("https://x.com/search") == ""  # 'search' is a special path
+
+
+# ============ Module 4.5: Twitter Author Display Tests ============
+
+class TestTwitterAuthorDisplay:
+    """Test Twitter author display in report generation"""
+
+    def test_format_item_with_twitter_author(self):
+        """Twitter item should display author"""
+        from services.report_generator import format_single_item
+
+        item = {
+            "title": "ETH breaks $4000",
+            "summary": "Market sentiment is bullish",
+            "source": "Twitter Bundle",
+            "author": "@VitalikButerin",
+            "link": "https://x.com/VitalikButerin/status/123",
+            "section": "must_read",
+            "reason": "Matches your DeFi interest"
+        }
+
+        formatted = format_single_item(item, 1, "zh")
+
+        assert "@VitalikButerin" in formatted
+        assert "📣" in formatted
+
+    def test_format_item_without_author(self):
+        """Non-Twitter item should not display author line"""
+        from services.report_generator import format_single_item
+
+        item = {
+            "title": "Bitcoin analysis",
+            "summary": "Technical analysis report",
+            "source": "CoinDesk",
+            "author": "",  # No author
+            "link": "https://coindesk.com/article",
+            "section": "recommended",
+            "reason": "Industry news"
+        }
+
+        formatted = format_single_item(item, 1, "zh")
+
+        assert "📣" not in formatted
+
+    def test_format_item_with_invalid_author(self):
+        """Item with non-Twitter author format should not display author"""
+        from services.report_generator import format_single_item
+
+        item = {
+            "title": "News article",
+            "summary": "Summary text",
+            "source": "Some Source",
+            "author": "John Doe",  # Not a Twitter handle (no @)
+            "link": "https://example.com",
+            "section": "other"
+        }
+
+        formatted = format_single_item(item, 1, "zh")
+
+        assert "📣" not in formatted
+        assert "John Doe" not in formatted
+
 
 # ============ Module 5: AI Content Filtering Tests ============
 
@@ -569,6 +648,235 @@ class TestFeedbackLearning:
         assert trends["total_feedbacks"] == 4
         assert trends["positive_count"] == 3
         assert trends["negative_count"] == 1
+
+
+# ============ Module 10: Language Adaptation Tests ============
+
+class TestLanguageAdaptation:
+    """Test language adaptation functionality"""
+
+    def test_normalize_language_code_chinese(self):
+        """Chinese language codes should normalize to 'zh'"""
+        from utils.language import normalize_language_code
+        
+        assert normalize_language_code("zh") == "zh"
+        assert normalize_language_code("zh-hans") == "zh"
+        assert normalize_language_code("zh-hant") == "zh"
+        assert normalize_language_code("zh-CN") == "zh"
+        assert normalize_language_code("zh-TW") == "zh"
+
+    def test_normalize_language_code_english(self):
+        """English language codes should normalize to 'en'"""
+        from utils.language import normalize_language_code
+        
+        assert normalize_language_code("en") == "en"
+        assert normalize_language_code("en-US") == "en"
+        assert normalize_language_code("en-GB") == "en"
+
+    def test_normalize_language_code_fallback(self):
+        """Unsupported languages should fall back to 'en'"""
+        from utils.language import normalize_language_code
+        
+        assert normalize_language_code("fr") == "en"
+        assert normalize_language_code("de") == "en"
+        assert normalize_language_code(None) == "en"
+        assert normalize_language_code("") == "en"
+
+    def test_get_ui_locale_zh(self):
+        """Chinese UI locale should have Chinese strings"""
+        from locales.ui_strings import get_ui_locale
+        
+        ui = get_ui_locale("zh")
+        assert ui["menu_view_digest"] == "查看今日简报"
+        assert ui["feedback_helpful"] == "有帮助"
+
+    def test_get_ui_locale_en(self):
+        """English UI locale should have English strings"""
+        from locales.ui_strings import get_ui_locale
+        
+        ui = get_ui_locale("en")
+        assert ui["menu_view_digest"] == "View Today's Digest"
+        assert ui["feedback_helpful"] == "Helpful"
+
+    def test_get_ui_locale_fallback(self):
+        """Unknown language should fall back to English"""
+        from locales.ui_strings import get_ui_locale
+        
+        ui = get_ui_locale("xyz")
+        assert ui["menu_view_digest"] == "View Today's Digest"
+
+    def test_create_user_with_language(self, tmp_data_dir):
+        """Create user should store language"""
+        from utils.json_storage import create_user, get_user_language
+        
+        user = create_user(
+            telegram_id="lang_test_user",
+            username="langtest",
+            first_name="Lang",
+            language="ja"
+        )
+        
+        assert user["language"] == "ja"
+        assert get_user_language("lang_test_user") == "ja"
+
+    def test_get_user_language_default(self, tmp_data_dir):
+        """Non-existent user should return default language"""
+        from utils.json_storage import get_user_language
+        
+        lang = get_user_language("nonexistent_user")
+        assert lang == "zh"
+
+
+# ============ Module 11: Twitter Source Addition Tests ============
+
+class TestValidateRssUrl:
+    """Test RSS URL validation function"""
+
+    @pytest.mark.asyncio
+    async def test_valid_rss_url(self):
+        """Valid RSS URL should return success with title and entries count"""
+        from services.rss_fetcher import validate_rss_url
+        
+        # Use a known working RSS feed
+        result = await validate_rss_url("https://cointelegraph.com/rss")
+        
+        assert result["valid"] is True
+        assert "title" in result
+        assert "entries_count" in result
+        assert result["entries_count"] > 0
+        assert result["error"] is None
+
+    @pytest.mark.asyncio
+    async def test_invalid_format_no_http(self):
+        """URL without http should be rejected"""
+        from services.rss_fetcher import validate_rss_url
+        
+        result = await validate_rss_url("@VitalikButerin")
+        
+        assert result["valid"] is False
+        assert "http" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_non_rss_webpage(self):
+        """Non-RSS webpage should be rejected"""
+        from services.rss_fetcher import validate_rss_url
+        
+        result = await validate_rss_url("https://example.com")
+        
+        assert result["valid"] is False
+        assert "RSS" in result["error"] or "有效" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_url(self):
+        """Non-existent URL should be rejected"""
+        from services.rss_fetcher import validate_rss_url
+        
+        result = await validate_rss_url("https://rss.app/feeds/nonexistent12345.xml")
+        
+        assert result["valid"] is False
+        assert result["error"] is not None
+
+
+class TestTwitterSourceGuide:
+    """Test Twitter source addition guide and flow"""
+
+    def test_start_add_twitter_returns_correct_state(self):
+        """start_add_twitter should return AWAITING_TWITTER_ADD state"""
+        from handlers.sources import AWAITING_TWITTER_ADD
+        
+        # Verify state constant exists
+        assert AWAITING_TWITTER_ADD is not None
+        assert isinstance(AWAITING_TWITTER_ADD, int)
+
+    def test_twitter_tutorial_callback_registered(self):
+        """twitter_tutorial callback should be registered"""
+        from handlers.sources import get_sources_callbacks
+        
+        callbacks = get_sources_callbacks()
+        patterns = [cb.pattern.pattern for cb in callbacks]
+        
+        assert "^twitter_tutorial$" in patterns
+
+    def test_sources_add_twitter_callback_in_conversation(self):
+        """sources_add_twitter should be in conversation handler entry points"""
+        from handlers.sources import get_sources_handler
+        from telegram.ext import CallbackQueryHandler
+        
+        handler = get_sources_handler()
+        # Filter for CallbackQueryHandler only (CommandHandler has no pattern)
+        callback_handlers = [ep for ep in handler.entry_points if isinstance(ep, CallbackQueryHandler)]
+        entry_patterns = [ep.pattern.pattern for ep in callback_handlers]
+        
+        assert "^sources_add_twitter$" in entry_patterns
+
+
+class TestHandleTwitterAdd:
+    """Test handle_twitter_add function logic"""
+
+    @pytest.mark.asyncio
+    async def test_non_url_input_rejected(self):
+        """Non-URL input should be rejected with helpful message"""
+        from handlers.sources import handle_twitter_add
+        from telegram import Update, Message, User, Chat
+        from telegram.ext import ContextTypes
+        from unittest.mock import AsyncMock, MagicMock
+        
+        # Mock update
+        mock_user = MagicMock(spec=User)
+        mock_user.id = 12345
+        
+        mock_chat = MagicMock(spec=Chat)
+        mock_chat.id = 12345
+        
+        mock_message = MagicMock(spec=Message)
+        mock_message.text = "@VitalikButerin"  # Not a URL
+        mock_message.reply_text = AsyncMock()
+        
+        mock_update = MagicMock(spec=Update)
+        mock_update.effective_user = mock_user
+        mock_update.message = mock_message
+        
+        mock_context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+        
+        # Call function
+        result = await handle_twitter_add(mock_update, mock_context)
+        
+        # Verify rejection
+        mock_message.reply_text.assert_called_once()
+        call_args = mock_message.reply_text.call_args
+        assert "格式不正确" in call_args[0][0] or "http" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_valid_rss_url_accepted(self, tmp_data_dir):
+        """Valid RSS URL should be accepted and saved"""
+        from handlers.sources import handle_twitter_add
+        from telegram import Update, Message, User, Chat
+        from telegram.ext import ContextTypes
+        from unittest.mock import AsyncMock, MagicMock, patch
+        
+        # Mock update
+        mock_user = MagicMock(spec=User)
+        mock_user.id = 99999
+        
+        mock_message = MagicMock(spec=Message)
+        mock_message.text = "https://cointelegraph.com/rss"
+        mock_message.reply_text = AsyncMock()
+        
+        mock_update = MagicMock(spec=Update)
+        mock_update.effective_user = mock_user
+        mock_update.message = mock_message
+        
+        mock_context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+        
+        # Mock track_event to avoid side effects
+        with patch("handlers.sources.track_event"):
+            result = await handle_twitter_add(mock_update, mock_context)
+        
+        # Verify acceptance
+        mock_message.reply_text.assert_called_once()
+        call_args = mock_message.reply_text.call_args
+        # Should contain success message
+        assert "成功" in call_args[0][0] or "添加" in call_args[0][0]
 
 
 # ============ Fixtures ============

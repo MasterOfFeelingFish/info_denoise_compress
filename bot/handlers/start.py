@@ -31,8 +31,11 @@ from utils.json_storage import (
     save_user_profile,
     get_user_profile,
     track_event,
+    get_user_language,
 )
 from utils.auth import whitelist_required
+from utils.language import normalize_language_code
+from locales.ui_strings import get_ui_locale
 
 logger = logging.getLogger(__name__)
 
@@ -56,54 +59,57 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     existing_user = get_user(telegram_id)
 
     if existing_user:
-        # Existing user - show main menu with clear visual hierarchy
+        # Existing user - get language and show main menu
         from handlers.admin import is_admin
         
+        lang = get_user_language(telegram_id)
+        ui = get_ui_locale(lang)
+        
         keyboard = [
-            [InlineKeyboardButton("查看今日简报", callback_data="view_digest")],
+            [InlineKeyboardButton(ui["menu_view_digest"], callback_data="view_digest")],
             [
-                InlineKeyboardButton("偏好设置", callback_data="update_preferences"),
-                InlineKeyboardButton("信息源", callback_data="manage_sources"),
+                InlineKeyboardButton(ui["menu_preferences"], callback_data="update_preferences"),
+                InlineKeyboardButton(ui["menu_sources"], callback_data="manage_sources"),
             ],
             [
-                InlineKeyboardButton("查看统计", callback_data="view_stats"),
+                InlineKeyboardButton(ui["menu_stats"], callback_data="view_stats"),
             ],
         ]
         
         # Add admin panel button for admins only
         if is_admin(user.id):
-            keyboard.append([InlineKeyboardButton("🛡️ 管理员控制台", callback_data="admin_panel")])
+            keyboard.append([InlineKeyboardButton(ui["menu_admin"], callback_data="admin_panel")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.message.reply_text(
-            f"欢迎回来，{user.first_name}\n"
-            f"{'─' * 24}\n\n"
-            "你的个性化 Web3 情报简报。\n"
-            "每日精选，智能推送。\n\n"
-            "请选择操作：",
+            f"{ui['welcome_back'].format(name=user.first_name)}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui['welcome_back_desc']}\n\n"
+            f"{ui['welcome_choose']}",
             reply_markup=reply_markup
         )
         return ConversationHandler.END
 
     else:
-        # New user - directly start onboarding (no button click required)
+        # New user - get language from Telegram and start onboarding
         # Clear only onboarding-related state from previous incomplete registration
         # (Don't use .clear() to avoid affecting other potential features)
         context.user_data["conversation_history"] = []
         context.user_data["current_round"] = 1
+        
+        # Detect and store user's language from Telegram
+        lang = normalize_language_code(user.language_code)
+        context.user_data["language"] = lang
+        ui = get_ui_locale(lang)
 
         # Show welcome message + typing indicator
         await update.message.reply_text(
-            "Web3 每日简报\n"
-            f"{'─' * 24}\n\n"
-            "你的个性化情报助手。\n\n"
-            "我们做什么：\n"
-            "  • 每日扫描 50+ 信息源\n"
-            "  • 过滤噪音，精选内容\n"
-            "  • 推送真正重要的信息\n\n"
-            "让我们先了解你的偏好，开始 3 步设置...\n\n"
-            "⏳ <i>正在生成问题，请稍候...</i>",
+            f"{ui['onboarding_title']}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui['onboarding_welcome']}\n\n"
+            f"{ui['onboarding_intro']}\n\n"
+            f"⏳ <i>{ui['onboarding_thinking']}</i>",
             parse_mode="HTML"
         )
 
@@ -121,16 +127,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         except Exception as e:
             logger.error(f"Onboarding round 1 failed: {e}")
             keyboard = [
-                [InlineKeyboardButton("重试", callback_data="start_onboarding")],
+                [InlineKeyboardButton(ui["btn_retry"], callback_data="start_onboarding")],
             ]
             await update.message.reply_text(
-                "AI 服务暂时不可用，请稍后重试。",
+                ui["error_occurred"],
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return ConversationHandler.END
 
+        step_text = ui["onboarding_step"].format(current=1, total=3)
         await update.message.reply_text(
-            "[第 1 步 / 共 3 步] 设置你的偏好\n\n" + ai_response
+            f"{step_text}\n\n{ai_response}"
         )
 
         return ONBOARDING_ROUND_1
@@ -140,10 +147,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Begin the AI-driven preference collection (3 rounds)."""
     query = update.callback_query
+    
+    # Get language from context (set during start) or default
+    lang = context.user_data.get("language", "zh")
+    ui = get_ui_locale(lang)
 
     # Anti-debounce: Prevent duplicate clicks
     if context.user_data.get("processing"):
-        await safe_answer_callback_query(query, "正在生成问题，请稍候...", show_alert=True)
+        await safe_answer_callback_query(query, ui["onboarding_thinking"], show_alert=True)
         return ONBOARDING_ROUND_1
 
     context.user_data["processing"] = True
@@ -169,18 +180,19 @@ async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         logger.error(f"Onboarding round 1 failed: {e}")
         context.user_data.pop("processing", None)  # Release lock on error
         keyboard = [
-            [InlineKeyboardButton("重试", callback_data="start_onboarding")],
-            [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+            [InlineKeyboardButton(ui["retry"], callback_data="start_onboarding")],
+            [InlineKeyboardButton(ui["back_to_main"], callback_data="back_to_start")],
         ]
         await query.edit_message_text(
-            "AI 服务暂时不可用，请稍后重试。",
+            ui["ai_unavailable"],
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return ConversationHandler.END
 
     context.user_data.pop("processing", None)  # Release lock on success
+    step_text = ui["onboarding_step"].format(current=1, total=3)
     await query.edit_message_text(
-        "[第 1 步 / 共 3 步] 设置你的偏好\n\n" + ai_response
+        f"{step_text} {ui['onboarding_set_prefs']}\n\n{ai_response}"
     )
 
     return ONBOARDING_ROUND_1
@@ -188,6 +200,9 @@ async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user response in round 1, proceed to round 2."""
+    lang = context.user_data.get("language", "zh")
+    ui = get_ui_locale(lang)
+    
     user_message = update.message.text
     context.user_data["conversation_history"].append({
         "round": 1,
@@ -210,17 +225,18 @@ async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         logger.error(f"Onboarding round 2 failed: {e}")
         keyboard = [
-            [InlineKeyboardButton("重试", callback_data="start_onboarding")],
-            [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+            [InlineKeyboardButton(ui["retry"], callback_data="start_onboarding")],
+            [InlineKeyboardButton(ui["back_to_main"], callback_data="back_to_start")],
         ]
         await update.message.reply_text(
-            "AI 服务暂时不可用，请稍后重试。",
+            ui["ai_unavailable"],
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return ConversationHandler.END
 
+    step_text = ui["onboarding_step"].format(current=2, total=3)
     await update.message.reply_text(
-        "[第 2 步 / 共 3 步] 内容偏好\n\n" + ai_response
+        f"{step_text} {ui['onboarding_content_prefs']}\n\n{ai_response}"
     )
 
     return ONBOARDING_ROUND_2
@@ -228,6 +244,9 @@ async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user response in round 2, proceed to round 3 (confirmation)."""
+    lang = context.user_data.get("language", "zh")
+    ui = get_ui_locale(lang)
+    
     user_message = update.message.text
     context.user_data["conversation_history"].append({
         "round": 2,
@@ -237,7 +256,7 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Show progress message
     progress_msg = await update.message.reply_text(
-        "⏳ <i>正在生成你的个性化画像，请稍候...</i>",
+        f"<i>{ui['generating_profile']}</i>",
         parse_mode="HTML"
     )
 
@@ -261,11 +280,11 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         logger.error(f"Onboarding round 3 failed: {e}")
         keyboard = [
-            [InlineKeyboardButton("重试", callback_data="retry_round_2")],
-            [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+            [InlineKeyboardButton(ui["retry"], callback_data="retry_round_2")],
+            [InlineKeyboardButton(ui["back_to_main"], callback_data="back_to_start")],
         ]
         await update.message.reply_text(
-            "AI 服务暂时不可用，请稍后重试。",
+            ui["ai_unavailable"],
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return ConversationHandler.END
@@ -275,13 +294,14 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Add confirmation buttons
     keyboard = [
-        [InlineKeyboardButton("确认", callback_data="confirm_profile")],
-        [InlineKeyboardButton("重新开始", callback_data="start_onboarding")],
+        [InlineKeyboardButton(ui["btn_confirm"], callback_data="confirm_profile")],
+        [InlineKeyboardButton(ui["btn_restart"], callback_data="start_onboarding")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    step_text = ui["onboarding_step"].format(current=3, total=3)
     await update.message.reply_text(
-        "[第 3 步 / 共 3 步] 请确认你的偏好\n\n" + ai_response,
+        f"{step_text} {ui['onboarding_confirm_prefs']}\n\n{ai_response}",
         reply_markup=reply_markup
     )
 
@@ -290,16 +310,19 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def retry_round_2_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Retry round 2 with the same round 1 data."""
+    lang = context.user_data.get("language", "zh")
+    ui = get_ui_locale(lang)
+    
     query = update.callback_query
-    await query.answer("正在重试...")
+    await query.answer(ui["retrying"])
 
     # Get round 1 data
     round_1 = context.user_data.get("onboarding_round_1")
     if not round_1:
         await query.edit_message_text(
-            "无法重试，请重新开始注册。",
+            ui["retry_failed"],
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("重新开始", callback_data="start_onboarding")
+                InlineKeyboardButton(ui["btn_restart"], callback_data="start_onboarding")
             ]])
         )
         return ConversationHandler.END

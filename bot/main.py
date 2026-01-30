@@ -35,6 +35,8 @@ from config import (
 )
 from services.digest_processor import process_single_user
 from utils.telegram_utils import safe_answer_callback_query
+from utils.json_storage import get_user_language
+from locales.ui_strings import get_ui_locale
 from handlers.start import get_start_handler, get_start_callbacks
 from handlers.feedback import get_feedback_handlers
 from handlers.settings import get_settings_handler, get_settings_callbacks
@@ -461,53 +463,51 @@ async def test_prefetch_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /help command."""
+    telegram_id = str(update.effective_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+    
     keyboard = [
         [
-            InlineKeyboardButton("主菜单", callback_data="back_to_start"),
-            InlineKeyboardButton("设置", callback_data="update_preferences"),
+            InlineKeyboardButton(ui["back_to_main"], callback_data="back_to_start"),
+            InlineKeyboardButton(ui["menu_preferences"], callback_data="update_preferences"),
         ],
-        [InlineKeyboardButton("信息源", callback_data="manage_sources")],
+        [InlineKeyboardButton(ui["menu_sources"], callback_data="manage_sources")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    help_text = f"""帮助
-{'─' * 24}
+    help_text = f"""{ui['help_title']}
+{ui['divider']}
 
-命令：
-  /start     主菜单
-  /settings  偏好设置
-  /sources   信息源管理
-  /stats     查看统计
-  /help      帮助信息
+{ui['help_commands']}
+{ui['help_start']}
+{ui['help_settings']}
+{ui['help_sources']}
+{ui['help_stats']}
+{ui['help_help']}
 
-{'─' * 24}
+{ui['divider']}
 
-功能说明：
+{ui['help_features']}
 
-每日简报
-  每天自动推送（约 24 小时一次）。
-  内容分为「今日必看」「推荐」「其他」三个板块。
-  AI 根据你的偏好智能筛选 15-30 条精选内容。
+{ui['help_digest_title']}
+{ui['help_digest_desc']}
 
-偏好设置 (/settings)
-  查看或更新你的 Web3 兴趣偏好。
-  AI 会根据偏好个性化筛选每日简报。
+{ui['help_settings_title']}
+{ui['help_settings_desc']}
 
-信息源管理 (/sources)
-  添加/删除你关注的 Twitter 账号或网站 RSS。
-  支持自定义个人信息源。
+{ui['help_sources_title']}
+{ui['help_sources_desc']}
 
-统计 (/stats)
-  查看你的注册时间、反馈历史、满意度趋势。
+{ui['help_stats_title']}
+{ui['help_stats_desc']}
 
-反馈机制
-  每条推送消息都有反馈按钮（👍/👎）。
-  你的反馈会被收集并在每日凌晨批量更新偏好画像，
-  次日推送将体现你的最新偏好。
+{ui['help_feedback_title']}
+{ui['help_feedback_desc']}
 
-{'─' * 24}
+{ui['divider']}
 
-有问题？使用上方命令或主菜单操作。"""
+{ui['help_footer']}"""
 
     await update.message.reply_text(help_text, reply_markup=reply_markup)
 
@@ -570,6 +570,10 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def post_init(application: Application) -> None:
     """Post-initialization callback to set up scheduled jobs and bot commands."""
+    # Auto-detect RSS for sources configured with domain only (AUTO: prefix)
+    from config import resolve_default_sources_rss
+    await resolve_default_sources_rss()
+    
     # Set bot commands menu (only show user-facing commands)
     # Debug commands (/test, /testprofile) are hidden from menu but still functional
     commands = [
@@ -862,9 +866,10 @@ def main() -> None:
         application.add_handler(callback)
 
     # Feedback handlers
-    feedback_conv, item_handler = get_feedback_handlers()
+    feedback_conv, item_handler, unsubscribe_handler = get_feedback_handlers()
     application.add_handler(feedback_conv)
     application.add_handler(item_handler)
+    application.add_handler(unsubscribe_handler)
 
     # Command handlers
     application.add_handler(CommandHandler("help", help_command))

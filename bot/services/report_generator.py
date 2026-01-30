@@ -655,7 +655,9 @@ def format_single_item(item: Dict[str, Any], index: int, lang: str = "zh") -> st
         reason_prefix = locale.get("reason_prefix", "💡 ")
         lines.append(f"{reason_prefix}{reason_escaped}")
 
-    # Note: Source line removed per user feedback - considered redundant
+    # 显示 Twitter 作者（如果有）
+    if author and author.startswith("@"):
+        lines.append(f"📣 {author}")
 
     return "\n".join(lines)
 

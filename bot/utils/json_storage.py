@@ -166,9 +166,17 @@ def get_user(telegram_id: str) -> Optional[Dict[str, Any]]:
 def create_user(
     telegram_id: str,
     username: Optional[str] = None,
-    first_name: Optional[str] = None
+    first_name: Optional[str] = None,
+    language: str = "zh"
 ) -> Dict[str, Any]:
-    """Create a new user."""
+    """Create a new user.
+    
+    Args:
+        telegram_id: Telegram user ID
+        username: Telegram username
+        first_name: User's first name
+        language: User's language code (from Telegram language_code)
+    """
     data = _read_json(USERS_FILE)
     if "users" not in data:
         data["users"] = []
@@ -184,6 +192,7 @@ def create_user(
         "telegram_id": telegram_id,
         "username": username,
         "first_name": first_name,
+        "language": language,
         "created": datetime.now().isoformat(),
         "last_active": datetime.now().isoformat(),
     }
@@ -191,7 +200,7 @@ def create_user(
     data["users"].append(user)
     _write_json(USERS_FILE, data)
 
-    logger.info(f"Created user: {user['id']} (telegram_id: {telegram_id})")
+    logger.info(f"Created user: {user['id']} (telegram_id: {telegram_id}, language: {language})")
     return user
 
 
@@ -203,6 +212,89 @@ def update_user_activity(telegram_id: str) -> None:
             user["last_active"] = datetime.now().isoformat()
             _write_json(USERS_FILE, data)
             break
+
+
+def get_user_language(telegram_id: str) -> str:
+    """Get user's language setting.
+    
+    Args:
+        telegram_id: Telegram user ID
+        
+    Returns:
+        Language code (e.g., "zh", "en", "ja", "ko"), defaults to "zh"
+    """
+    user = get_user(telegram_id)
+    if not user:
+        return "zh"
+    return user.get("language", "zh")
+
+
+# ============ Update Subscription Management ============
+
+def get_user_subscribe_updates(telegram_id: str) -> bool:
+    """Get user's update subscription status.
+    
+    Args:
+        telegram_id: Telegram user ID
+        
+    Returns:
+        True if user is subscribed to system updates (default True)
+    """
+    user = get_user(telegram_id)
+    if not user:
+        return True
+    return user.get("subscribe_updates", True)
+
+
+def set_user_subscribe_updates(telegram_id: str, subscribed: bool) -> bool:
+    """Set user's update subscription status.
+    
+    Args:
+        telegram_id: Telegram user ID
+        subscribed: True to subscribe, False to unsubscribe
+        
+    Returns:
+        True if successful
+    """
+    data = _read_json(USERS_FILE)
+    for user in data.get("users", []):
+        if user.get("telegram_id") == telegram_id:
+            user["subscribe_updates"] = subscribed
+            result = _write_json(USERS_FILE, data)
+            if result:
+                logger.info(f"Updated subscribe_updates for {telegram_id}: {subscribed}")
+            return result
+    return False
+
+
+def get_subscribed_users() -> List[Dict[str, Any]]:
+    """Get all users who are subscribed to system updates.
+    
+    Returns:
+        List of user dictionaries who have subscribe_updates=True (or not set, defaulting to True)
+    """
+    users = get_users()
+    return [u for u in users if u.get("subscribe_updates", True)]
+
+
+def update_user_language(telegram_id: str, language: str) -> bool:
+    """Update user's language setting.
+    
+    Args:
+        telegram_id: Telegram user ID
+        language: Language code (e.g., "zh", "en", "ja", "ko")
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    data = _read_json(USERS_FILE)
+    for user in data.get("users", []):
+        if user.get("telegram_id") == telegram_id:
+            user["language"] = language
+            _write_json(USERS_FILE, data)
+            logger.info(f"Updated language for {telegram_id}: {language}")
+            return True
+    return False
 
 
 def get_user_setting(telegram_id: str, key: str, default: Any = None) -> Any:
@@ -364,6 +456,43 @@ def get_user_feedbacks(telegram_id: str, days: int = 7) -> List[Dict[str, Any]]:
                 feedbacks.append(feedback)
 
     return feedbacks
+
+
+def get_feedback_reason_stats(days: int = 7) -> Dict[str, int]:
+    """
+    统计负面反馈原因分布。
+    
+    遍历指定天数内的反馈数据，提取 overall="negative" 的反馈中的 reason_selected，
+    返回各原因的计数。
+    
+    Args:
+        days: 统计的天数（默认 7 天）
+        
+    Returns:
+        原因 -> 次数 的映射，按次数降序排列
+    """
+    reason_counts: Dict[str, int] = {}
+    
+    for i in range(days):
+        date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+        feedback_path = os.path.join(FEEDBACK_DIR, f"{date}.json")
+        
+        data = _read_json(feedback_path)
+        for feedback in data.get("feedbacks", []):
+            # 只统计负面反馈
+            if feedback.get("overall") == "negative":
+                # 统计 reason_selected 中的原因
+                for reason in feedback.get("reason_selected", []):
+                    if reason:
+                        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+                
+                # 如果有自定义原因文本，也统计
+                reason_text = feedback.get("reason_text")
+                if reason_text:
+                    # 自定义原因归类为"其他"
+                    reason_counts["其他"] = reason_counts.get("其他", 0) + 1
+    
+    return reason_counts
 
 
 # ============ Daily Stats Management ============

@@ -17,7 +17,8 @@ from telegram.ext import (
 )
 
 from utils.telegram_utils import safe_answer_callback_query
-from utils.json_storage import save_feedback, get_user, track_event
+from utils.json_storage import save_feedback, get_user, track_event, get_user_language
+from locales.ui_strings import get_ui_locale
 
 logger = logging.getLogger(__name__)
 
@@ -25,31 +26,33 @@ logger = logging.getLogger(__name__)
 SELECTING_REASON, ENTERING_CUSTOM_REASON = range(2)
 
 
-def create_feedback_keyboard(report_id: str) -> InlineKeyboardMarkup:
+def create_feedback_keyboard(report_id: str, lang: str = "zh") -> InlineKeyboardMarkup:
     """Create the main feedback buttons for a report."""
+    ui = get_ui_locale(lang)
     keyboard = [
         [
-            InlineKeyboardButton("有帮助", callback_data=f"fb_positive_{report_id}"),
-            InlineKeyboardButton("没帮助", callback_data=f"fb_negative_{report_id}"),
+            InlineKeyboardButton(ui["feedback_helpful"], callback_data=f"fb_positive_{report_id}"),
+            InlineKeyboardButton(ui["feedback_not_helpful"], callback_data=f"fb_negative_{report_id}"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
-def create_reason_keyboard(report_id: str) -> InlineKeyboardMarkup:
+def create_reason_keyboard(report_id: str, lang: str = "zh") -> InlineKeyboardMarkup:
     """Create reason selection buttons for negative feedback."""
+    ui = get_ui_locale(lang)
     keyboard = [
         [
-            InlineKeyboardButton("内容不相关", callback_data=f"reason_not_relevant_{report_id}"),
-            InlineKeyboardButton("漏掉重要信息", callback_data=f"reason_missed_{report_id}"),
+            InlineKeyboardButton(ui["reason_not_relevant"], callback_data=f"reason_not_relevant_{report_id}"),
+            InlineKeyboardButton(ui["reason_missed"], callback_data=f"reason_missed_{report_id}"),
         ],
         [
-            InlineKeyboardButton("信息太多", callback_data=f"reason_too_much_{report_id}"),
-            InlineKeyboardButton("信息太少", callback_data=f"reason_too_few_{report_id}"),
+            InlineKeyboardButton(ui["reason_too_much"], callback_data=f"reason_too_much_{report_id}"),
+            InlineKeyboardButton(ui["reason_too_few"], callback_data=f"reason_too_few_{report_id}"),
         ],
-        [InlineKeyboardButton("主题不对", callback_data=f"reason_wrong_topics_{report_id}")],
-        [InlineKeyboardButton("其他", callback_data=f"reason_other_{report_id}")],
-        [InlineKeyboardButton("取消", callback_data="feedback_cancel")],
+        [InlineKeyboardButton(ui["reason_wrong_topics"], callback_data=f"reason_wrong_topics_{report_id}")],
+        [InlineKeyboardButton(ui["reason_other"], callback_data=f"reason_other_{report_id}")],
+        [InlineKeyboardButton(ui["cancel"], callback_data="feedback_cancel")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -130,6 +133,8 @@ async def handle_feedback_positive(update: Update, context: ContextTypes.DEFAULT
 
     user = update.effective_user
     telegram_id = str(user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     # Extract report ID from callback data
     callback_data = query.data
@@ -152,7 +157,7 @@ async def handle_feedback_positive(update: Update, context: ContextTypes.DEFAULT
     context.user_data.pop("item_feedbacks", None)
 
     await query.edit_message_text(
-        query.message.text + "\n\n---\n感谢你的反馈。"
+        query.message.text + f"\n\n---\n{ui['feedback_thanks']}"
     )
 
     logger.info(f"Positive feedback from {telegram_id} for report {report_id}")
@@ -165,19 +170,23 @@ async def handle_feedback_negative(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await safe_answer_callback_query(query)
 
+    user = update.effective_user
+    telegram_id = str(user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     callback_data = query.data
     report_id = callback_data.replace("fb_negative_", "")
 
     # Store report_id for later
     context.user_data["feedback_report_id"] = report_id
 
-    reply_markup = create_reason_keyboard(report_id)
+    reply_markup = create_reason_keyboard(report_id, lang)
 
     await query.edit_message_text(
-        f"反馈\n"
-        f"{'─' * 24}\n\n"
-        "有什么可以改进的？\n\n"
-        "请选择原因：",
+        f"{ui['feedback_reason_title']}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui['feedback_reason_prompt']}",
         reply_markup=reply_markup
     )
 
@@ -399,6 +408,46 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
     logger.info(f"Item feedback from {telegram_id}: {feedback_type} on '{item_title[:30]}'")
 
 
+async def handle_unsubscribe_updates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle unsubscribe from system updates callback."""
+    from utils.json_storage import get_user_subscribe_updates, set_user_subscribe_updates
+    
+    query = update.callback_query
+    await safe_answer_callback_query(query)
+    
+    user = update.effective_user
+    telegram_id = str(user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+    
+    # Check if already unsubscribed
+    if not get_user_subscribe_updates(telegram_id):
+        await query.answer(ui["already_unsubscribed"], show_alert=True)
+        return
+    
+    # Unsubscribe user
+    success = set_user_subscribe_updates(telegram_id, False)
+    
+    if success:
+        # Track event
+        track_event(telegram_id, "unsubscribe_updates")
+        
+        # Update the message to remove the button
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        
+        # Send confirmation
+        await context.bot.send_message(
+            chat_id=telegram_id,
+            text=ui["unsubscribed_updates"]
+        )
+        logger.info(f"User {telegram_id} unsubscribed from system updates")
+    else:
+        await query.answer("Error occurred", show_alert=True)
+
+
 def get_feedback_handlers():
     """Create and return all feedback-related handlers."""
     # Main feedback conversation handler
@@ -424,5 +473,8 @@ def get_feedback_handlers():
 
     # Item-level feedback handler
     item_handler = CallbackQueryHandler(handle_item_feedback, pattern=r"^item_")
+    
+    # Unsubscribe from updates handler
+    unsubscribe_handler = CallbackQueryHandler(handle_unsubscribe_updates, pattern=r"^unsubscribe_updates$")
 
-    return feedback_conv, item_handler
+    return feedback_conv, item_handler, unsubscribe_handler

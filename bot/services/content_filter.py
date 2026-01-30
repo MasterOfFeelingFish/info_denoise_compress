@@ -101,6 +101,25 @@ def summarize_feedbacks(feedbacks: List[Dict[str, Any]]) -> str:
     return " ".join(summary_parts)
 
 
+def _count_sources(items: List[Dict[str, Any]]) -> Dict[str, int]:
+    """
+    统计内容列表中各来源的条数分布。
+    
+    用于监控 AI 筛选是否存在来源偏向性。
+    
+    Args:
+        items: 内容列表
+        
+    Returns:
+        来源名称 -> 条数 的映射
+    """
+    counts: Dict[str, int] = {}
+    for item in items:
+        src = item.get("source", "Unknown")
+        counts[src] = counts.get(src, 0) + 1
+    return counts
+
+
 async def filter_content_for_user(
     telegram_id: str,
     raw_content: List[Dict[str, Any]],
@@ -160,13 +179,33 @@ async def filter_content_for_user(
         else:
             content = title if len(title) >= len(summary) else summary
         
+        # Determine source label for AI
+        # For Twitter content: use "@author twitter" format so AI can recognize KOLs
+        # For websites: use original source name
+        author = item.get("author", "")
+        original_source = item.get("source", "")
+        
+        if author and author.startswith("@"):
+            # Twitter content with specific author: "@VitalikButerin twitter"
+            source_label = f"{author} twitter"
+        elif "Twitter" in original_source or original_source.startswith("@"):
+            # Twitter bundle without specific author: keep as is
+            source_label = original_source
+        else:
+            # Website or other source
+            source_label = original_source
+        
         # Compact format: n (index), src (source), t (content)
         # Removed: id, link, category (not needed for AI analysis)
         content_for_ai.append({
             "n": i,
-            "src": item.get("source", ""),
+            "src": source_label,
             "t": content
         })
+
+    # 统计过滤前的来源分布（用于监控 AI 偏向性）
+    input_source_counts = _count_sources(raw_content)
+    logger.info(f"Filter input for {telegram_id}: {len(raw_content)} items, sources: {input_source_counts}")
 
     # Build prompt with optimized system instruction
     system_instruction = get_prompt(
@@ -232,6 +271,11 @@ Please select {MAX_DIGEST_ITEMS} most valuable items."""
                    f"macro: {section_counts.get('macro_insights', 0)}, "
                    f"recommended: {section_counts.get('recommended', 0)}, "
                    f"other: {section_counts.get('other', 0)})")
+        
+        # 统计过滤后的来源分布（用于监控 AI 偏向性）
+        output_source_counts = _count_sources(all_items)
+        logger.info(f"Filter output for {telegram_id}: {total_count} items, sources: {output_source_counts}")
+        
         return all_items[:max_items]
 
     logger.error(f"Unexpected response format: {type(filtered_result)}")
@@ -351,9 +395,20 @@ async def _filter_single_batch(
         else:
             content = title if len(title) >= len(summary) else summary
         
+        # Determine source label for AI (same logic as main filter)
+        author = item.get("author", "")
+        original_source = item.get("source", "")
+        
+        if author and author.startswith("@"):
+            source_label = f"{author} twitter"
+        elif "Twitter" in original_source or original_source.startswith("@"):
+            source_label = original_source
+        else:
+            source_label = original_source
+        
         content_for_ai.append({
             "n": i,
-            "src": item.get("source", ""),
+            "src": source_label,
             "t": content
         })
     

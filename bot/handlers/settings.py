@@ -26,7 +26,9 @@ from utils.json_storage import (
     get_user_profile,
     save_user_profile,
     track_event,
+    get_user_language,
 )
+from locales.ui_strings import get_ui_locale
 
 logger = logging.getLogger(__name__)
 
@@ -38,31 +40,29 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """Handle /settings command - show settings menu."""
     user = update.effective_user
     telegram_id = str(user.id)
+    
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     db_user = get_user(telegram_id)
     if not db_user:
-        await update.message.reply_text(
-            "你还没有注册。请使用 /start 开始。"
-        )
+        await update.message.reply_text(ui["not_registered"])
         return
 
     keyboard = [
-        [InlineKeyboardButton("查看偏好", callback_data="settings_view")],
+        [InlineKeyboardButton(ui["settings_view"], callback_data="settings_view")],
         [
-            InlineKeyboardButton("更新", callback_data="settings_update"),
-            InlineKeyboardButton("重置", callback_data="settings_reset"),
+            InlineKeyboardButton(ui["settings_update"], callback_data="settings_update"),
+            InlineKeyboardButton(ui["settings_reset"], callback_data="settings_reset"),
         ],
-        [InlineKeyboardButton("返回", callback_data="back_to_start")],
+        [InlineKeyboardButton(ui["back"], callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        f"偏好设置\n"
-        f"{'─' * 24}\n\n"
-        "管理你的偏好设置：\n"
-        "  • 查看当前偏好\n"
-        "  • 更新兴趣领域\n"
-        "  • 重置为默认",
+        f"{ui['settings_title']}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui['settings_desc']}",
         reply_markup=reply_markup
     )
 
@@ -74,26 +74,27 @@ async def view_current_profile(update: Update, context: ContextTypes.DEFAULT_TYP
 
     user = update.effective_user
     telegram_id = str(user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     profile = get_user_profile(telegram_id)
 
     if profile:
         text = (
-            f"你的偏好设置\n"
-            f"{'─' * 24}\n\n"
+            f"{ui['settings_your_prefs']}\n"
+            f"{ui['divider']}\n\n"
             f"{html.escape(profile)}\n\n"
-            f"{'─' * 24}\n"
-            "使用 /settings 修改偏好。"
+            f"{ui['divider']}\n"
+            f"{ui['settings_use_settings']}"
         )
     else:
         text = (
-            f"你的偏好设置\n"
-            f"{'─' * 24}\n\n"
-            "还没有设置偏好。\n\n"
-            "使用 /start 开始设置。"
+            f"{ui['settings_your_prefs']}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui['settings_no_prefs']}"
         )
 
-    keyboard = [[InlineKeyboardButton("返回", callback_data="settings_back")]]
+    keyboard = [[InlineKeyboardButton(ui["back"], callback_data="settings_back")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(text, reply_markup=reply_markup)

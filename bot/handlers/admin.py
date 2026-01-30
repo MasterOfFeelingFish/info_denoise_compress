@@ -8,8 +8,10 @@ from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, Con
 
 from utils.json_storage import (
     get_whitelist, add_to_whitelist, remove_from_whitelist, get_users,
-    get_whitelist_enabled, set_whitelist_enabled, get_events_summary
+    get_whitelist_enabled, set_whitelist_enabled, get_events_summary,
+    get_feedback_reason_stats, get_user_language
 )
+from locales.ui_strings import get_ui_locale
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -44,38 +46,42 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         user_id = update.effective_user.id
 
+    # Get language - admin might have different language
+    lang = get_user_language(str(user_id))
+    ui = get_ui_locale(lang)
+
     if not is_admin(user_id):
         if query:
-            await query.answer("🔒 无权限", show_alert=True)
+            await query.answer(ui["admin_no_permission"], show_alert=True)
         return
 
     # Get current whitelist status
     wl_enabled = get_whitelist_enabled()
-    wl_status = "🟢 已开启" if wl_enabled else "🔴 已关闭"
-    toggle_text = "关闭白名单" if wl_enabled else "开启白名单"
+    wl_status = ui["admin_whitelist_on"] if wl_enabled else ui["admin_whitelist_off"]
+    toggle_text = ui["admin_toggle_off"] if wl_enabled else ui["admin_toggle_on"]
     toggle_emoji = "🔴" if wl_enabled else "🟢"
 
     keyboard = [
-        [InlineKeyboardButton("📊 数据分析", callback_data="admin_analytics")],
+        [InlineKeyboardButton(ui["admin_data_analysis"], callback_data="admin_analytics")],
         [InlineKeyboardButton(f"{toggle_emoji} {toggle_text}", callback_data="admin_wl_toggle")],
-        [InlineKeyboardButton("📋 查看白名单", callback_data="admin_wl_list")],
+        [InlineKeyboardButton(ui["admin_view_whitelist"], callback_data="admin_wl_list")],
         [
-            InlineKeyboardButton("➕ 添加用户", callback_data="admin_wl_add"),
-            InlineKeyboardButton("➖ 删除用户", callback_data="admin_wl_del"),
+            InlineKeyboardButton(ui["admin_add_user"], callback_data="admin_wl_add"),
+            InlineKeyboardButton(ui["admin_remove_user"], callback_data="admin_wl_del"),
         ],
-        [InlineKeyboardButton("« 返回主菜单", callback_data="back_to_start")],
+        [InlineKeyboardButton(ui["back_to_main"], callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     whitelist = get_whitelist()
     users = get_users()
     text = (
-        "🛡️ <b>管理员控制台</b>\n"
-        f"{'─' * 24}\n\n"
-        f"注册用户: {len(users)} 人\n"
-        f"白名单状态: {wl_status}\n"
-        f"白名单人数: {len(whitelist)} 人\n\n"
-        "请选择操作："
+        f"<b>{ui['admin_title']}</b>\n"
+        f"{ui['divider']}\n\n"
+        f"{ui['admin_users_count'].format(count=len(users))}\n"
+        f"{ui['admin_whitelist_status'].format(status=wl_status)}\n"
+        f"{ui['admin_whitelist_count'].format(count=len(whitelist))}\n\n"
+        f"{ui['admin_choose_action']}"
     )
 
     if query:
@@ -417,6 +423,15 @@ async def show_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
             rate = positive / total_feedback * 100
             lines.append(f"• 整体满意度: {rate:.0f}% ({positive}👍/{negative}👎)")
             lines.append(f"  <i>简报末尾\"有帮助\"的占比</i>")
+        
+        # 负面反馈原因分布
+        if negative > 0:
+            reason_stats = get_feedback_reason_stats(days)
+            if reason_stats:
+                lines.append("• 负面反馈原因:")
+                for reason, count in sorted(reason_stats.items(), key=lambda x: -x[1]):
+                    lines.append(f"  - {reason}: {count}次")
+        
         if total_item > 0:
             # 点击查看原文视为正向信号
             rate = item_click / total_item * 100

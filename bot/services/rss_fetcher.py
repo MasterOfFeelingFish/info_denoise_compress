@@ -526,6 +526,93 @@ async def validate_url(url: str) -> Dict[str, Any]:
     }
 
 
+async def validate_rss_url(url: str) -> Dict[str, Any]:
+    """
+    Validate a URL and verify it contains valid RSS/Atom content.
+    
+    Unlike validate_url which only checks accessibility, this function
+    also verifies the content is a valid RSS feed.
+    
+    Args:
+        url: RSS URL to validate
+        
+    Returns:
+        Dict with:
+        - valid: bool
+        - title: RSS feed title (if valid)
+        - entries_count: number of entries (if valid)
+        - error: error message (if invalid)
+    """
+    url = url.strip()
+    
+    # Basic URL format check
+    if not url.startswith("http://") and not url.startswith("https://"):
+        return {
+            "valid": False,
+            "error": "请发送完整的 RSS 地址，应该以 http:// 或 https:// 开头"
+        }
+    
+    # Fetch and validate RSS content
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            follow_redirects=True,
+            headers={"User-Agent": "Web3DailyDigest/1.0 (+https://github.com/web3digest)"}
+        ) as client:
+            response = await client.get(url)
+            
+            if response.status_code >= 400:
+                return {
+                    "valid": False,
+                    "error": f"无法访问该地址（错误码 {response.status_code}）"
+                }
+            
+            content = response.text
+            
+    except httpx.TimeoutException:
+        return {
+            "valid": False,
+            "error": "访问超时，请检查地址是否正确"
+        }
+    except Exception as e:
+        return {
+            "valid": False,
+            "error": f"无法访问该地址：{str(e)[:50]}"
+        }
+    
+    # Parse RSS content
+    feed = feedparser.parse(content)
+    
+    # Check if parsing failed
+    if feed.bozo and not feed.entries:
+        # bozo means there was a parsing error
+        return {
+            "valid": False,
+            "error": "这不是有效的 RSS 源，请检查地址是否正确"
+        }
+    
+    # Check if feed has entries
+    if not feed.entries:
+        return {
+            "valid": False,
+            "error": "RSS 源为空，没有任何内容"
+        }
+    
+    # Get feed title
+    feed_title = feed.feed.get("title", "").strip()
+    if not feed_title:
+        # Try to extract from URL
+        feed_title = "Twitter List RSS"
+    
+    return {
+        "valid": True,
+        "title": feed_title,
+        "entries_count": len(feed.entries),
+        "url": url,
+        "error": None
+    }
+
+
 async def auto_detect_rss(domain: str) -> Dict[str, Any]:
     """
     Auto-detect RSS feed URL for a domain.

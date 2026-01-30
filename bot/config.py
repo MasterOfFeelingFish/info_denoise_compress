@@ -209,18 +209,45 @@ _DEFAULT_SOURCES = {
 }
 
 
+def _is_full_rss_url(url: str) -> bool:
+    """Check if a string is a full RSS URL (not just a domain)."""
+    if not url:
+        return False
+    url_lower = url.lower()
+    # Full URL patterns
+    if url_lower.startswith("http://") or url_lower.startswith("https://"):
+        # Check if it's more than just a domain (has path or specific endpoints)
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        # If path is empty or just "/", it's likely a domain needing detection
+        if parsed.path and parsed.path != "/" and len(parsed.path) > 1:
+            return True
+        # If has common RSS path indicators
+        if any(x in url_lower for x in ["/rss", "/feed", "/atom", ".xml", "/api/"]):
+            return True
+        return False
+    return False
+
+
 def _parse_sources_env() -> dict:
     """
     Parse default sources from environment variables.
 
-    Supports two formats:
+    Supports multiple formats:
     1. JSON format: DEFAULT_SOURCES='{"twitter": {"@user": "url"}, "websites": {"name": "url"}}'
     2. Simple format (comma-separated):
        DEFAULT_TWITTER_SOURCES='@VitalikButerin,@lookonchain,@whale_alert'
        DEFAULT_WEBSITE_SOURCES='The Block|https://theblock.co/rss.xml,CoinDesk|https://coindesk.com/rss'
+    3. Auto-detect format (domain only, RSS will be auto-detected at startup):
+       DEFAULT_WEBSITE_SOURCES='Cointelegraph|cointelegraph.com,CoinDesk|coindesk.com'
+       DEFAULT_WEBSITE_SOURCES='theblock.co,coindesk.com' (name = domain)
 
     Returns:
         Dict with twitter and websites sources
+        URL can be:
+        - Full RSS URL: use directly
+        - Domain only: marked with "AUTO:" prefix for later detection
+        - Empty: will attempt auto-detection
     """
     # Try JSON format first
     json_sources = os.getenv("DEFAULT_SOURCES", "")
@@ -257,7 +284,11 @@ def _parse_sources_env() -> dict:
                 handle = f"@{handle}"
             result["twitter"][handle] = url
 
-    # Parse website sources: Name|url,Name2|url2
+    # Parse website sources with auto-detection support
+    # Formats:
+    #   Name|https://xxx/rss.xml  -> full URL, use directly
+    #   Name|domain.com           -> domain only, mark for auto-detection
+    #   domain.com                -> name=domain, mark for auto-detection
     website_env = os.getenv("DEFAULT_WEBSITE_SOURCES", "")
     if website_env:
         for item in website_env.split(","):
@@ -267,8 +298,21 @@ def _parse_sources_env() -> dict:
             if "|" in item:
                 parts = item.split("|", 1)
                 name = parts[0].strip()
-                url = parts[1].strip()
-                result["websites"][name] = url
+                url_or_domain = parts[1].strip()
+            else:
+                # No "|" - treat as domain, name = domain
+                name = item
+                url_or_domain = item
+            
+            # Determine if it's a full RSS URL or needs auto-detection
+            if _is_full_rss_url(url_or_domain):
+                # Full RSS URL, use directly
+                result["websites"][name] = url_or_domain
+            else:
+                # Domain only or incomplete URL, mark for auto-detection
+                # Store domain with AUTO: prefix for later resolution
+                domain = url_or_domain.replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
+                result["websites"][name] = f"AUTO:{domain}"
 
     # If nothing from env, return None to use hardcoded defaults
     if not result["twitter"] and not result["websites"]:
@@ -280,3 +324,41 @@ def _parse_sources_env() -> dict:
 # Load default sources: env > hardcoded defaults
 _env_sources = _parse_sources_env()
 DEFAULT_USER_SOURCES = _env_sources if _env_sources else _DEFAULT_SOURCES
+
+
+async def resolve_default_sources_rss() -> None:
+    """
+    Resolve RSS URLs for sources marked with AUTO: prefix.
+    Called at bot startup to auto-detect RSS feeds for configured domains.
+    
+    This allows .env to use simple domain format:
+        DEFAULT_WEBSITE_SOURCES=Cointelegraph|cointelegraph.com,CoinDesk|coindesk.com
+    Instead of requiring full RSS URLs.
+    """
+    global DEFAULT_USER_SOURCES
+    
+    from services.rss_fetcher import auto_detect_rss
+    
+    websites = DEFAULT_USER_SOURCES.get("websites", {})
+    updated = False
+    
+    for name, url in list(websites.items()):
+        if url.startswith("AUTO:"):
+            domain = url[5:]  # Remove "AUTO:" prefix
+            logger.info(f"Auto-detecting RSS for {name} ({domain})...")
+            
+            try:
+                result = await auto_detect_rss(domain)
+                if result.get("found"):
+                    websites[name] = result["url"]
+                    logger.info(f"  ✓ Found RSS: {result['url']}")
+                    updated = True
+                else:
+                    logger.warning(f"  ✗ No RSS found for {name} ({domain}): {result.get('error')}")
+                    # Keep the AUTO: prefix so it can be retried later
+            except Exception as e:
+                logger.error(f"  ✗ Error detecting RSS for {name}: {e}")
+    
+    if updated:
+        DEFAULT_USER_SOURCES["websites"] = websites
+        logger.info("Default sources updated with auto-detected RSS URLs")
