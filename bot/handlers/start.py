@@ -394,14 +394,15 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Clear conversation data
     context.user_data.clear()
 
-    # Show source choice: custom sources / default sources / skip
+    # Show source choice: default sources (recommended) / custom sources
+    # Simplified flow: encourage users to start with defaults, customize later
     from config import DEFAULT_USER_SOURCES
 
-    default_sources_preview = ", ".join(list(DEFAULT_USER_SOURCES.get("websites", {}).keys())[:2])
+    default_sources_preview = ", ".join(list(DEFAULT_USER_SOURCES.get("websites", {}).keys())[:3])
 
     keyboard = [
-        [InlineKeyboardButton("📡 使用默认推荐源", callback_data="source_default_no_push")],
-        [InlineKeyboardButton("🎯 配置我自己的信息源", callback_data="source_custom_no_push")],
+        [InlineKeyboardButton("🚀 立即开始（推荐）", callback_data="source_default_no_push")],
+        [InlineKeyboardButton("🎯 我要添加自己的信息源", callback_data="source_custom_no_push")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -438,8 +439,11 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "└─────────────────────────────┘\n\n"
         "💬 每条内容都有反馈按钮，你的反馈会让 AI 越来越懂你！\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📰 现在，选择你的信息源：\n"
-        f"🔹 默认源：{default_sources_preview}...",
+        f"📰 <b>信息源设置</b>\n\n"
+        f"我们已为你预配置了优质信息源：\n"
+        f"📌 {default_sources_preview} 等\n\n"
+        f"💡 <b>建议先体验默认源</b>，之后可随时在设置中\n"
+        f"添加你关注的 Twitter 账号或网站。",
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
@@ -619,7 +623,7 @@ async def view_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
     # Send each item with feedback buttons
-    for item_msg, item_id in item_messages:
+    for item_msg, item_id, item_url in item_messages:
         # Check feedback status
         feedback_status = get_item_feedback_status(item_id)
 
@@ -636,13 +640,13 @@ async def view_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             # Create feedback keyboard based on status
             if feedback_status:
                 # Already has feedback, show status
-                status_text = "👍 已点赞" if feedback_status == "like" else "👎 已标记"
+                status_text = "📖 已查看" if feedback_status in ("like", "click") else "👎 已标记"
                 item_keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton(status_text, callback_data=f"noop")]
                 ])
             else:
-                # No feedback yet, show buttons
-                item_keyboard = create_item_feedback_keyboard(item_id)
+                # No feedback yet, show buttons with item URL
+                item_keyboard = create_item_feedback_keyboard(item_id, item_url=item_url)
 
             await send_message_safe(
                 context,

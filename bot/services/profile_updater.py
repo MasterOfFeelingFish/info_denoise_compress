@@ -23,7 +23,16 @@ logger = logging.getLogger(__name__)
 
 
 def format_feedbacks_for_ai(feedbacks: List[Dict[str, Any]]) -> str:
-    """Format feedback records for AI analysis."""
+    """Format feedback records for AI analysis.
+    
+    Includes:
+    - Overall rating (positive/negative)
+    - Reasons for negative feedback
+    - Item-level feedback:
+      - click: User clicked to view original (strong positive signal)
+      - dislike: User marked as not interested (negative signal)
+      - like/star: Explicit positive feedback
+    """
     if not feedbacks:
         return "No feedback records available."
 
@@ -36,17 +45,32 @@ def format_feedbacks_for_ai(feedbacks: List[Dict[str, Any]]) -> str:
         reason_text = fb.get("reason_text", "")
         item_fbs = fb.get("item_feedbacks", [])
 
-        entry = f"- {date} {time}: {overall.upper()}"
+        entry = f"- {date} {time}: {overall.upper()}" if overall else f"- {date} {time}:"
         if reasons:
             entry += f" | Reasons: {', '.join(reasons)}"
         if reason_text:
             entry += f" | Comment: {reason_text}"
+        
         if item_fbs:
-            likes = sum(1 for i in item_fbs if i.get("feedback") == "like")
-            dislikes = sum(1 for i in item_fbs if i.get("feedback") == "dislike")
-            stars = sum(1 for i in item_fbs if i.get("feedback") == "star")
-            if likes or dislikes or stars:
-                entry += f" | Items: {likes} liked, {dislikes} disliked, {stars} starred"
+            # Count different feedback types
+            clicks = [i for i in item_fbs if i.get("feedback") == "click"]
+            dislikes = [i for i in item_fbs if i.get("feedback") == "dislike"]
+            likes = [i for i in item_fbs if i.get("feedback") in ("like", "star")]
+            
+            # Report click events with titles (strong positive signal)
+            # User actively clicked to read the full article
+            if clicks:
+                click_titles = [i.get("title", "Unknown")[:50] for i in clicks]
+                entry += f"\n  📖 User clicked to read ({len(clicks)} items): {', '.join(click_titles)}"
+            
+            # Report dislike events with titles (negative signal)
+            if dislikes:
+                dislike_titles = [i.get("title", "Unknown")[:50] for i in dislikes]
+                entry += f"\n  👎 User marked not interested ({len(dislikes)} items): {', '.join(dislike_titles)}"
+            
+            # Report like events (explicit positive)
+            if likes:
+                entry += f"\n  👍 User liked {len(likes)} items"
 
         formatted.append(entry)
 

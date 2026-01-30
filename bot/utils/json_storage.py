@@ -1124,13 +1124,20 @@ def get_events_summary(days: int = 7) -> Dict[str, Any]:
         days: 统计最近多少天
     
     Returns:
-        汇总数据
+        汇总数据，包含：
+        - active_users: 活跃的注册用户数（仅统计在users.json中存在的用户）
+        - total_event_users: 有事件的所有用户数（包含已删除/未注册用户）
     """
     cutoff_date = datetime.now() - timedelta(days=days)
     
+    # 获取所有注册用户的telegram_id集合
+    registered_users = get_users()
+    registered_user_ids = {str(u.get("telegram_id")) for u in registered_users}
+    
     # 统计数据
     event_counts: Dict[str, int] = {}
-    user_events: Dict[str, int] = {}
+    user_events: Dict[str, int] = {}  # 所有有事件的用户
+    registered_user_events: Dict[str, int] = {}  # 仅注册用户
     daily_counts: Dict[str, int] = {}
     
     for filename in os.listdir(EVENTS_DIR) if os.path.exists(EVENTS_DIR) else []:
@@ -1153,9 +1160,13 @@ def get_events_summary(days: int = 7) -> Dict[str, Any]:
                         event_type = event.get("event", "unknown")
                         event_counts[event_type] = event_counts.get(event_type, 0) + 1
                         
-                        # 按用户统计
+                        # 按用户统计（所有用户）
                         uid = event.get("uid", "unknown")
                         user_events[uid] = user_events.get(uid, 0) + 1
+                        
+                        # 仅统计注册用户的活跃
+                        if uid in registered_user_ids:
+                            registered_user_events[uid] = registered_user_events.get(uid, 0) + 1
                         
                         # 按日期统计
                         date_str = event_time.strftime("%Y-%m-%d")
@@ -1169,10 +1180,11 @@ def get_events_summary(days: int = 7) -> Dict[str, Any]:
     return {
         "period_days": days,
         "total_events": sum(event_counts.values()),
-        "active_users": len(user_events),
+        "active_users": len(registered_user_events),  # 仅注册用户中的活跃数
+        "total_event_users": len(user_events),  # 所有有事件的用户（含已删除/未注册）
         "event_counts": event_counts,
         "daily_counts": daily_counts,
-        "top_users": sorted(user_events.items(), key=lambda x: -x[1])[:10],
+        "top_users": sorted(registered_user_events.items(), key=lambda x: -x[1])[:10],  # 仅展示注册用户
     }
 
 

@@ -214,7 +214,11 @@ async def process_single_user(
             locale = get_locale(user_lang)
 
             # Send each item with feedback buttons
-            for item_msg, item_id in item_messages:
+            # Store item_id -> item_url mapping for click tracking
+            if "item_urls" not in context.bot_data:
+                context.bot_data["item_urls"] = {}
+            
+            for item_msg, item_id, item_url in item_messages:
                 # Section headers don't get feedback buttons
                 if item_id.startswith("section_"):
                     await send_message_safe(context,
@@ -224,7 +228,12 @@ async def process_single_user(
                         disable_web_page_preview=True
                     )
                 else:
-                    item_keyboard = create_item_feedback_keyboard(item_id, lang=user_lang)
+                    # Store URL mapping for later retrieval in click handler
+                    if item_url:
+                        context.bot_data["item_urls"][item_id] = item_url
+                    
+                    # Pass item_url for "查看原文" button
+                    item_keyboard = create_item_feedback_keyboard(item_id, item_url=item_url, lang=user_lang)
                     await send_message_safe(context,
                         chat_id=chat_id,
                         text=item_msg,

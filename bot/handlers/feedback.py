@@ -54,16 +54,17 @@ def create_reason_keyboard(report_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
-def create_item_feedback_keyboard(item_id: str, lang: str = "zh") -> InlineKeyboardMarkup:
+def create_item_feedback_keyboard(item_id: str, item_url: str = "", lang: str = "zh") -> InlineKeyboardMarkup:
     """
     Create feedback buttons for individual items.
     
     Buttons:
-    - 👍 (Like)
-    - "不感兴趣" / "Not interested" (instead of 👎)
+    - "查看原文" / "View Original" (callback button - tracks click, then shows URL)
+    - "不感兴趣" / "Not interested" (dislike callback)
     
     Args:
         item_id: Item identifier for callback data
+        item_url: Original article URL for the "View Original" button
         lang: Language code for button text
     
     Returns:
@@ -73,15 +74,20 @@ def create_item_feedback_keyboard(item_id: str, lang: str = "zh") -> InlineKeybo
     from services.report_generator import get_locale
     locale = get_locale(lang)
     
-    like_text = locale.get("btn_like", "👍")
+    view_original_text = locale.get("btn_view_original", "查看原文")
     not_interested_text = locale.get("btn_not_interested", "不感兴趣")
     
-    keyboard = [
-        [
-            InlineKeyboardButton(like_text, callback_data=f"item_like_{item_id}"),
-            InlineKeyboardButton(not_interested_text, callback_data=f"item_dislike_{item_id}"),
-        ]
-    ]
+    buttons = []
+    
+    # "查看原文" button - callback type to track clicks
+    # After click: records event, then shows URL button for user to open
+    if item_url:
+        buttons.append(InlineKeyboardButton(view_original_text, callback_data=f"item_click_{item_id}"))
+    
+    # "不感兴趣" button
+    buttons.append(InlineKeyboardButton(not_interested_text, callback_data=f"item_dislike_{item_id}"))
+    
+    keyboard = [buttons]
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -284,7 +290,11 @@ async def handle_custom_reason(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle like/dislike feedback on individual content items."""
+    """Handle click/dislike feedback on individual content items.
+    
+    item_click: User clicked "查看原文" - strong positive intent signal
+    item_dislike: User clicked "不感兴趣" - negative signal
+    """
 
     query = update.callback_query
 
@@ -292,17 +302,20 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
     telegram_id = str(user.id)
     callback_data = query.data
 
-    # Parse item feedback (only like/dislike)
-    if callback_data.startswith("item_like_"):
-        item_id = callback_data.replace("item_like_", "")
-        feedback_type = "like"
-        response = "👍 已记录"
-        indicator = "👍"
+    # Parse item feedback (click or dislike)
+    if callback_data.startswith("item_click_"):
+        item_id = callback_data.replace("item_click_", "")
+        feedback_type = "click"
+        response = "📖 正在打开原文..."
     elif callback_data.startswith("item_dislike_"):
         item_id = callback_data.replace("item_dislike_", "")
         feedback_type = "dislike"
         response = "👎 已记录"
-        indicator = "👎"
+    # Legacy support for item_like (backward compatibility)
+    elif callback_data.startswith("item_like_"):
+        item_id = callback_data.replace("item_like_", "")
+        feedback_type = "click"  # Treat like as click for backward compatibility
+        response = "👍 已记录"
     else:
         await safe_answer_callback_query(query)
         return
@@ -310,13 +323,19 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
     # Extract item content from the message for profile update
     # The message contains the news title and source
     original_text = query.message.text or ""
+    
     # Try to extract title (first line after emoji indicator)
     lines = original_text.split("\n")
     item_title = lines[0] if lines else "Unknown"
-    # Clean up the title (remove emoji indicators like 🔴 🔵 and numbering)
+    # Clean up the title (remove emoji indicators like 🔴 🔵 🟠 and numbering)
     import re
-    item_title = re.sub(r'^[🔴🔵]\s*\d+\.\s*', '', item_title).strip()
+    item_title = re.sub(r'^[🔴🔵🟠]\s*\d+\.\s*', '', item_title).strip()
     item_title = re.sub(r'<[^>]+>', '', item_title)  # Remove HTML tags
+    
+    # Get URL from bot_data storage (set when digest was sent)
+    item_url = ""
+    if "item_urls" in context.bot_data:
+        item_url = context.bot_data["item_urls"].get(item_id, "")
 
     # Store item feedback in memory (for later aggregation)
     item_feedbacks = context.user_data.get("item_feedbacks", [])
@@ -332,7 +351,7 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
     from utils.json_storage import save_feedback
     save_feedback(
         telegram_id=telegram_id,
-        overall_rating="positive" if feedback_type == "like" else "neutral",
+        overall_rating="positive" if feedback_type == "click" else "neutral",
         item_feedbacks=[{
             "item_id": item_id,
             "feedback": feedback_type,
@@ -341,16 +360,41 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
     # 埋点：单条内容反馈
-    track_event(telegram_id, f"item_{feedback_type}", {"item_id": item_id, "title": item_title[:50]})
+    # item_click 是强意图信号（用户点击查看原文）
+    # item_dislike 是负向信号（用户不感兴趣）
+    event_type = "item_click" if feedback_type == "click" else "item_dislike"
+    track_event(telegram_id, event_type, {
+        "item_id": item_id, 
+        "title": item_title[:50],
+        "url": item_url[:200] if item_url else ""
+    })
 
-    # Show visual confirmation with indicator
+    # Show visual confirmation
     await safe_answer_callback_query(query, f"{response}", show_alert=False)
 
-    # Remove feedback buttons but keep original message (preserves HTML links)
-    try:
-        await query.edit_message_reply_markup(reply_markup=None)
-    except Exception:
-        pass  # Message may already be edited
+    # For item_click, replace buttons with a URL button to open the article
+    if feedback_type == "click":
+        try:
+            if item_url:
+                # Create a URL button for user to open the article
+                from services.report_generator import get_locale
+                locale = get_locale("zh")
+                open_text = locale.get("btn_open_link", "打开链接")
+                
+                open_button = InlineKeyboardButton(f"📖 {open_text}", url=item_url)
+                new_keyboard = InlineKeyboardMarkup([[open_button]])
+                await query.edit_message_reply_markup(reply_markup=new_keyboard)
+            else:
+                # No URL available, just remove buttons
+                await query.edit_message_reply_markup(reply_markup=None)
+        except Exception as e:
+            logger.warning(f"Failed to update message after click: {e}")
+    else:
+        # For dislike, remove feedback buttons
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass  # Message may already be edited
 
     logger.info(f"Item feedback from {telegram_id}: {feedback_type} on '{item_title[:30]}'")
 

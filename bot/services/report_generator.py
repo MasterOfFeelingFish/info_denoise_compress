@@ -115,6 +115,8 @@ LOCALE_STRINGS = {
         # New strings for item display
         "reason_prefix": "💡 ",
         "source_prefix": "来源: ",
+        "btn_view_original": "查看原文",
+        "btn_open_link": "打开链接",
         "btn_like": "👍",
         "btn_not_interested": "不感兴趣",
     },
@@ -142,6 +144,7 @@ LOCALE_STRINGS = {
         # New strings for item display
         "reason_prefix": "💡 ",
         "source_prefix": "Source: ",
+        "btn_view_original": "View Original",
         "btn_like": "👍",
         "btn_not_interested": "Not interested",
     },
@@ -169,6 +172,8 @@ LOCALE_STRINGS = {
         # New strings for item display
         "reason_prefix": "💡 ",
         "source_prefix": "ソース: ",
+        "btn_view_original": "原文を見る",
+        "btn_open_link": "リンクを開く",
         "btn_like": "👍",
         "btn_not_interested": "興味なし",
     },
@@ -196,6 +201,8 @@ LOCALE_STRINGS = {
         # New strings for item display
         "reason_prefix": "💡 ",
         "source_prefix": "출처: ",
+        "btn_view_original": "원문 보기",
+        "btn_open_link": "링크 열기",
         "btn_like": "👍",
         "btn_not_interested": "관심없음",
     },
@@ -631,12 +638,10 @@ def format_single_item(item: Dict[str, Any], index: int, lang: str = "zh") -> st
     summary_escaped = html.escape(summary) if summary else ""
     reason_escaped = html.escape(reason) if reason else ""
 
-    # Make title clickable if link exists
-    if link:
-        link_escaped = html.escape(link, quote=True)
-        title_html = f'<a href="{link_escaped}">{title_escaped}</a>'
-    else:
-        title_html = title_escaped
+    # Title is now plain text (no hyperlink)
+    # Users must use "查看原文" button to access original content
+    # This ensures all traffic goes through the monitored button
+    title_html = title_escaped
 
     lines = [f"{priority} <b>{index}. {title_html}</b>"]
 
@@ -717,7 +722,7 @@ def prepare_digest_messages(
         lang: Language code
 
     Returns:
-        Tuple of (header_message, list of (item_message, item_id) tuples)
+        Tuple of (header_message, list of (item_message, item_id, item_url) tuples)
     """
     date_str = datetime.now().strftime("%Y-%m-%d")
     locale = get_locale(lang)
@@ -754,6 +759,7 @@ def prepare_digest_messages(
 """
 
     # Generate individual item messages with hierarchy
+    # Each item is (message, item_id, item_url) tuple
     item_messages = []
     item_index = 1
 
@@ -761,48 +767,52 @@ def prepare_digest_messages(
     if must_read:
         section_name = category_names.get("must_read", "MUST READ")
         section_header = f"\n<b>{DIVIDER_LIGHT * 8} {section_name} {DIVIDER_LIGHT * 8}</b>\n"
-        item_messages.append((section_header, "section_must_read"))
+        item_messages.append((section_header, "section_must_read", ""))
 
         for item in must_read:
             msg = format_single_item(item, item_index, lang)
             item_id = item.get("id", f"item_{item_index}")
-            item_messages.append((msg, item_id))
+            item_url = item.get("link", "")
+            item_messages.append((msg, item_id, item_url))
             item_index += 1
 
     # Section 2: Macro Insights (行业大局) - Industry context, implicit needs
     if macro_insights:
         section_name = category_names.get("macro_insights", "Industry Context")
         section_header = f"\n<b>{DIVIDER_LIGHT * 8} {section_name} {DIVIDER_LIGHT * 8}</b>\n"
-        item_messages.append((section_header, "section_macro_insights"))
+        item_messages.append((section_header, "section_macro_insights", ""))
 
         for item in macro_insights:
             msg = format_single_item(item, item_index, lang)
             item_id = item.get("id", f"item_{item_index}")
-            item_messages.append((msg, item_id))
+            item_url = item.get("link", "")
+            item_messages.append((msg, item_id, item_url))
             item_index += 1
 
     # Section 3: Recommended (推荐) - Matching user preferences
     if recommended:
         section_name = category_names.get("recommended", "Recommended")
         section_header = f"\n<b>{DIVIDER_LIGHT * 8} {section_name} {DIVIDER_LIGHT * 8}</b>\n"
-        item_messages.append((section_header, "section_recommended"))
+        item_messages.append((section_header, "section_recommended", ""))
 
         for item in recommended:
             msg = format_single_item(item, item_index, lang)
             item_id = item.get("id", f"item_{item_index}")
-            item_messages.append((msg, item_id))
+            item_url = item.get("link", "")
+            item_messages.append((msg, item_id, item_url))
             item_index += 1
 
     # Section 4: Other (其他)
     if other:
         section_name = category_names.get("other", "Other")
         section_header = f"\n<b>{DIVIDER_LIGHT * 8} {section_name} {DIVIDER_LIGHT * 8}</b>\n"
-        item_messages.append((section_header, "section_other"))
+        item_messages.append((section_header, "section_other", ""))
 
         for item in other:
             msg = format_single_item(item, item_index, lang)
             item_id = item.get("id", f"item_{item_index}")
-            item_messages.append((msg, item_id))
+            item_url = item.get("link", "")
+            item_messages.append((msg, item_id, item_url))
             item_index += 1
 
     return header, item_messages

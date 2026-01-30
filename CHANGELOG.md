@@ -2,6 +2,150 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.6.2] - 2026-01-30
+
+### Summary
+修复多个Bug并优化用户体验：查看原文按钮支持点击追踪、活跃用户统计修正、新用户引导流程优化、运营数据增加说明文字。
+
+---
+
+### Fixed
+
+#### 1. 查看原文按钮无法追踪点击 (P0)
+**问题**：用户点击"查看原文"按钮后无法追踪行为，且标题超链接可绕过监控。
+
+**解决方案**：
+- 将按钮改为两步操作：点击 → 记录埋点 → 显示URL按钮 → 打开原文
+- 移除标题超链接，用户必须通过按钮访问原文
+
+**修改文件**：
+- `bot/handlers/feedback.py` - 恢复callback类型，点击后显示URL按钮
+- `bot/services/digest_processor.py` - 存储 item_id → item_url 映射
+- `bot/services/report_generator.py` - 移除标题超链接，添加本地化字符串
+
+#### 2. 活跃用户数统计错误 (P0)
+**问题**：活跃用户数(79)超过总用户数(58)，统计包含了已删除/未注册用户。
+
+**解决方案**：
+- 修改 `get_events_summary()` 只统计在 `users.json` 中存在的注册用户
+- 新增 `total_event_users` 字段保留原始统计（用于对比）
+
+**修改文件**：
+- `bot/utils/json_storage.py` - 过滤非注册用户的事件统计
+
+---
+
+### Changed
+
+#### 3. 用户画像更新逻辑增强
+**改进**：将用户"点击查看原文"的行为如实告诉AI，让AI自行解读其含义。
+
+点击原文是高价值的正向信号（用户愿意深入阅读），现在会传递给AI：
+```
+📖 User clicked to read (2 items): 白宫召集加密行业高管会议, Tether每周买入黄金
+👎 User marked not interested (1 items): 某个不感兴趣的新闻
+```
+
+**修改文件**：
+- `bot/services/profile_updater.py` - 修改 `format_feedbacks_for_ai()` 包含click事件
+
+#### 4. 运营统计面板增加指标说明 (P1)
+**改进**：为每个统计指标添加详细解释，让运营更清楚数据含义。
+
+| 指标 | 说明 |
+|------|------|
+| 总事件数 | 统计周期内所有用户操作的总次数 |
+| 活跃用户 | 有过任意操作的注册用户 / 总注册用户 |
+| 人均事件 | 平均每个活跃用户的操作次数 |
+| 活跃率 | 活跃用户占总用户的比例 |
+| 查看原文 | 用户点击查看原文按钮（新增事件类型） |
+| 整体满意度 | 简报末尾"有帮助"的占比 |
+| 内容吸引力 | 用户主动查看原文的占比 |
+
+**修改文件**：
+- `bot/handlers/admin.py` - 添加指标说明文字
+
+#### 5. 新用户引导流程优化 (P1)
+**改进**：简化信息源选择界面，引导用户快速上手。
+
+- 主按钮改为"🚀 立即开始（推荐）"
+- 增加说明："建议先体验默认源，之后可随时在设置中添加"
+- 预览更多默认源名称，让用户了解内容质量
+
+**修改文件**：
+- `bot/handlers/start.py` - 优化文案和按钮布局
+
+---
+
+### Technical Details
+
+#### 活跃用户定义说明
+只有以下操作会被记录为"活跃"：
+- `/start` 命令 → session_start
+- 点击查看原文 → item_click（新增）
+- 简报反馈 → feedback_positive/negative
+- 单条内容反馈 → item_dislike
+- 设置变更 → settings_changed
+- 信息源增删 → source_added/removed
+
+**注意**：被动接收简报、只翻看不点击不会被记录为活跃（Telegram平台限制）。
+
+---
+
+## [v1.6.1] - 2026-01-29
+
+### Summary
+优化默认 RSS 信息源配置：移除失效源，新增 TechFlow 官方快讯 RSS。
+
+---
+
+### Changed
+
+#### 默认 RSS 信息源优化 (`bot/.env`)
+
+| 操作 | 源名称 | 原因 |
+|------|--------|------|
+| ❌ 移除 | Prediction News | HTTP 403 Cloudflare 防护，无法访问 |
+| ➕ 新增 | TechFlow 快讯 | 官方 7x24h 快讯 RSS |
+
+**更新后的信息源列表：**
+- Cointelegraph ✅
+- CoinDesk ✅
+- The Block Beats (律动) ✅
+- TechFlow Post (Substack 深度文章) ✅
+- **TechFlow 快讯** (官方 7x24h 快讯) 🆕
+- DeFi Rate ✅
+- Event Horizon ✅
+- un.Block 吴说 ✅
+
+---
+
+### Technical Details
+
+#### RSS 源可用性检查结果
+
+| 源 | URL | 状态 |
+|----|-----|------|
+| Cointelegraph | `cointelegraph.com/rss` | ✅ HTTP 200 |
+| CoinDesk | `coindesk.com/arc/outboundfeeds/rss/` | ✅ HTTP 200 |
+| The Block Beats | `api.theblockbeats.news/v1/open-api/home-xml` | ✅ HTTP 200 |
+| TechFlow Post | `techflowpost.substack.com/feed` | ✅ HTTP 200 |
+| TechFlow 快讯 | `techflowpost.com/api/client/common/rss.xml` | ✅ HTTP 200 |
+| DeFi Rate | `defirate.com/feed` | ✅ HTTP 200 |
+| Prediction News | `predictionnews.com/rss/` | ❌ HTTP 403 |
+| Event Horizon | `nexteventhorizon.substack.com/feed` | ✅ HTTP 200 |
+| un.Block | `unblock256.substack.com/feed` | ✅ HTTP 200 |
+
+---
+
+### Migration Notes
+
+1. **新用户** - 注册时自动获得更新后的默认信息源
+2. **现有用户** - 不受影响，保持原有订阅配置
+3. **无需代码变更** - 仅环境变量配置更新
+
+---
+
 ## [v1.6.0] - 2026-01-29
 
 ### Summary
