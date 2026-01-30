@@ -263,7 +263,6 @@ async def send_update_to_user(
     
     # Build message
     message = f"**{ui['update_notification_title']}** ({changelog['version']})\n\n"
-    message += f"{ui['update_notification_intro']}\n\n"
     message += content
     
     # Truncate if too long (Telegram limit is 4096 chars)
