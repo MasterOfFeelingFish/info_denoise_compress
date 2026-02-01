@@ -34,7 +34,7 @@ from utils.json_storage import (
     get_user_language,
 )
 from utils.auth import whitelist_required
-from utils.language import normalize_language_code
+from services.language_service import normalize_language_code, get_language_native_name
 from locales.ui_strings import get_ui_locale
 
 logger = logging.getLogger(__name__)
@@ -101,6 +101,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         # Detect and store user's language from Telegram
         lang = normalize_language_code(user.language_code)
         context.user_data["language"] = lang
+        # Store native language name for AI prompts
+        context.user_data["language_native"] = get_language_native_name(lang)
         ui = get_ui_locale(lang)
 
         # Show welcome message + typing indicator
@@ -115,8 +117,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
         await update.message.chat.send_action(ChatAction.TYPING)
 
-        # Load prompt from file
-        system_instruction = get_prompt("onboarding_round1.txt")
+        # Load prompt from file with user's language
+        user_language = context.user_data["language_native"]
+        system_instruction = get_prompt("onboarding_round1.txt", user_language=user_language)
 
         try:
             ai_response = await call_gemini(
@@ -150,6 +153,7 @@ async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     # Get language from context (set during start) or default
     lang = context.user_data.get("language", "zh")
+    user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
 
     # Anti-debounce: Prevent duplicate clicks
@@ -167,8 +171,8 @@ async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Show typing indicator while AI generates response
     await query.message.chat.send_action(ChatAction.TYPING)
 
-    # Load prompt from file
-    system_instruction = get_prompt("onboarding_round1.txt")
+    # Load prompt from file with user's language
+    system_instruction = get_prompt("onboarding_round1.txt", user_language=user_language)
 
     try:
         ai_response = await call_gemini(
@@ -201,6 +205,7 @@ async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user response in round 1, proceed to round 2."""
     lang = context.user_data.get("language", "zh")
+    user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
     
     user_message = update.message.text
@@ -213,8 +218,8 @@ async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Show typing indicator while AI generates response
     await update.message.chat.send_action(ChatAction.TYPING)
 
-    # Load prompt from file with user input
-    system_instruction = get_prompt("onboarding_round2.txt", user_input=user_message)
+    # Load prompt from file with user input and language
+    system_instruction = get_prompt("onboarding_round2.txt", user_input=user_message, user_language=user_language)
 
     try:
         ai_response = await call_gemini(
@@ -245,6 +250,7 @@ async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user response in round 2, proceed to round 3 (confirmation)."""
     lang = context.user_data.get("language", "zh")
+    user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
     
     user_message = update.message.text
@@ -268,8 +274,8 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     round_1 = history[0]["user_input"]
     round_2 = user_message
 
-    # Load prompt from file
-    system_instruction = get_prompt("onboarding_round3.txt", round_1=round_1, round_2=round_2)
+    # Load prompt from file with language
+    system_instruction = get_prompt("onboarding_round3.txt", round_1=round_1, round_2=round_2, user_language=user_language)
 
     try:
         ai_response = await call_gemini(
@@ -311,6 +317,7 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def retry_round_2_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Retry round 2 with the same round 1 data."""
     lang = context.user_data.get("language", "zh")
+    user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
     
     query = update.callback_query
@@ -327,8 +334,8 @@ async def retry_round_2_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
         return ConversationHandler.END
 
-    # Load prompt from file
-    system_instruction = get_prompt("onboarding_round2.txt", user_input=round_1)
+    # Load prompt from file with language
+    system_instruction = get_prompt("onboarding_round2.txt", user_input=round_1, user_language=user_language)
 
     try:
         ai_response = await call_gemini(
@@ -370,6 +377,10 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     user = update.effective_user
     telegram_id = str(user.id)
+    
+    # Get language settings from context
+    lang = context.user_data.get("language", "zh")
+    user_language = context.user_data.get("language_native", get_language_native_name(lang))
 
     # Show progress message
     await query.edit_message_text(
@@ -377,11 +388,12 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         parse_mode="HTML"
     )
 
-    # Create user record (save user_id to avoid file lock race condition)
+    # Create user record with language (save user_id to avoid file lock race condition)
     created_user = create_user(
         telegram_id=telegram_id,
         username=user.username,
-        first_name=user.first_name
+        first_name=user.first_name,
+        language=lang  # Pass language to storage
     )
     user_id = created_user['id']
 
@@ -389,8 +401,12 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     profile_summary = context.user_data.get("profile_summary", "")
     history = context.user_data.get("conversation_history", [])
 
-    # Load prompt from file
-    system_instruction = get_prompt("onboarding_confirm.txt")
+    # Load prompt from file with language and conversation summary
+    system_instruction = get_prompt(
+        "onboarding_confirm.txt",
+        user_language=user_language,
+        conversation_summary=f"History: {history}. Summary: {profile_summary}"
+    )
 
     try:
         full_profile = await call_gemini(

@@ -148,6 +148,17 @@ EVENTS_DIR = os.path.join(DATA_DIR, "events")
 # 简报配置
 MAX_DIGEST_ITEMS = _parse_int_env("MAX_DIGEST_ITEMS", 20)  # 每日精选输出条数
 
+# Translation Configuration
+# 翻译配置 - 低温度值确保翻译输出稳定不发散
+def _parse_float_env(key: str, default: float) -> float:
+    """Parse a float environment variable with fallback."""
+    try:
+        return float(os.getenv(key, str(default)))
+    except ValueError:
+        return default
+
+TRANSLATION_TEMPERATURE = _parse_float_env("TRANSLATION_TEMPERATURE", 0.1)
+
 # Two-stage filtering configuration (v2.1)
 # 两阶段筛选配置
 BATCH_SIZE = _parse_int_env("BATCH_SIZE", 100)  # 每批处理的新闻数量

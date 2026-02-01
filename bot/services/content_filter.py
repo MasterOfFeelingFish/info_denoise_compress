@@ -21,7 +21,7 @@ from services.gemini import call_gemini_json, call_gemini
 from services.llm_factory import call_llm_json, call_llm_text
 from utils.json_storage import get_user_profile, get_user_feedbacks
 from utils.prompt_loader import get_prompt
-from config import MAX_DIGEST_ITEMS, BATCH_SIZE, STAGE1_RATIO
+from config import MAX_DIGEST_ITEMS, BATCH_SIZE, STAGE1_RATIO, TRANSLATION_TEMPERATURE
 
 logger = logging.getLogger(__name__)
 
@@ -732,14 +732,15 @@ async def translate_text(text: str, target_language: str) -> str:
     
     prompt = f"Translate the following to {target_language}. Output only the translation, no extra text:\n\n{text}"
     
-    # Use unified retry mechanism
+    # Use unified retry mechanism with configured temperature for stable output
     result, model_used = await call_llm_text(
         prompt=prompt,
-        temperature=0.3,
+        temperature=TRANSLATION_TEMPERATURE,
         context="text-translation"
     )
     
     if result:
+        logger.debug(f"Text translation completed using {model_used} (temp={TRANSLATION_TEMPERATURE})")
         return result.strip()
     
     logger.error("Text translation failed, returning original")
@@ -818,10 +819,11 @@ async def translate_content(
     )
     
     # Use unified retry mechanism with model switching for translation
+    # Use configured temperature for stable, accurate output
     translated_result, model_used = await call_llm_json(
         prompt=prompt,
         system_instruction="You are a professional translator. Output valid JSON only.",
-        temperature=0.3,  # Low temperature for accurate translation
+        temperature=TRANSLATION_TEMPERATURE,
         context="translation"
     )
     

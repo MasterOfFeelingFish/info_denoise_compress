@@ -4,6 +4,39 @@
 
 ---
 
+## v1.6.5 - 2026年2月1日
+
+### 本次更新
+
+**更好的语言体验**
+- 新用户对话现在完全使用你的语言，不再中英混杂
+- 支持更多语言：俄语、西班牙语、法语、德语等都能自动适配
+- 新增语言设置：在「偏好设置」页面可以手动切换语言
+
+**翻译质量提升**
+- 简报内容翻译更加稳定准确
+
+### 技术改进
+
+- 新增 `services/language_service.py` 统一语言管理服务
+- 新增 UI 缓存版本号机制（`UI_VERSION`），更新 UI 文案时缓存自动失效
+- 修改 `onboarding_round1/2/3.txt` 支持 `{user_language}` 动态占位符
+- `handlers/settings.py` 新增语言设置功能
+- `config.py` 新增 `TRANSLATION_TEMPERATURE` 配置（默认 0.1）
+- 所有翻译相关 LLM 调用使用统一的低 temperature 确保输出稳定
+
+### 测试验证
+
+```
+12 passed
+✅ UI_VERSION 版本号机制测试通过
+✅ TRANSLATION_TEMPERATURE 配置测试通过
+✅ UI 缓存版本检查测试通过
+✅ Prompt 语言占位符测试通过
+```
+
+---
+
 ## v1.6.4 - 2026年1月30日
 
 ### 本次更新

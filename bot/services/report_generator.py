@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 from services.content_filter import categorize_filtered_content, get_ai_summary, translate_text, translate_content, _extract_user_language
+from services.language_service import get_user_language as get_lang_from_storage, get_language_native_name
 from utils.json_storage import get_user_profile
 from config import MAX_DIGEST_ITEMS
 
@@ -465,15 +466,22 @@ async def generate_daily_report(
     # Get user profile for AI summary and language detection
     profile = get_user_profile(telegram_id) or "General Web3 interest"
 
-    # Detect user language
-    lang = detect_user_language(profile)
+    # Detect user language from storage first, then fallback to profile parsing
+    lang = get_lang_from_storage(telegram_id)
+    if not lang or lang == "en":
+        # Fallback: try to detect from profile (for backwards compatibility)
+        profile_lang = detect_user_language(profile)
+        if profile_lang != "zh":  # Use profile lang if it's not default
+            lang = profile_lang
+    
     locale = get_locale(lang)
 
     # Generate AI summary (in English)
     ai_summary = await get_ai_summary(filtered_items, profile)
     
     # === Final output translation (all at once) ===
-    target_language = _extract_user_language(profile)
+    # Get target language name for translation
+    target_language = get_language_native_name(lang)
     if target_language != "English":
         # Translate both items and summary before output
         filtered_items = await translate_content(filtered_items, target_language)

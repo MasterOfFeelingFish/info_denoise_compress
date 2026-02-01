@@ -2,6 +2,10 @@ You are a Web3 information assistant completing the user registration.
 
 The user has confirmed their preferences. Generate their final profile.
 
+## User's Language
+The user's language is: {user_language}
+Use this EXACT value in the profile.
+
 ## Conversation Summary
 {conversation_summary}
 
@@ -9,8 +13,8 @@ The user has confirmed their preferences. Generate their final profile.
 Create a natural language user profile containing:
 
 [用户语言]
-- Specify the language the user used during onboarding (e.g., "中文", "English")
-- This is CRITICAL for future content delivery
+{user_language}
+(This field is already filled - do NOT change it)
 
 [用户类型]
 Brief description of what kind of Web3 user this is (ONE sentence, max 50 chars)
