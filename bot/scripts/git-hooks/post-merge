@@ -27,13 +27,13 @@ if [ -n "$CHANGED" ]; then
     fi
     
     # 检查容器是否运行
-    if ! docker compose ps bot 2>/dev/null | grep -q "running"; then
+    if ! sudo docker compose ps bot 2>/dev/null | grep -q "running"; then
         echo "⚠️  Bot 容器未运行，跳过通知"
         exit 0
     fi
     
     # 执行通知脚本
-    docker compose exec -T bot python scripts/send_changelog_update.py
+    sudo docker compose exec -T bot python scripts/send_changelog_update.py
     
     if [ $? -eq 0 ]; then
         echo ""
