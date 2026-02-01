@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# Git post-merge hook
+# 当 git pull 后 CHANGELOG.md 有变更时，自动发送更新通知
+#
+# 安装方法（在服务器上执行）：
+#   cp bot/scripts/git-hooks/post-merge .git/hooks/
+#   chmod +x .git/hooks/post-merge
+#
+
+# 获取项目根目录
+PROJECT_DIR="$(git rev-parse --show-toplevel)"
+cd "$PROJECT_DIR"
+
+# 检查 CHANGELOG.md 是否有变更
+CHANGED=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD 2>/dev/null | grep "CHANGELOG.md")
+
+if [ -n "$CHANGED" ]; then
+    echo ""
+    echo "📢 检测到 CHANGELOG.md 变更，发送更新通知..."
+    echo ""
+    
+    # 检查 Docker 是否可用
+    if ! command -v docker &> /dev/null; then
+        echo "⚠️  Docker 未安装，跳过通知"
+        exit 0
+    fi
+    
+    # 检查容器是否运行
+    if ! docker compose ps bot 2>/dev/null | grep -q "running"; then
+        echo "⚠️  Bot 容器未运行，跳过通知"
+        exit 0
+    fi
+    
+    # 执行通知脚本
+    docker compose exec -T bot python scripts/send_changelog_update.py
+    
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo "✅ 更新通知发送完成"
+    else
+        echo ""
+        echo "❌ 更新通知发送失败，请检查日志"
+    fi
+fi
