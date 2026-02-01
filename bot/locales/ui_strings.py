@@ -1013,6 +1013,23 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "stats_feedback_given": "{count} 件のフィードバックを提供",
         "stats_sources": "情報源：{twitter} Twitter + {website} サイト",
         
+        # ============ 統計詳細 ============
+        "stats_your_stats": "あなたの統計",
+        "stats_registered": "登録日：{date}",
+        "stats_last_30_days": "過去30日間",
+        "stats_feedback_count": "フィードバック数",
+        "stats_positive": "ポジティブ",
+        "stats_negative": "ネガティブ",
+        "stats_satisfaction": "満足度",
+        "stats_trend": "トレンド",
+        "stats_main_issues": "主な問題",
+        "stats_trend_improving": "改善中",
+        "stats_trend_declining": "低下中",
+        "stats_trend_stable": "安定",
+        "stats_trend_no_data": "データなし",
+        "stats_item_viewed": "📖 閲覧済み",
+        "stats_item_marked": "👎 マーク済み",
+        
         # ============ ダイジェスト ============
         "digest_generating": "今日のダイジェストを生成中...",
         "digest_no_user": "ユーザーが見つかりません。/start で登録してください。",
@@ -1194,6 +1211,23 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "stats_digests_received": "{count}개 다이제스트 수신",
         "stats_feedback_given": "{count}개 피드백 제출",
         "stats_sources": "소스: {twitter} Twitter + {website} 웹사이트",
+        
+        # ============ 통계 상세 ============
+        "stats_your_stats": "당신의 통계",
+        "stats_registered": "가입일: {date}",
+        "stats_last_30_days": "최근 30일",
+        "stats_feedback_count": "피드백 수",
+        "stats_positive": "긍정적",
+        "stats_negative": "부정적",
+        "stats_satisfaction": "만족도",
+        "stats_trend": "추세",
+        "stats_main_issues": "주요 문제",
+        "stats_trend_improving": "개선 중",
+        "stats_trend_declining": "하락 중",
+        "stats_trend_stable": "안정",
+        "stats_trend_no_data": "데이터 없음",
+        "stats_item_viewed": "📖 조회됨",
+        "stats_item_marked": "👎 마크됨",
         
         # ============ 다이제스트 ============
         "digest_generating": "오늘의 다이제스트 생성 중...",

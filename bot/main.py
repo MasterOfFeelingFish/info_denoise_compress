@@ -42,6 +42,7 @@ from handlers.feedback import get_feedback_handlers
 from handlers.settings import get_settings_handler, get_settings_callbacks
 from handlers.sources import get_sources_handler, get_sources_callbacks
 from handlers.admin import get_admin_handlers
+from services.rate_limiter import get_rate_limiter
 
 
 # ============ Logging Configuration ============
@@ -216,7 +217,13 @@ async def interval_digest_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     Runs every PUSH_CHECK_INTERVAL minutes and pushes users whose last push was >= PUSH_INTERVAL_HOURS ago.
     Respects quiet hours (PUSH_QUIET_START to PUSH_QUIET_END).
     """
+    from config import PAUSE_PUSH
     from utils.json_storage import get_users, get_user_sources, get_user_last_push_time
+
+    # Check if push is paused (for debugging)
+    if PAUSE_PUSH:
+        logger.info("Push paused (PAUSE_PUSH=true), skipping interval check")
+        return
 
     beijing_tz = ZoneInfo("Asia/Shanghai")
     now = datetime.now(beijing_tz)
@@ -575,16 +582,51 @@ async def post_init(application: Application) -> None:
     await resolve_default_sources_rss()
     
     # Set bot commands menu (only show user-facing commands)
-    # Debug commands (/test, /testprofile) are hidden from menu but still functional
-    commands = [
+    # Set bot commands menu for different languages
+    # Telegram will show the menu based on user's Telegram client language
+    
+    # Chinese (default)
+    commands_zh = [
         BotCommand("start", "主菜单"),
         BotCommand("help", "帮助信息"),
         BotCommand("settings", "偏好设置"),
         BotCommand("sources", "信息源管理"),
         BotCommand("stats", "查看统计"),
     ]
-    await application.bot.set_my_commands(commands)
-    logger.info("Bot commands menu set successfully")
+    await application.bot.set_my_commands(commands_zh)  # Default
+    await application.bot.set_my_commands(commands_zh, language_code="zh")
+    
+    # English
+    commands_en = [
+        BotCommand("start", "Main Menu"),
+        BotCommand("help", "Help"),
+        BotCommand("settings", "Preferences"),
+        BotCommand("sources", "Sources"),
+        BotCommand("stats", "Statistics"),
+    ]
+    await application.bot.set_my_commands(commands_en, language_code="en")
+    
+    # Japanese
+    commands_ja = [
+        BotCommand("start", "メインメニュー"),
+        BotCommand("help", "ヘルプ"),
+        BotCommand("settings", "設定"),
+        BotCommand("sources", "情報源"),
+        BotCommand("stats", "統計"),
+    ]
+    await application.bot.set_my_commands(commands_ja, language_code="ja")
+    
+    # Korean
+    commands_ko = [
+        BotCommand("start", "메인 메뉴"),
+        BotCommand("help", "도움말"),
+        BotCommand("settings", "설정"),
+        BotCommand("sources", "소스"),
+        BotCommand("stats", "통계"),
+    ]
+    await application.bot.set_my_commands(commands_ko, language_code="ko")
+    
+    logger.info("Bot commands menu set for zh/en/ja/ko languages")
 
     # Get timezone for Beijing
     beijing_tz = ZoneInfo("Asia/Shanghai")
@@ -760,6 +802,36 @@ async def prefetch_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Prefetch job failed: {e}", exc_info=True)
 
 
+async def rate_limit_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    全局频率限制中间件。
+    
+    在所有其他 handler 之前执行，检查用户是否超过频率限制。
+    如果被限制，抛出 ApplicationHandlerStop 阻止后续处理。
+    """
+    from telegram.ext import ApplicationHandlerStop
+    
+    user = update.effective_user
+    if not user:
+        return  # 没有用户信息，继续处理
+    
+    user_id = str(user.id)
+    limiter = get_rate_limiter()
+    
+    is_limited, reason = limiter.is_rate_limited(user_id)
+    if is_limited:
+        # 被限制，发送提示并阻止后续处理
+        logger.warning(f"Rate limited user {user_id}: {reason}")
+        if update.callback_query:
+            await safe_answer_callback_query(update.callback_query, f"⚠️ {reason}", show_alert=True)
+        elif update.message:
+            await update.message.reply_text(f"⚠️ {reason}")
+        raise ApplicationHandlerStop()  # 阻止后续 handler
+    
+    # 记录请求，继续后续处理
+    limiter.record_request(user_id)
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors in the bot."""
     logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
@@ -843,7 +915,12 @@ def main() -> None:
 
     # Add handlers
     
-    # 1. Admin handlers (Priority: Highest - always handle admin commands first)
+    # 0. Global rate limiter (Priority: Highest - runs before all other handlers)
+    from telegram.ext import TypeHandler
+    application.add_handler(TypeHandler(Update, rate_limit_middleware), group=-1)
+    logger.info("Rate limiter middleware registered")
+    
+    # 1. Admin handlers (Priority: High - handle admin commands first)
     for handler in get_admin_handlers():
         application.add_handler(handler)
     logger.info("Admin handlers registered")

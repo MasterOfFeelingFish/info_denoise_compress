@@ -401,12 +401,15 @@ async def change_language(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ui = get_ui_locale(lang_code)
         lang_name = get_language_native_name(lang_code)
         
-        keyboard = [[InlineKeyboardButton(ui.get("back", "Back"), callback_data="settings_back")]]
+        keyboard = [
+            [InlineKeyboardButton(f"🌐 {ui.get('settings_change_lang', '修改语言')}", callback_data="settings_language")],
+            [InlineKeyboardButton(ui.get("back", "Back"), callback_data="settings_back")],
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            f"✓ Language updated to {lang_name}\n\n"
-            f"All future messages will be in {lang_name}.",
+            f"✓ {ui.get('lang_updated', 'Language updated to')} {lang_name}\n\n"
+            f"{ui.get('lang_future_msg', 'All future messages will be in')} {lang_name}.",
             reply_markup=reply_markup
         )
         

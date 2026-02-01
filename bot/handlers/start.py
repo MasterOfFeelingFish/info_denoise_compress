@@ -544,49 +544,52 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.effective_user
     telegram_id = str(user.id)
     existing_user = get_user(telegram_id)
+    
+    # Get user's language setting
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     if existing_user:
         from handlers.admin import is_admin
         
         keyboard = [
-            [InlineKeyboardButton("查看今日简报", callback_data="view_digest")],
+            [InlineKeyboardButton(ui["menu_view_digest"], callback_data="view_digest")],
             [
-                InlineKeyboardButton("偏好设置", callback_data="update_preferences"),
-                InlineKeyboardButton("信息源", callback_data="manage_sources"),
+                InlineKeyboardButton(ui["menu_preferences"], callback_data="update_preferences"),
+                InlineKeyboardButton(ui["menu_sources"], callback_data="manage_sources"),
             ],
-            [InlineKeyboardButton("查看统计", callback_data="view_stats")],
+            [InlineKeyboardButton(ui["menu_stats"], callback_data="view_stats")],
         ]
         
         # Add admin panel button for admins only
         if is_admin(user.id):
-            keyboard.append([InlineKeyboardButton("🛡️ 管理员控制台", callback_data="admin_panel")])
+            keyboard.append([InlineKeyboardButton(ui["menu_admin"], callback_data="admin_panel")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            f"欢迎回来，{user.first_name}\n"
-            f"{'─' * 24}\n\n"
-            "你的个性化 Web3 情报简报。\n"
-            "每日精选，智能推送。\n\n"
-            "请选择操作：",
+            f"{ui['welcome_back'].format(name=user.first_name)}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui['welcome_back_desc']}\n\n"
+            f"{ui['welcome_choose']}",
             reply_markup=reply_markup
         )
     else:
         keyboard = [
-            [InlineKeyboardButton("开始使用", callback_data="start_onboarding")],
-            [InlineKeyboardButton("了解更多", callback_data="learn_more")],
+            [InlineKeyboardButton(ui.get("btn_start", "开始使用"), callback_data="start_onboarding")],
+            [InlineKeyboardButton(ui.get("btn_learn_more", "了解更多"), callback_data="learn_more")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            "Web3 每日简报\n"
-            f"{'─' * 24}\n\n"
-            "你的个性化情报助手。\n\n"
-            "我们做什么：\n"
-            "  • 每日扫描 50+ 信息源\n"
-            "  • 过滤噪音，精选内容\n"
-            "  • 推送真正重要的信息\n\n"
-            "每天节省约 2 小时阅读时间",
+            f"{ui.get('onboarding_title', 'Web3 每日简报')}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui.get('onboarding_welcome', '你的个性化情报助手。')}\n\n"
+            f"{ui.get('onboarding_what_we_do', '我们做什么')}:\n"
+            f"  • {ui.get('feature_scan', '每日扫描 50+ 信息源')}\n"
+            f"  • {ui.get('feature_filter', '过滤噪音，精选内容')}\n"
+            f"  • {ui.get('feature_push', '推送真正重要的信息')}\n\n"
+            f"{ui.get('time_save', '每天节省约 2 小时阅读时间')}",
             reply_markup=reply_markup
         )
 
@@ -701,20 +704,24 @@ async def update_preferences(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Redirect to settings for preference update."""
     query = update.callback_query
     await safe_answer_callback_query(query)
+    
+    telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     keyboard = [
         [
-            InlineKeyboardButton("查看", callback_data="settings_view"),
-            InlineKeyboardButton("更新", callback_data="settings_update"),
+            InlineKeyboardButton(ui["settings_view"], callback_data="settings_view"),
+            InlineKeyboardButton(ui["settings_update"], callback_data="settings_update"),
         ],
-        [InlineKeyboardButton("返回", callback_data="back_to_start")],
+        [InlineKeyboardButton(ui["back"], callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        "偏好设置\n"
-        f"{'─' * 24}\n\n"
-        "管理你的 Web3 每日简报偏好。",
+        f"{ui['settings_title']}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui['settings_desc']}",
         reply_markup=reply_markup
     )
 
@@ -723,22 +730,25 @@ async def manage_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Redirect to sources management."""
     query = update.callback_query
     await safe_answer_callback_query(query)
+    
+    telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     keyboard = [
         [
-            InlineKeyboardButton("Twitter", callback_data="sources_twitter"),
-            InlineKeyboardButton("网站", callback_data="sources_websites"),
+            InlineKeyboardButton(ui["sources_twitter"], callback_data="sources_twitter"),
+            InlineKeyboardButton(ui["sources_websites"], callback_data="sources_websites"),
         ],
-        [InlineKeyboardButton("推荐信息源", callback_data="sources_suggest")],
-        [InlineKeyboardButton("返回", callback_data="back_to_start")],
+        [InlineKeyboardButton(ui["sources_suggest"], callback_data="sources_suggest")],
+        [InlineKeyboardButton(ui["back"], callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        "信息源管理\n"
-        f"{'─' * 24}\n\n"
-        "我们监控多个信息源为你生成简报。\n"
-        "查看当前信息源或推荐新的。",
+        f"{ui['sources_title']}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui['sources_choose_category']}",
         reply_markup=reply_markup
     )
 
@@ -803,50 +813,55 @@ async def view_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     from services.profile_updater import analyze_feedback_trends
 
-    def _translate_trend(trend: str) -> str:
-        translations = {
-            "improving": "改善中",
-            "declining": "下降中",
-            "stable": "稳定",
-            "no_data": "暂无数据",
-        }
-        return translations.get(trend, trend.replace('_', ' '))
-
     user = update.effective_user
     telegram_id = str(user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
+    def _translate_trend(trend: str) -> str:
+        trend_map = {
+            "improving": ui.get("stats_trend_improving", "改善中"),
+            "declining": ui.get("stats_trend_declining", "下降中"),
+            "stable": ui.get("stats_trend_stable", "稳定"),
+            "no_data": ui.get("stats_trend_no_data", "暂无数据"),
+        }
+        return trend_map.get(trend, trend.replace('_', ' '))
 
     db_user = get_user(telegram_id)
     if not db_user:
-        keyboard = [[InlineKeyboardButton("返回", callback_data="back_to_start")]]
+        keyboard = [[InlineKeyboardButton(ui["back"], callback_data="back_to_start")]]
         await query.edit_message_text(
-            "你还没有注册。请使用 /start 开始。",
+            ui["not_registered"],
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
 
     trends = await analyze_feedback_trends(telegram_id, days=30)
+    
+    created_date = db_user.get('created', '----')[:10]
+    issues_line = f"  {ui.get('stats_main_issues', '主要问题')}         {', '.join(trends['common_issues'][:2])}" if trends['common_issues'] else ""
 
-    stats_text = f"""你的统计
-{'─' * 24}
+    stats_text = f"""{ui.get('stats_your_stats', '你的统计')}
+{ui['divider']}
 
-注册时间：{db_user.get('created', '未知')[:10]}
+{ui.get('stats_registered', '注册时间：{date}').format(date=created_date)}
 
-最近 30 天
-  反馈次数         {trends['total_feedbacks']}
-  正面评价         {trends['positive_count']}
-  负面评价         {trends['negative_count']}
-  满意度           {trends['positive_rate']:.0%}
-  趋势             {_translate_trend(trends['trend'])}
-{f"  主要问题         {', '.join(trends['common_issues'][:2])}" if trends['common_issues'] else ""}
+{ui.get('stats_last_30_days', '最近 30 天')}
+  {ui.get('stats_feedback_count', '反馈次数')}         {trends['total_feedbacks']}
+  {ui.get('stats_positive', '正面评价')}         {trends['positive_count']}
+  {ui.get('stats_negative', '负面评价')}         {trends['negative_count']}
+  {ui.get('stats_satisfaction', '满意度')}           {trends['positive_rate']:.0%}
+  {ui.get('stats_trend', '趋势')}             {_translate_trend(trends['trend'])}
+{issues_line}
 
-{'─' * 24}
+{ui['divider']}
 
-使用 /settings 调整偏好设置。"""
+{ui.get('stats_settings_hint', '使用 /settings 调整偏好设置。')}"""
 
     keyboard = [
         [
-            InlineKeyboardButton("更新偏好", callback_data="settings_update"),
-            InlineKeyboardButton("返回", callback_data="back_to_start"),
+            InlineKeyboardButton(ui["settings_update"], callback_data="settings_update"),
+            InlineKeyboardButton(ui["back"], callback_data="back_to_start"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)

@@ -114,6 +114,9 @@ PUSH_QUIET_END = _parse_int_env("PUSH_QUIET_END", 7)       # 07:00 结束静默
 # 检查频率（分钟），用于 user_interval 模式，每隔多少分钟检查一次到期用户
 PUSH_CHECK_INTERVAL = _parse_int_env("PUSH_CHECK_INTERVAL", 30)
 
+# 暂停推送开关（调试用）- 设置为 true 可暂停所有定时推送
+PAUSE_PUSH = os.getenv("PAUSE_PUSH", "").lower() in ("true", "1", "yes")
+
 # Data Directory
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 
@@ -121,6 +124,10 @@ DATA_DIR = os.getenv("DATA_DIR", "./data")
 # Support multiple admins (comma-separated)
 _admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "") or os.getenv("ADMIN_TELEGRAM_ID", "")
 ADMIN_TELEGRAM_IDS = [id.strip() for id in _admin_ids_str.split(",") if id.strip()]
+
+# Rate Limiting Configuration (防止高频交互攻击)
+# 每用户每分钟最大交互次数，设为 0 表示禁用频率限制
+RATE_LIMIT_PER_MINUTE = _parse_int_env("RATE_LIMIT_PER_MINUTE", 30)
 
 # Legacy single admin (for backward compatibility)
 ADMIN_TELEGRAM_ID = ADMIN_TELEGRAM_IDS[0] if ADMIN_TELEGRAM_IDS else ""
