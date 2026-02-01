@@ -203,30 +203,36 @@ async def handle_reason_selection(update: Update, context: ContextTypes.DEFAULT_
     telegram_id = str(user.id)
     callback_data = query.data
 
+    # Get user language
+    from utils.json_storage import get_user_language
+    from locales.ui_strings import get_ui_locale
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     if callback_data == "feedback_cancel":
-        await query.edit_message_text("已取消反馈。")
+        await query.edit_message_text(ui.get("feedback_cancelled", "Feedback cancelled."))
         return ConversationHandler.END
 
-    # Parse reason from callback data
+    # Parse reason from callback data (keep internal keys, display localized text)
     reason_map = {
-        "reason_not_relevant_": "内容不相关",
-        "reason_missed_": "漏掉重要信息",
-        "reason_too_much_": "信息太多",
-        "reason_too_few_": "信息太少",
-        "reason_wrong_topics_": "主题不对",
+        "reason_not_relevant_": ("not_relevant", ui.get("feedback_reason_not_relevant", "Not relevant")),
+        "reason_missed_": ("missed", ui.get("feedback_reason_missed", "Missing important content")),
+        "reason_too_much_": ("too_much", ui.get("feedback_reason_too_much", "Too much content")),
+        "reason_too_few_": ("too_few", ui.get("feedback_reason_too_few", "Too little content")),
+        "reason_wrong_topics_": ("wrong_topics", ui.get("feedback_reason_wrong_topics", "Wrong topics")),
     }
 
     selected_reason = None
-    for prefix, reason_text in reason_map.items():
+    reason_display = None
+    for prefix, (reason_key, reason_text) in reason_map.items():
         if callback_data.startswith(prefix):
-            selected_reason = reason_text
+            selected_reason = reason_key
+            reason_display = reason_text
             break
 
     if callback_data.startswith("reason_other_"):
-        context.user_data["feedback_reason_selected"] = ["其他"]
-        await query.edit_message_text(
-            "请输入你的反馈意见："
-        )
+        context.user_data["feedback_reason_selected"] = ["other"]
+        await query.edit_message_text(ui.get("feedback_input_prompt", "Please enter your feedback:"))
         return ENTERING_CUSTOM_REASON
 
     if selected_reason:
@@ -247,11 +253,12 @@ async def handle_reason_selection(update: Update, context: ContextTypes.DEFAULT_
         # Clear item feedbacks after saving
         context.user_data.pop("item_feedbacks", None)
 
+        issue_msg = ui.get('feedback_issue', 'Issue: {reason}').format(reason=reason_display)
         await query.edit_message_text(
-            f"已收到反馈\n"
-            f"{'─' * 24}\n\n"
-            f"问题：{selected_reason}\n\n"
-            "我们会调整你的偏好设置。"
+            f"{ui.get('feedback_received_title', 'Feedback Received')}\n"
+            f"{ui['divider']}\n\n"
+            f"{issue_msg}\n\n"
+            f"{ui.get('feedback_will_adjust', 'We will adjust your preferences.')}"
         )
 
         logger.info(f"Negative feedback from {telegram_id}: {selected_reason}")
@@ -265,6 +272,12 @@ async def handle_custom_reason(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.effective_user
     telegram_id = str(user.id)
     custom_text = update.message.text
+
+    # Get user language
+    from utils.json_storage import get_user_language
+    from locales.ui_strings import get_ui_locale
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     # Get accumulated item feedbacks from session
     item_feedbacks = context.user_data.get("item_feedbacks", [])
@@ -282,10 +295,9 @@ async def handle_custom_reason(update: Update, context: ContextTypes.DEFAULT_TYP
     track_event(telegram_id, "feedback_negative", {"reason": "custom", "text": custom_text[:100]})
 
     await update.message.reply_text(
-        f"已收到反馈\n"
-        f"{'─' * 24}\n\n"
-        "感谢你的详细反馈。\n"
-        "我们会用它来改进你的简报。"
+        f"{ui.get('feedback_received_title', 'Feedback Received')}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui.get('feedback_thanks_detail', 'Thanks for your detailed feedback!')}"
     )
 
     logger.info(f"Custom feedback from {telegram_id}: {custom_text[:50]}...")

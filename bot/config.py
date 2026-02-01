@@ -117,6 +117,9 @@ PUSH_CHECK_INTERVAL = _parse_int_env("PUSH_CHECK_INTERVAL", 30)
 # 暂停推送开关（调试用）- 设置为 true 可暂停所有定时推送
 PAUSE_PUSH = os.getenv("PAUSE_PUSH", "").lower() in ("true", "1", "yes")
 
+# Chat Context Days - 聊天上下文天数 (0=仅今天, 1=+昨天, etc.)
+CHAT_CONTEXT_DAYS = _parse_int_env("CHAT_CONTEXT_DAYS", 1)
+
 # Data Directory
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 

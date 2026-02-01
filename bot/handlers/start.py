@@ -366,10 +366,15 @@ async def retry_round_2_callback(update: Update, context: ContextTypes.DEFAULT_T
 async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Save confirmed user profile and complete registration."""
     query = update.callback_query
+    
+    # Get language settings from context
+    lang = context.user_data.get("language", "zh")
+    ui = get_ui_locale(lang)
+    user_language = context.user_data.get("language_native", get_language_native_name(lang))
 
     # Anti-debounce: Prevent duplicate clicks
     if context.user_data.get("processing"):
-        await safe_answer_callback_query(query, "正在处理中，请稍候...", show_alert=True)
+        await safe_answer_callback_query(query, ui.get("processing_wait", "Processing..."), show_alert=True)
         return CONFIRM_PROFILE
 
     context.user_data["processing"] = True
@@ -377,14 +382,10 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     user = update.effective_user
     telegram_id = str(user.id)
-    
-    # Get language settings from context
-    lang = context.user_data.get("language", "zh")
-    user_language = context.user_data.get("language_native", get_language_native_name(lang))
 
     # Show progress message
     await query.edit_message_text(
-        "⏳ <i>正在保存你的偏好设置，请稍候...</i>",
+        f"<i>{ui.get('saving_prefs', '⏳ Saving preferences...')}</i>",
         parse_mode="HTML"
     )
 
@@ -418,11 +419,11 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error(f"Failed to generate profile: {e}")
         context.user_data.pop("processing", None)  # Release lock on error
         keyboard = [
-            [InlineKeyboardButton("重试", callback_data="confirm_profile")],
-            [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+            [InlineKeyboardButton(ui.get("retry", "Retry"), callback_data="confirm_profile")],
+            [InlineKeyboardButton(ui.get("back_to_main", "Back to Main"), callback_data="back_to_start")],
         ]
         await query.edit_message_text(
-            "AI 服务暂时不可用，请稍后重试。",
+            ui.get("error_occurred", "An error occurred. Please try again later."),
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return ConversationHandler.END
@@ -440,49 +441,22 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     default_sources_preview = ", ".join(list(DEFAULT_USER_SOURCES.get("websites", {}).keys())[:3])
 
     keyboard = [
-        [InlineKeyboardButton("🚀 立即开始（推荐）", callback_data="source_default_no_push")],
-        [InlineKeyboardButton("🎯 我要添加自己的信息源", callback_data="source_custom_no_push")],
+        [InlineKeyboardButton(ui.get("source_choice_default", "🚀 Start Now (Recommended)"), callback_data="source_default_no_push")],
+        [InlineKeyboardButton(ui.get("source_choice_custom", "🎯 Add My Own Sources"), callback_data="source_custom_no_push")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        "✅ 偏好保存成功！\n\n"
-        "你的兴趣画像已记录完成。\n\n"
-        "📅 <b>推送时间：每天自动推送（约 24 小时一次）</b>\n\n"
-        "💡 <b>为什么是每天一次？</b>\n"
-        "系统会持续监控你订阅的信息源，积攒一整天的内容后，\n"
-        "由 AI 集中筛选出最符合你画像的精华，\n"
-        "避免碎片化打扰，一次看完当天最值得关注的信息。\n\n"
-        "━━━━━━ 📋 你将收到的简报示例 ━━━━━━\n\n"
-        "┌─────────────────────────────┐\n"
-        "│     <b>Web3 每日简报</b>            │\n"
-        "│  ━━━━━━━━━━━━━━━━━━━━━━━━━  │\n"
-        "│                             │\n"
-        "│  📊 监控 11 个源 · 扫描 1026 条 │\n"
-        "│     为你精选 25 条            │\n"
-        "│                             │\n"
-        "│  🤖 AI 摘要：今日市场关注...   │\n"
-        "│                             │\n"
-        "│  ──── <b>今日必看</b> ────          │\n"
-        "│  🔴 1. 白宫召集加密行业高管会议 │\n"
-        "│  💡 影响稳定币套利边界...      │\n"
-        "│    [👍 有用] [👎 不感兴趣]    │\n"
-        "│                             │\n"
-        "│  ──── <b>推荐</b> ────              │\n"
-        "│  🔵 2. Tether 每周买入黄金    │\n"
-        "│  🔵 3. 贵金属合约成交量激增    │\n"
-        "│  ...共 25 条精选...          │\n"
-        "│                             │\n"
-        "│  这份简报有帮助吗？            │\n"
-        "│    [👍 有用] [👎 一般]        │\n"
-        "└─────────────────────────────┘\n\n"
-        "💬 每条内容都有反馈按钮，你的反馈会让 AI 越来越懂你！\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📰 <b>信息源设置</b>\n\n"
-        f"我们已为你预配置了优质信息源：\n"
-        f"📌 {default_sources_preview} 等\n\n"
-        f"💡 <b>建议先体验默认源</b>，之后可随时在设置中\n"
-        f"添加你关注的 Twitter 账号或网站。",
+        f"{ui.get('prefs_saved_title', '✅ Preferences Saved!')}\n\n"
+        f"{ui.get('prefs_saved_desc', 'Your interest profile has been recorded.')}\n\n"
+        f"{ui.get('push_time_title', '📅 Push Schedule')}\n"
+        f"{ui.get('push_time_desc', 'Daily at 9:00 AM')}\n\n"
+        f"{ui.get('push_daily_reason', '💡 Why once daily?')}\n"
+        f"{ui.get('push_daily_explain', 'AI summarizes 24h content to avoid overload.')}\n\n"
+        f"{ui['divider']}\n\n"
+        f"📰 <b>{ui.get('sources_title', 'Sources')}</b>\n\n"
+        f"📌 {default_sources_preview}\n\n"
+        f"{ui.get('push_now_desc', 'After selecting sources, you can start immediately.')}",
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
@@ -494,26 +468,26 @@ async def learn_more(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     """Show more information about the service."""
     query = update.callback_query
     await safe_answer_callback_query(query)
+    
+    user = update.effective_user
+    telegram_id = str(user.id) if user else "0"
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     keyboard = [
-        [InlineKeyboardButton("开始使用", callback_data="start_onboarding")],
-        [InlineKeyboardButton("返回", callback_data="back_to_start")],
+        [InlineKeyboardButton(ui.get("btn_start", "Start"), callback_data="start_onboarding")],
+        [InlineKeyboardButton(ui.get("back", "Back"), callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        "工作原理\n"
-        f"{'─' * 24}\n\n"
-        "第 1 步  告诉我们你的兴趣\n"
-        "        3 轮 AI 对话快速完成\n\n"
-        "第 2 步  我们 24/7 监控信息源\n"
-        "        50+ Twitter 账号和网站\n\n"
-        "第 3 步  AI 智能过滤噪音\n"
-        "        根据你的画像个性化筛选\n\n"
-        "第 4 步  每日推送简报\n"
-        "        北京时间 9:00\n\n"
-        "第 5 步  持续优化\n"
-        "        根据你的反馈不断学习",
+        f"{ui.get('learn_more_title', 'Learn More')}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui.get('learn_more_what', 'What we do:')}\n"
+        f"{ui.get('learn_more_scan', '• Scan 50+ sources daily')}\n"
+        f"{ui.get('learn_more_filter', '• Filter noise, curate content')}\n"
+        f"{ui.get('learn_more_push', '• Push what truly matters')}\n\n"
+        f"{ui.get('learn_more_time_save', 'Save ~2 hours daily')}",
         reply_markup=reply_markup
     )
 
@@ -521,16 +495,21 @@ async def learn_more(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the conversation."""
     context.user_data.clear()
+    
+    user = update.effective_user
+    telegram_id = str(user.id) if user else "0"
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     keyboard = [
-        [InlineKeyboardButton("开始设置", callback_data="start_onboarding")],
-        [InlineKeyboardButton("了解更多", callback_data="learn_more")],
+        [InlineKeyboardButton(ui.get("btn_start", "Start"), callback_data="start_onboarding")],
+        [InlineKeyboardButton(ui.get("btn_learn_more", "Learn More"), callback_data="learn_more")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        "设置已取消。\n\n"
-        "随时可以重新开始。",
+        f"{ui.get('cancelled', 'Cancelled')}\n\n"
+        f"{ui.get('can_restart', 'You can start again anytime.')}",
         reply_markup=reply_markup
     )
     return ConversationHandler.END
@@ -606,6 +585,8 @@ async def view_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     from datetime import datetime
 
     telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
     today = datetime.now().strftime("%Y-%m-%d")
 
     # Get today's stats
@@ -614,17 +595,17 @@ async def view_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not stats or not stats.get("filtered_items"):
         # No digest available yet
         keyboard = [
-            [InlineKeyboardButton("返回", callback_data="back_to_start")],
+            [InlineKeyboardButton(ui.get("back", "Back"), callback_data="back_to_start")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
+        push_time_msg = ui.get('digest_push_time', '⏰ Push time: {time}').format(time=f'{PUSH_HOUR:02d}:{PUSH_MINUTE:02d}')
         await query.edit_message_text(
-            "今日简报\n"
-            f"{'─' * 24}\n\n"
-            f"推送时间：北京时间 {PUSH_HOUR:02d}:{PUSH_MINUTE:02d}\n\n"
-            "你的简报将自动推送。\n"
-            "请在推送时间后查看。\n\n"
-            "提示：使用 /settings 自定义偏好设置。",
+            f"{ui.get('digest_today', 'Today Digest')}\n"
+            f"{ui['divider']}\n\n"
+            f"{push_time_msg}\n\n"
+            f"{ui.get('digest_auto_push', 'Your digest will be pushed automatically.')}\n\n"
+            f"{ui.get('digest_hint', '💡 Tip: Use /settings to customize preferences.')}",
             reply_markup=reply_markup
         )
         return
@@ -839,12 +820,13 @@ async def view_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     trends = await analyze_feedback_trends(telegram_id, days=30)
     
     created_date = db_user.get('created', '----')[:10]
-    issues_line = f"  {ui.get('stats_main_issues', '主要问题')}         {', '.join(trends['common_issues'][:2])}" if trends['common_issues'] else ""
+    issues_line = f"  {ui.get('stats_main_issues', 'Main issues')}         {', '.join(trends['common_issues'][:2])}" if trends['common_issues'] else ""
+    registered_msg = ui.get('stats_registered', 'Registered: {date}').format(date=created_date)
 
-    stats_text = f"""{ui.get('stats_your_stats', '你的统计')}
+    stats_text = f"""{ui.get('stats_your_stats', 'Your Statistics')}
 {ui['divider']}
 
-{ui.get('stats_registered', '注册时间：{date}').format(date=created_date)}
+{registered_msg}
 
 {ui.get('stats_last_30_days', '最近 30 天')}
   {ui.get('stats_feedback_count', '反馈次数')}         {trends['total_feedbacks']}
@@ -1290,12 +1272,15 @@ async def trigger_first_digest_internal(
     """Internal function to trigger first digest."""
     query = update.callback_query
     telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
+    source_type = ui.get("first_digest_using_default", "📡 Using default sources") if use_default else ui.get("first_digest_using_custom", "🎯 Using your sources")
     await query.edit_message_text(
-        "正在为你准备首份简报...\n\n"
-        f"{'📡 使用默认信息源' if use_default else '🎯 使用你配置的信息源'}\n"
-        "🤖 AI 智能筛选中\n\n"
-        "预计 10-20 秒，请稍候..."
+        f"{ui.get('first_digest_generating', 'Preparing your first digest...')}\n\n"
+        f"{source_type}\n"
+        f"{ui.get('first_digest_ai_filtering', '🤖 AI filtering')}\n\n"
+        f"{ui.get('expected_time', 'This may take 10-20 seconds...')}"
     )
 
     try:
@@ -1306,9 +1291,7 @@ async def trigger_first_digest_internal(
         user = get_user(telegram_id)
 
         if not user:
-            await query.edit_message_text(
-                "用户信息未找到，请使用 /start 重新开始。"
-            )
+            await query.edit_message_text(ui.get("user_not_found", "User not found. Please use /start."))
             return
 
         # Trigger digest generation with timeout protection
@@ -1319,13 +1302,11 @@ async def trigger_first_digest_internal(
             )
         except asyncio.TimeoutError:
             logger.error(f"Digest generation timeout for {telegram_id} (>{DIGEST_TIMEOUT}s)")
-            keyboard = [
-                [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
-            ]
+            keyboard = [[InlineKeyboardButton(ui.get("back_to_main", "Back to Main"), callback_data="back_to_start")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
-                f"⏱️ 生成超时\n\n"
-                f"服务器繁忙，请等待下次自动推送（约 24 小时后）。",
+                f"{ui.get('first_digest_timeout', '⏱️ Generation timed out')}\n\n"
+                f"{ui.get('first_digest_timeout_desc', 'Server is busy. Next digest in ~24 hours.')}",
                 reply_markup=reply_markup
             )
             return
@@ -1335,58 +1316,59 @@ async def trigger_first_digest_internal(
 
             if items_count == 0:
                 # No content - guide user to add sources
-                keyboard = [[InlineKeyboardButton("添加信息源", callback_data="manage_sources")]]
+                keyboard = [[InlineKeyboardButton(ui.get("menu_sources", "Sources"), callback_data="manage_sources")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 await send_message_safe(
                     context,
                     chat_id=int(telegram_id),
-                    text="暂时没有新内容。\n\n"
-                         "💡 建议：\n"
-                         "  • 添加更多信息源（/sources）\n"
-                         "  • 下次推送：约 24 小时后",
+                    text=f"{ui.get('first_digest_no_content', 'No new content available.')}\n\n"
+                         f"{ui.get('first_digest_suggestion', '💡 Suggestion')}\n"
+                         f"{ui.get('first_digest_add_sources', '• Add more sources (/sources)')}\n"
+                         f"{ui.get('next_push_time', 'Next push: ~24 hours')}",
                     reply_markup=reply_markup
                 )
             else:
                 # Success - digest messages already sent
-                keyboard = [[InlineKeyboardButton("返回主菜单", callback_data="back_to_start")]]
+                keyboard = [[InlineKeyboardButton(ui.get("back_to_main", "Back to Main"), callback_data="back_to_start")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
+                items_msg = ui.get('first_digest_items_count', 'Curated {count} items').format(count=items_count)
                 await send_message_safe(
                     context,
                     chat_id=int(telegram_id),
-                    text=f"✅ 首份简报推送完成！\n\n"
-                         f"已为你精选 {items_count} 条内容。\n\n"
-                         f"💡 提示：\n"
-                         f"  • 每条内容都有反馈按钮（👍/👎）\n"
-                         f"  • 你的反馈会让简报更懂你\n"
-                         f"  • 下次推送：约 24 小时后\n\n"
-                         f"使用 /help 查看更多功能。",
+                    text=f"{ui.get('first_digest_complete', '✅ First digest sent!')}\n\n"
+                         f"{items_msg}\n\n"
+                         f"{ui.get('first_digest_tip_title', '💡 Tips')}\n"
+                         f"{ui.get('first_digest_tip_feedback', '• Use feedback buttons to improve')}\n"
+                         f"{ui.get('first_digest_tip_settings', '• /settings to adjust preferences')}\n"
+                         f"{ui.get('next_push_time', 'Next push: ~24 hours')}",
                     reply_markup=reply_markup
                 )
         else:
             # Error occurred
-            error_msg = result.get("error", "未知错误")
+            error_msg = result.get("error", "Unknown error")
             keyboard = [
-                [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
-                [InlineKeyboardButton("查看帮助", callback_data="show_help")],
+                [InlineKeyboardButton(ui.get("back_to_main", "Back to Main"), callback_data="back_to_start")],
+                [InlineKeyboardButton(ui.get("help_title", "Help"), callback_data="show_help")],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
+            reason_msg = ui.get('first_digest_reason', 'Reason: {reason}').format(reason=error_msg[:100])
             await query.edit_message_text(
-                f"推送失败\n\n"
-                f"原因：{error_msg[:100]}\n\n"
-                f"请等待下次自动推送（约 24 小时后）。",
+                f"{ui.get('first_digest_failed', 'Push failed')}\n\n"
+                f"{reason_msg}\n\n"
+                f"{ui.get('first_digest_wait_next', 'Please wait for the next push (~24 hours).')}",
                 reply_markup=reply_markup
             )
 
     except Exception as e:
         logger.error(f"First digest trigger failed for {telegram_id}: {e}")
-        keyboard = [[InlineKeyboardButton("返回主菜单", callback_data="back_to_start")]]
+        keyboard = [[InlineKeyboardButton(ui.get("back_to_main", "Back to Main"), callback_data="back_to_start")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            "推送失败，请等待下次自动推送（约 24 小时后）。",
+            f"{ui.get('first_digest_failed', 'Push failed')}, {ui.get('first_digest_wait_next', 'please wait for the next push.')}",
             reply_markup=reply_markup
         )
 

@@ -117,33 +117,30 @@ async def start_profile_update(update: Update, context: ContextTypes.DEFAULT_TYP
 
     user = update.effective_user
     telegram_id = str(user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     profile = get_user_profile(telegram_id)
+    examples = ui.get("settings_examples", "Examples:\n  • 'Add more DeFi'\n  • 'Less NFT'\n  • 'Focus on Arbitrum'")
 
     if profile:
         await query.edit_message_text(
-            f"更新偏好\n"
-            f"{'─' * 24}\n\n"
-            "当前偏好：\n"
+            f"{ui.get('settings_update_title', 'Update Preferences')}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui.get('settings_current', 'Current preferences:')}\n"
             f"{html.escape(profile)}\n\n"
-            f"{'─' * 24}\n\n"
-            "你想修改什么？\n\n"
-            "示例：\n"
-            "  • '增加 DeFi 内容'\n"
-            "  • '减少 NFT 相关'\n"
-            "  • '关注 Arbitrum'\n\n"
-            "请输入或 /cancel 取消："
+            f"{ui['divider']}\n\n"
+            f"{ui.get('settings_what_change', 'What would you like to change?')}\n\n"
+            f"{examples}\n\n"
+            f"{ui.get('settings_input_or_cancel', 'Enter or /cancel:')}"
         )
     else:
         await query.edit_message_text(
-            f"更新偏好\n"
-            f"{'─' * 24}\n\n"
-            "还没有设置偏好。\n\n"
-            "请描述你的兴趣：\n\n"
-            "示例：'我对 DeFi 感兴趣，\n"
-            "主要关注 Uniswap 和 Aave。\n"
-            "我关注 Solana 和以太坊。'\n\n"
-            "请输入或 /cancel 取消："
+            f"{ui.get('settings_update_title', 'Update Preferences')}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui.get('settings_no_prefs', 'No preferences set yet.')}\n\n"
+            f"{examples}\n\n"
+            f"{ui.get('settings_input_or_cancel', 'Enter or /cancel:')}"
         )
 
     return AWAITING_PROFILE_UPDATE
@@ -154,6 +151,8 @@ async def handle_profile_update(update: Update, context: ContextTypes.DEFAULT_TY
     user = update.effective_user
     telegram_id = str(user.id)
     user_input = update.message.text
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     # Get current profile
     current_profile = get_user_profile(telegram_id) or ""
@@ -179,11 +178,9 @@ async def handle_profile_update(update: Update, context: ContextTypes.DEFAULT_TY
         track_event(telegram_id, "settings_changed", {"action": "update", "input": user_input[:100]})
 
         await update.message.reply_text(
-            f"偏好已更新\n"
-            f"{'─' * 24}\n\n"
-            f"{html.escape(updated_profile)}\n\n"
-            f"{'─' * 24}\n"
-            "下次简报将反映这些变化。"
+            f"{ui.get('settings_updated_success', '✅ Preferences Updated')}\n"
+            f"{ui['divider']}\n\n"
+            f"{html.escape(updated_profile)}"
         )
 
         logger.info(f"Updated profile for {telegram_id}")
@@ -191,13 +188,12 @@ async def handle_profile_update(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.error(f"Failed to update profile for {telegram_id}: {e}")
         keyboard = [
-            [InlineKeyboardButton("重试", callback_data="settings_update")],
-            [InlineKeyboardButton("返回设置", callback_data="settings_back")],
+            [InlineKeyboardButton(ui.get("retry", "Retry"), callback_data="settings_update")],
+            [InlineKeyboardButton(ui.get("settings_back", "Back"), callback_data="settings_back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "暂时无法更新偏好。\n\n"
-            "可能是临时问题，请稍后重试。",
+            ui.get("settings_update_failed", "Unable to update preferences. Please try again later."),
             reply_markup=reply_markup
         )
 
@@ -209,20 +205,23 @@ async def confirm_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     query = update.callback_query
     await safe_answer_callback_query(query)
 
+    user = update.effective_user
+    telegram_id = str(user.id) if user else "0"
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     keyboard = [
         [
-            InlineKeyboardButton("取消", callback_data="settings_back"),
-            InlineKeyboardButton("确认重置", callback_data="settings_reset_confirm"),
+            InlineKeyboardButton(ui.get("btn_cancel", "Cancel"), callback_data="settings_back"),
+            InlineKeyboardButton(ui.get("btn_confirm_reset", "Confirm Reset"), callback_data="settings_reset_confirm"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"重置偏好\n"
-        f"{'─' * 24}\n\n"
-        "这将删除你当前的偏好设置。\n"
-        "你需要重新设置。\n\n"
-        "确定要重置吗？",
+        f"{ui.get('settings_reset_title', 'Reset Preferences')}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui.get('settings_reset_confirm_msg', 'This will delete your preferences. Are you sure?')}",
         reply_markup=reply_markup
     )
 
@@ -234,22 +233,24 @@ async def execute_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     user = update.effective_user
     telegram_id = str(user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     # Reset profile to default
-    default_profile = """[用户类型]
-Web3 新用户，通用兴趣
+    default_profile = """[User Type]
+Web3 new user, general interest
 
-[关注领域]
-- Web3 综合新闻
-- 主要生态系统更新
-- 市场重大动态
+[Focus Areas]
+- Web3 general news
+- Major ecosystem updates
+- Market dynamics
 
-[内容偏好]
-- 新闻和分析均衡
-- 适中数量 (10-15 条)
+[Content Preferences]
+- Balanced news and analysis
+- Moderate amount (10-15 items)
 
-[明确不喜欢]
-- 暂无"""
+[Dislikes]
+- None yet"""
 
     save_user_profile(telegram_id, default_profile)
 
@@ -257,10 +258,9 @@ Web3 新用户，通用兴趣
     track_event(telegram_id, "settings_changed", {"action": "reset"})
 
     await query.edit_message_text(
-        f"偏好已重置\n"
-        f"{'─' * 24}\n\n"
-        "你的偏好已重置为默认设置。\n\n"
-        "使用 /settings 自定义。"
+        f"{ui.get('settings_reset_done', '✅ Preferences Reset')}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui.get('settings_use_settings', 'Use /settings to customize.')}"
     )
 
     logger.info(f"Reset profile for {telegram_id}")
@@ -271,40 +271,47 @@ async def settings_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     query = update.callback_query
     await safe_answer_callback_query(query)
 
+    user = update.effective_user
+    telegram_id = str(user.id) if user else "0"
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     keyboard = [
-        [InlineKeyboardButton("查看偏好", callback_data="settings_view")],
+        [InlineKeyboardButton(ui.get("settings_view", "View Preferences"), callback_data="settings_view")],
         [
-            InlineKeyboardButton("更新", callback_data="settings_update"),
-            InlineKeyboardButton("重置", callback_data="settings_reset"),
+            InlineKeyboardButton(ui.get("settings_update", "Update"), callback_data="settings_update"),
+            InlineKeyboardButton(ui.get("settings_reset", "Reset"), callback_data="settings_reset"),
         ],
-        [InlineKeyboardButton("返回", callback_data="back_to_start")],
+        [InlineKeyboardButton(ui.get("back", "Back"), callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"偏好设置\n"
-        f"{'─' * 24}\n\n"
-        "管理你的偏好设置：\n"
-        "  • 查看当前偏好\n"
-        "  • 更新兴趣领域\n"
-        "  • 重置为默认",
+        f"{ui.get('settings_title', 'Preferences')}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui.get('settings_desc', 'Manage your preferences.')}",
         reply_markup=reply_markup
     )
 
 
 async def cancel_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel settings conversation."""
+    user = update.effective_user
+    telegram_id = str(user.id) if user else "0"
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     keyboard = [
         [
-            InlineKeyboardButton("设置", callback_data="settings_back"),
-            InlineKeyboardButton("主菜单", callback_data="back_to_start"),
+            InlineKeyboardButton(ui.get("settings_title", "Settings"), callback_data="settings_back"),
+            InlineKeyboardButton(ui.get("menu_main", "Main Menu"), callback_data="back_to_start"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        "已取消。\n\n"
-        "随时可以重新开始。",
+        f"{ui.get('cancelled', 'Cancelled')}\n\n"
+        f"{ui.get('can_restart', 'You can start again anytime.')}",
         reply_markup=reply_markup
     )
     return ConversationHandler.END

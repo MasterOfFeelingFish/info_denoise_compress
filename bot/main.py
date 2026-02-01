@@ -527,47 +527,51 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     def _translate_trend(trend: str) -> str:
         """Translate trend text to Chinese."""
         translations = {
-            "improving": "改善中",
-            "declining": "下降中",
-            "stable": "稳定",
-            "no_data": "暂无数据",
+            "improving": "improving",
+            "declining": "declining",
+            "stable": "stable",
+            "no_data": "no_data",
         }
         return translations.get(trend, trend.replace('_', ' '))
 
     user = update.effective_user
     telegram_id = str(user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
 
     db_user = get_user(telegram_id)
     if not db_user:
-        await update.message.reply_text(
-            "你还没有注册。请使用 /start 开始。"
-        )
+        await update.message.reply_text(ui.get("not_registered", "Please use /start to begin."))
         return
 
     # Get feedback trends
     trends = await analyze_feedback_trends(telegram_id, days=30)
 
-    stats_text = f"""你的统计
-{'─' * 24}
+    # Translate trend
+    trend_key = f"stats_trend_{_translate_trend(trends['trend'])}"
+    trend_text = ui.get(trend_key, trends['trend'])
 
-注册时间：{db_user.get('created', '未知')[:10]}
+    stats_text = f"""{ui.get('stats_your_stats', 'Your Statistics')}
+{ui['divider']}
 
-最近 30 天
-  反馈次数         {trends['total_feedbacks']}
-  正面评价         {trends['positive_count']}
-  负面评价         {trends['negative_count']}
-  满意度           {trends['positive_rate']:.0%}
-  趋势             {_translate_trend(trends['trend'])}
-{f"  主要问题         {', '.join(trends['common_issues'][:2])}" if trends['common_issues'] else ""}
+{ui.get('stats_registered', 'Registered')}: {db_user.get('created', 'Unknown')[:10]}
 
-{'─' * 24}
+{ui.get('stats_last_30_days', 'Last 30 days')}
+  {ui.get('stats_total_feedbacks', 'Feedbacks')}: {trends['total_feedbacks']}
+  {ui.get('stats_positive', 'Positive')}: {trends['positive_count']}
+  {ui.get('stats_negative', 'Negative')}: {trends['negative_count']}
+  {ui.get('stats_satisfaction', 'Satisfaction')}: {trends['positive_rate']:.0%}
+  {ui.get('stats_trend', 'Trend')}: {trend_text}
+{f"  {ui.get('stats_issues', 'Issues')}: {', '.join(trends['common_issues'][:2])}" if trends['common_issues'] else ""}
 
-使用 /settings 调整偏好设置。"""
+{ui['divider']}
+
+{ui.get('settings_use_settings', 'Use /settings to adjust preferences.')}"""
 
     keyboard = [
         [
-            InlineKeyboardButton("更新偏好", callback_data="settings_update"),
-            InlineKeyboardButton("主菜单", callback_data="back_to_start"),
+            InlineKeyboardButton(ui.get("settings_update", "Update Preferences"), callback_data="settings_update"),
+            InlineKeyboardButton(ui.get("menu_main", "Main Menu"), callback_data="back_to_start"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -840,7 +844,11 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 async def noop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle noop callback for already-feedback items."""
     query = update.callback_query
-    await safe_answer_callback_query(query, "已经反馈过了", show_alert=False)
+    user = query.from_user
+    telegram_id = str(user.id) if user else "0"
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+    await safe_answer_callback_query(query, ui.get("feedback_already", "Already submitted"), show_alert=False)
 
 
 async def show_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -848,49 +856,48 @@ async def show_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await safe_answer_callback_query(query)
 
+    user = query.from_user
+    telegram_id = str(user.id) if user else "0"
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     keyboard = [
         [
-            InlineKeyboardButton("主菜单", callback_data="back_to_start"),
-            InlineKeyboardButton("设置", callback_data="update_preferences"),
+            InlineKeyboardButton(ui.get("menu_main", "Main Menu"), callback_data="back_to_start"),
+            InlineKeyboardButton(ui.get("settings_title", "Settings"), callback_data="update_preferences"),
         ],
-        [InlineKeyboardButton("信息源", callback_data="manage_sources")],
+        [InlineKeyboardButton(ui.get("sources_title", "Sources"), callback_data="manage_sources")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    help_text = f"""帮助
-{'─' * 24}
+    help_text = f"""{ui.get('help_title', 'Help')}
+{ui['divider']}
 
-命令：
-  /start     主菜单
-  /settings  偏好设置
-  /sources   信息源管理
-  /stats     查看统计
-  /help      帮助信息
+{ui.get('help_commands', 'Commands:')}
+{ui.get('help_start', '  /start     Main menu')}
+{ui.get('help_settings', '  /settings  Preferences')}
+{ui.get('help_sources', '  /sources   Manage sources')}
+{ui.get('help_stats', '  /stats     View statistics')}
+{ui.get('help_help', '  /help      Help')}
 
-{'─' * 24}
+{ui['divider']}
 
-功能说明：
+{ui.get('help_features', 'Features:')}
 
-每日简报
-  每天自动推送（约 24 小时一次）。
-  内容分为「今日必看」「推荐」「其他」三个板块。
-  AI 根据你的偏好智能筛选 15-30 条精选内容。
+{ui.get('help_digest_title', 'Daily Digest')}
+{ui.get('help_digest_desc', '  Auto-pushed daily.')}
 
-偏好设置 (/settings)
-  查看或更新你的 Web3 兴趣偏好。
-  AI 会根据偏好个性化筛选每日简报。
+{ui.get('help_settings_title', 'Preferences (/settings)')}
+{ui.get('help_settings_desc', '  Update your interests.')}
 
-信息源管理 (/sources)
-  添加/删除你关注的 Twitter 账号或网站 RSS。
-  支持自定义个人信息源。
+{ui.get('help_sources_title', 'Sources (/sources)')}
+{ui.get('help_sources_desc', '  Manage your sources.')}
 
-统计 (/stats)
-  查看你的注册时间、反馈历史、满意度趋势。
+{ui.get('help_stats_title', 'Statistics (/stats)')}
+{ui.get('help_stats_desc', '  View your feedback history.')}
 
-反馈机制
-  每条推送消息都有反馈按钮（👍/👎）。
-  你的反馈会被收集并在每日凌晨批量更新偏好画像，
-  次日推送将体现你的最新偏好。
+{ui.get('help_feedback_title', 'Feedback')}
+{ui.get('help_feedback_desc', '  Use buttons to provide feedback.')}
 
 {'─' * 24}
 

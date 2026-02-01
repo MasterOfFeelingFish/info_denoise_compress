@@ -128,18 +128,17 @@ async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYP
         text = "\n".join(lines)
     else:
         text = (
-            f"网站信息源\n"
-            f"{'─' * 24}\n\n"
-            "还没有配置网站信息源。\n\n"
-            "点击「添加网站」添加 RSS 源。"
+            f"{ui.get('website_title', 'Website Sources')}\n"
+            f"{ui['divider']}\n\n"
+            f"{ui.get('website_empty', 'No website sources configured.')}"
         )
 
     keyboard = [
-        [InlineKeyboardButton("添加网站", callback_data="sources_add_website")],
+        [InlineKeyboardButton(ui.get("website_add", "Add Website"), callback_data="sources_add_website")],
     ]
     if website_sources:
-        keyboard.append([InlineKeyboardButton("删除网站", callback_data="sources_del_website")])
-    keyboard.append([InlineKeyboardButton("返回", callback_data="sources_back")])
+        keyboard.append([InlineKeyboardButton(ui.get("website_delete", "Delete Website"), callback_data="sources_del_website")])
+    keyboard.append([InlineKeyboardButton(ui.get("back", "Back"), callback_data="sources_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(text, reply_markup=reply_markup)
@@ -150,14 +149,16 @@ async def start_source_suggestion(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await safe_answer_callback_query(query)
 
+    telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     await query.edit_message_text(
-        f"推荐信息源\n"
-        f"{'─' * 24}\n\n"
-        "告诉我们你想监控的信息源。\n\n"
-        "示例：\n"
-        "  • @DefiLlama - DeFi 分析\n"
-        "  • defillama.com - TVL 追踪\n\n"
-        "请输入或 /cancel 取消："
+        f"{ui.get('suggest_title', 'Suggest Sources')}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui.get('suggest_prompt', 'Tell us sources you want to follow.')}\n\n"
+        f"{ui.get('suggest_examples', 'Examples: @DefiLlama, defillama.com')}\n\n"
+        f"{ui.get('settings_input_or_cancel', 'Enter or /cancel:')}"
     )
 
     return AWAITING_SOURCE_SUGGESTION
@@ -357,9 +358,12 @@ async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception:
             name = "Custom Source"
 
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     keyboard = [
-        [InlineKeyboardButton("添加更多", callback_data="sources_add_website")],
-        [InlineKeyboardButton("返回", callback_data="sources_websites")],
+        [InlineKeyboardButton(ui.get("sources_add_more", "Add More"), callback_data="sources_add_website")],
+        [InlineKeyboardButton(ui.get("back", "Back"), callback_data="sources_websites")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -368,10 +372,10 @@ async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
         validation = await validate_url(url)
         if not validation["valid"]:
             await update.message.reply_text(
-                f"添加失败\n"
-                f"{'─' * 24}\n\n"
+                f"{ui.get('website_add_failed', 'Failed to add')}\n"
+                f"{ui['divider']}\n\n"
                 f"{html.escape(validation['error'])}\n\n"
-                "请检查地址后重试。",
+                f"{ui.get('website_check_retry', 'Please check and retry.')}",
                 reply_markup=reply_markup
             )
             return ConversationHandler.END
@@ -381,10 +385,10 @@ async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
         detection = await auto_detect_rss(url)
         if not detection["found"]:
             await update.message.reply_text(
-                f"添加失败\n"
-                f"{'─' * 24}\n\n"
+                f"{ui.get('website_add_failed', 'Failed to add')}\n"
+                f"{ui['divider']}\n\n"
                 f"{html.escape(detection['error'])}\n\n"
-                "请检查地址后重试。",
+                f"{ui.get('website_check_retry', 'Please check and retry.')}",
                 reply_markup=reply_markup
             )
             return ConversationHandler.END
@@ -397,10 +401,10 @@ async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # 埋点：添加信息源
         track_event(telegram_id, "source_added", {"category": "websites", "name": name})
         
+        added_msg = ui.get('website_added', '✅ Added {title}').format(title=html.escape(name))
         await update.message.reply_text(
-            f"添加成功\n"
-            f"{'─' * 24}\n\n"
-            f"已添加 {html.escape(name)}。\n"
+            f"{added_msg}\n"
+            f"{ui['divider']}\n\n"
             f"RSS: {html.escape(final_url)}",
             reply_markup=reply_markup
         )
@@ -569,30 +573,31 @@ async def show_delete_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE
     await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
     sources = get_user_source_list(telegram_id)
     twitter_sources = sources.get("twitter", [])
 
     if not twitter_sources:
         await query.edit_message_text(
-            "没有可删除的 Twitter 信息源。",
+            ui.get("sources_twitter_empty", "No Twitter sources to delete."),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("返回", callback_data="sources_twitter")]
+                [InlineKeyboardButton(ui.get("back", "Back"), callback_data="sources_twitter")]
             ])
         )
         return
 
-    lines = [
-        f"删除 Twitter 信息源\n"
-        f"{'─' * 24}\n\n"
-        "点击要删除的账号：\n"
-    ]
-    text = "\n".join(lines)
+    text = (
+        f"{ui.get('sources_delete_twitter', 'Delete Twitter Sources')}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui.get('delete_select_prompt', 'Click to delete:')}\n"
+    )
 
     # Create a button for each source
     keyboard = []
     for source in twitter_sources:
         keyboard.append([InlineKeyboardButton(f"❌ {source}", callback_data=f"del_tw_{source}")])
-    keyboard.append([InlineKeyboardButton("取消", callback_data="sources_twitter")])
+    keyboard.append([InlineKeyboardButton(ui.get("cancel", "Cancel"), callback_data="sources_twitter")])
 
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -603,30 +608,31 @@ async def show_delete_website(update: Update, context: ContextTypes.DEFAULT_TYPE
     await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
     sources = get_user_source_list(telegram_id)
     website_sources = sources.get("websites", [])
 
     if not website_sources:
         await query.edit_message_text(
-            "没有可删除的网站信息源。",
+            ui.get("sources_website_empty", "No website sources to delete."),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("返回", callback_data="sources_websites")]
+                [InlineKeyboardButton(ui.get("back", "Back"), callback_data="sources_websites")]
             ])
         )
         return
 
-    lines = [
-        f"删除网站信息源\n"
-        f"{'─' * 24}\n\n"
-        "点击要删除的网站：\n"
-    ]
-    text = "\n".join(lines)
+    text = (
+        f"{ui.get('sources_delete_website', 'Delete Website Sources')}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui.get('delete_select_prompt', 'Click to delete:')}\n"
+    )
 
     # Create a button for each source
     keyboard = []
     for source in website_sources:
         keyboard.append([InlineKeyboardButton(f"❌ {source}", callback_data=f"del_web_{source}")])
-    keyboard.append([InlineKeyboardButton("取消", callback_data="sources_websites")])
+    keyboard.append([InlineKeyboardButton(ui.get("cancel", "Cancel"), callback_data="sources_websites")])
 
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -637,6 +643,8 @@ async def handle_delete_twitter(update: Update, context: ContextTypes.DEFAULT_TY
     await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
     source_name = query.data.replace("del_tw_", "")
 
     success = remove_user_source(telegram_id, "twitter", source_name)
@@ -647,21 +655,17 @@ async def handle_delete_twitter(update: Update, context: ContextTypes.DEFAULT_TY
         
         logger.info(f"Deleted Twitter source for user {telegram_id}: {source_name}")
         await query.edit_message_text(
-            f"已删除\n"
-            f"{'─' * 24}\n\n"
-            f"{source_name} 已从你的信息源中移除。",
+            ui.get('delete_success', '🗑️ Deleted {name}').format(name=source_name),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("继续删除", callback_data="sources_del_twitter")],
-                [InlineKeyboardButton("返回", callback_data="sources_twitter")],
+                [InlineKeyboardButton(ui.get("sources_continue_delete", "Continue Delete"), callback_data="sources_del_twitter")],
+                [InlineKeyboardButton(ui.get("back", "Back"), callback_data="sources_twitter")],
             ])
         )
     else:
         await query.edit_message_text(
-            f"删除失败\n"
-            f"{'─' * 24}\n\n"
-            f"无法删除 {source_name}，请重试。",
+            f"{ui.get('delete_failed', 'Delete failed. Please retry.')}",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("返回", callback_data="sources_twitter")]
+                [InlineKeyboardButton(ui.get("back", "Back"), callback_data="sources_twitter")]
             ])
         )
 
@@ -672,6 +676,8 @@ async def handle_delete_website(update: Update, context: ContextTypes.DEFAULT_TY
     await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
     source_name = query.data.replace("del_web_", "")
 
     success = remove_user_source(telegram_id, "websites", source_name)
@@ -682,21 +688,17 @@ async def handle_delete_website(update: Update, context: ContextTypes.DEFAULT_TY
         
         logger.info(f"Deleted website source for user {telegram_id}: {source_name}")
         await query.edit_message_text(
-            f"已删除\n"
-            f"{'─' * 24}\n\n"
-            f"{source_name} 已从你的信息源中移除。",
+            ui.get('delete_success', '🗑️ Deleted {name}').format(name=source_name),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("继续删除", callback_data="sources_del_website")],
-                [InlineKeyboardButton("返回", callback_data="sources_websites")],
+                [InlineKeyboardButton(ui.get("sources_continue_delete", "Continue Delete"), callback_data="sources_del_website")],
+                [InlineKeyboardButton(ui.get("back", "Back"), callback_data="sources_websites")],
             ])
         )
     else:
         await query.edit_message_text(
-            f"删除失败\n"
-            f"{'─' * 24}\n\n"
-            f"无法删除 {source_name}，请重试。",
+            f"{ui.get('delete_failed', 'Delete failed. Please retry.')}",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("返回", callback_data="sources_websites")]
+                [InlineKeyboardButton(ui.get("back", "Back"), callback_data="sources_websites")]
             ])
         )
 
@@ -708,45 +710,52 @@ async def sources_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # Get source counts for this user
     telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
     sources = get_user_source_list(telegram_id)
     twitter_count = len(sources.get("twitter", []))
     website_count = len(sources.get("websites", []))
 
     keyboard = [
         [
-            InlineKeyboardButton("Twitter", callback_data="sources_twitter"),
-            InlineKeyboardButton("网站", callback_data="sources_websites"),
+            InlineKeyboardButton(ui.get("sources_twitter", "Twitter"), callback_data="sources_twitter"),
+            InlineKeyboardButton(ui.get("sources_websites", "Websites"), callback_data="sources_websites"),
         ],
-        [InlineKeyboardButton("批量导入", callback_data="sources_bulk_import")],
-        [InlineKeyboardButton("推荐信息源", callback_data="sources_suggest")],
-        [InlineKeyboardButton("返回", callback_data="back_to_start")],
+        [InlineKeyboardButton(ui.get("sources_bulk_import", "Bulk Import"), callback_data="sources_bulk_import")],
+        [InlineKeyboardButton(ui.get("sources_suggest", "Suggest"), callback_data="sources_suggest")],
+        [InlineKeyboardButton(ui.get("back", "Back"), callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"信息源管理\n"
-        f"{'─' * 24}\n\n"
-        f"当前监控：\n"
-        f"  • Twitter 账号: {twitter_count}\n"
-        f"  • 网站 RSS: {website_count}\n\n"
-        "选择分类查看详情。",
+        f"{ui.get('sources_title', 'Sources')}\n"
+        f"{ui['divider']}\n\n"
+        f"{ui.get('sources_monitoring', 'Currently monitoring:')}\n"
+        f"  • Twitter: {twitter_count}\n"
+        f"  • {ui.get('sources_websites', 'Websites')}: {website_count}\n\n"
+        f"{ui.get('sources_choose_category', 'Select a category.')}",
         reply_markup=reply_markup
     )
 
 
 async def cancel_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel sources conversation."""
+    user = update.effective_user
+    telegram_id = str(user.id) if user else "0"
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     keyboard = [
         [
-            InlineKeyboardButton("信息源", callback_data="sources_back"),
-            InlineKeyboardButton("主菜单", callback_data="back_to_start"),
+            InlineKeyboardButton(ui.get("sources_title", "Sources"), callback_data="sources_back"),
+            InlineKeyboardButton(ui.get("menu_main", "Main Menu"), callback_data="back_to_start"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        "已取消。\n\n"
-        "随时可以推荐信息源。",
+        f"{ui.get('cancelled', 'Cancelled')}\n\n"
+        f"{ui.get('can_restart', 'You can start again anytime.')}",
         reply_markup=reply_markup
     )
     return ConversationHandler.END
