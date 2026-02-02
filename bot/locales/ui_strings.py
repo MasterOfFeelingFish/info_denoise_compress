@@ -538,6 +538,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         # ============ 语言设置 ============
         "lang_updated": "语言已更新为",
         "lang_future_msg": "之后的消息将使用",
+        "lang_update_failed": "语言更新失败，请重试。",
         "settings_change_lang": "修改语言",
         "lang_settings_title": "🌐 语言设置",
         "lang_current": "当前：{lang}",
@@ -1135,6 +1136,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         # ============ Language Settings ============
         "lang_updated": "Language updated to",
         "lang_future_msg": "Future messages will be in",
+        "lang_update_failed": "Failed to update language. Please try again.",
         "settings_change_lang": "Change Language",
         "lang_settings_title": "🌐 Language Settings",
         "lang_current": "Current: {lang}",
@@ -1505,6 +1507,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         # ============ 言語設定 ============
         "lang_updated": "言語を更新しました：",
         "lang_future_msg": "今後のメッセージは",
+        "lang_update_failed": "言語の更新に失敗しました。もう一度お試しください。",
         "settings_change_lang": "言語を変更",
         "lang_settings_title": "🌐 言語設定",
         "lang_current": "現在：{lang}",
@@ -1875,6 +1878,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         # ============ 언어 설정 ============
         "lang_updated": "언어가 업데이트되었습니다:",
         "lang_future_msg": "앞으로 메시지는",
+        "lang_update_failed": "언어 업데이트에 실패했습니다. 다시 시도해주세요.",
         "settings_change_lang": "언어 변경",
         "lang_settings_title": "🌐 언어 설정",
         "lang_current": "현재: {lang}",

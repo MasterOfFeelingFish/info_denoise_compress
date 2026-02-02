@@ -114,17 +114,19 @@ async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYP
     await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
     sources = get_user_source_list(telegram_id)
     website_sources = sources.get("websites", [])
 
     if website_sources:
         lines = [
-            f"网站信息源\n"
-            f"{'─' * 24}\n"
+            f"{ui.get('website_title', 'Website Sources')}\n"
+            f"{ui['divider']}\n"
         ]
         for i, source in enumerate(website_sources, 1):
             lines.append(f"  {i}. {source}")
-        lines.append(f"\n共 {len(website_sources)} 个网站")
+        lines.append(f"\n{ui.get('website_total', '{count} websites').format(count=len(website_sources))}")
         text = "\n".join(lines)
     else:
         text = (

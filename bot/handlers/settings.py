@@ -339,15 +339,16 @@ async def show_language_settings(update: Update, context: ContextTypes.DEFAULT_T
     """Show language selection menu."""
     query = update.callback_query
     await safe_answer_callback_query(query)
-    
+
     user = update.effective_user
     telegram_id = str(user.id)
     current_lang = get_user_language(telegram_id)
-    
+    ui = get_ui_locale(current_lang)
+
     # Build language selection keyboard
     # Show supported languages first, then a few common others
     keyboard = []
-    
+
     # Supported languages with predefined UI
     for lang_code in SUPPORTED_UI_LANGUAGES:
         lang_name = get_language_native_name(lang_code)
@@ -355,7 +356,7 @@ async def show_language_settings(update: Update, context: ContextTypes.DEFAULT_T
         keyboard.append([
             InlineKeyboardButton(f"{is_current}{lang_name}", callback_data=f"set_lang_{lang_code}")
         ])
-    
+
     # Add separator and other common languages
     other_langs = ["ru", "es", "fr", "de", "vi", "th"]
     other_row = []
@@ -371,17 +372,17 @@ async def show_language_settings(update: Update, context: ContextTypes.DEFAULT_T
                 other_row = []
     if other_row:
         keyboard.append(other_row)
-    
-    keyboard.append([InlineKeyboardButton("← Back", callback_data="settings_back")])
+
+    keyboard.append([InlineKeyboardButton(f"← {ui['back']}", callback_data="settings_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     current_lang_name = get_language_native_name(current_lang)
-    
+
     await query.edit_message_text(
-        f"🌐 Language / 语言设置\n"
+        f"{ui['lang_settings_title']}\n"
         f"{'─' * 24}\n\n"
-        f"Current: {current_lang_name}\n\n"
-        f"Select your preferred language:",
+        f"{ui['lang_current'].format(lang=current_lang_name)}\n\n"
+        f"{ui['lang_select']}",
         reply_markup=reply_markup
     )
 
@@ -422,11 +423,14 @@ async def change_language(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         logger.info(f"Changed language for {telegram_id} to {lang_code}")
     else:
-        keyboard = [[InlineKeyboardButton("Retry", callback_data="settings_language")]]
+        # Fallback to English UI for error message since language update failed
+        from locales.ui_strings import get_ui_locale as get_fallback_ui
+        fallback_ui = get_fallback_ui("en")
+        keyboard = [[InlineKeyboardButton(fallback_ui["retry"], callback_data="settings_language")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         await query.edit_message_text(
-            "Failed to update language. Please try again.",
+            fallback_ui.get("lang_update_failed", "Failed to update language. Please try again."),
             reply_markup=reply_markup
         )
 

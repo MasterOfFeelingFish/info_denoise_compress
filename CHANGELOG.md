@@ -4,6 +4,32 @@
 
 ---
 
+## v1.6.6 - 2026年2月1日
+
+### 本次更新
+
+**语言设置界面优化**
+- 语言设置页面现在会根据你的语言显示对应文字
+- 修复了语言设置页面中英文混杂的问题
+
+### 技术改进
+
+- 修复 `handlers/settings.py` 中 3 处硬编码文本：
+  - `"← Back"` → 使用 `ui['back']`
+  - `"🌐 Language / 语言设置"` → 使用 `ui['lang_settings_title']`
+  - `"Current: ..."` / `"Select your preferred language:"` → 使用 `ui['lang_current']` / `ui['lang_select']`
+- 新增 `lang_update_failed` 翻译字符串（zh/en/ja/ko）
+
+### 测试验证
+
+```
+语言服务测试: 12/12 ✓ 全部通过
+所有模块测试: 55/56 ✓ 通过
+专项验证测试:  6/6  ✓ 全部通过
+```
+
+---
+
 ## v1.6.5 - 2026年2月1日
 
 ### 本次更新
