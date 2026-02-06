@@ -344,8 +344,9 @@ async def retry_round_2_callback(update: Update, context: ContextTypes.DEFAULT_T
             temperature=0.9
         )
 
+        step_text = ui["onboarding_step"].format(current=2, total=3)
         await query.edit_message_text(
-            "[第 2 步 / 共 3 步] 内容偏好\n\n" + ai_response
+            f"{step_text} {ui['onboarding_content_prefs']}\n\n{ai_response}"
         )
 
         return ONBOARDING_ROUND_2
@@ -353,11 +354,11 @@ async def retry_round_2_callback(update: Update, context: ContextTypes.DEFAULT_T
     except Exception as e:
         logger.error(f"Retry round 2 failed: {e}")
         keyboard = [
-            [InlineKeyboardButton("重试", callback_data="retry_round_2")],
-            [InlineKeyboardButton("返回主菜单", callback_data="back_to_start")],
+            [InlineKeyboardButton(ui["retry"], callback_data="retry_round_2")],
+            [InlineKeyboardButton(ui["back_to_main"], callback_data="back_to_start")],
         ]
         await query.edit_message_text(
-            "AI 服务暂时不可用，请稍后重试。",
+            ui["ai_unavailable"],
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return ConversationHandler.END
@@ -383,9 +384,11 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user = update.effective_user
     telegram_id = str(user.id)
 
-    # Show progress message
-    await query.edit_message_text(
-        f"<i>{ui.get('saving_prefs', '⏳ Saving preferences...')}</i>",
+    # T8 Fix: Use send_message instead of edit_message_text to preserve
+    # the profile summary message (prevents overwriting the preference summary)
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text=f"<i>{ui.get('saving_prefs', '⏳ Saving preferences...')}</i>",
         parse_mode="HTML"
     )
 
@@ -446,17 +449,19 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        f"{ui.get('prefs_saved_title', '✅ Preferences Saved!')}\n\n"
-        f"{ui.get('prefs_saved_desc', 'Your interest profile has been recorded.')}\n\n"
-        f"{ui.get('push_time_title', '📅 Push Schedule')}\n"
-        f"{ui.get('push_time_desc', 'Daily at 9:00 AM')}\n\n"
-        f"{ui.get('push_daily_reason', '💡 Why once daily?')}\n"
-        f"{ui.get('push_daily_explain', 'AI summarizes 24h content to avoid overload.')}\n\n"
-        f"{ui['divider']}\n\n"
-        f"📰 <b>{ui.get('sources_title', 'Sources')}</b>\n\n"
-        f"📌 {default_sources_preview}\n\n"
-        f"{ui.get('push_now_desc', 'After selecting sources, you can start immediately.')}",
+    # T8 Fix: Also use send_message here to keep profile summary visible
+    await context.bot.send_message(
+        chat_id=query.message.chat.id,
+        text=f"{ui.get('prefs_saved_title', '✅ Preferences Saved!')}\n\n"
+             f"{ui.get('prefs_saved_desc', 'Your interest profile has been recorded.')}\n\n"
+             f"{ui.get('push_time_title', '📅 Push Schedule')}\n"
+             f"{ui.get('push_time_desc', 'Daily at 9:00 AM')}\n\n"
+             f"{ui.get('push_daily_reason', '💡 Why once daily?')}\n"
+             f"{ui.get('push_daily_explain', 'AI summarizes 24h content to avoid overload.')}\n\n"
+             f"{ui['divider']}\n\n"
+             f"📰 <b>{ui.get('sources_title', 'Sources')}</b>\n\n"
+             f"📌 {default_sources_preview}\n\n"
+             f"{ui.get('push_now_desc', 'After selecting sources, you can start immediately.')}",
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
@@ -739,8 +744,12 @@ async def view_sample(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     query = update.callback_query
     await safe_answer_callback_query(query)
 
+    telegram_id = str(query.from_user.id) if query.from_user else "0"
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     keyboard = [
-        [InlineKeyboardButton("返回", callback_data="back_to_start")],
+        [InlineKeyboardButton(ui["back"], callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 

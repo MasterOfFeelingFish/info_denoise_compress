@@ -90,6 +90,79 @@ def is_summary_duplicate(title: str, summary: str) -> bool:
     return False
 
 
+def deduplicate_by_similarity(items: List[Dict[str, Any]], threshold: float = 0.8) -> List[Dict[str, Any]]:
+    """
+    T1: Cross-source semantic deduplication using title similarity.
+    
+    When multiple sources report the same event, keep only the most
+    complete version (longest summary). Uses difflib.SequenceMatcher
+    for fuzzy title matching.
+    
+    Args:
+        items: List of content items with 'title' and 'summary' fields
+        threshold: Similarity threshold (0.0-1.0), default 0.8
+        
+    Returns:
+        Deduplicated list of items
+    """
+    if not items or len(items) <= 1:
+        return items
+    
+    from difflib import SequenceMatcher
+    
+    # Track which items to keep (by index)
+    merged_into = {}  # index -> merged_target_index
+    
+    for i in range(len(items)):
+        if i in merged_into:
+            continue
+        title_i = items[i].get("title", "").strip()
+        if not title_i:
+            continue
+            
+        for j in range(i + 1, len(items)):
+            if j in merged_into:
+                continue
+            title_j = items[j].get("title", "").strip()
+            if not title_j:
+                continue
+            
+            # Calculate similarity
+            similarity = SequenceMatcher(None, title_i.lower(), title_j.lower()).ratio()
+            
+            if similarity >= threshold:
+                # Keep the one with longer summary (more complete)
+                summary_i = items[i].get("summary", "") or ""
+                summary_j = items[j].get("summary", "") or ""
+                
+                if len(summary_j) > len(summary_i):
+                    # j is more complete, merge i into j
+                    merged_into[i] = j
+                    # Add "综合多家报道" note to the keeper's reason
+                    source_i = items[i].get("source", "")
+                    source_j = items[j].get("source", "")
+                    if source_i != source_j:
+                        existing_reason = items[j].get("reason", "")
+                        items[j]["reason"] = f"{existing_reason} [综合 {source_i}+{source_j} 报道]".strip()
+                    break  # i is merged, move to next i
+                else:
+                    # i is more complete, merge j into i
+                    merged_into[j] = i
+                    source_i = items[i].get("source", "")
+                    source_j = items[j].get("source", "")
+                    if source_i != source_j:
+                        existing_reason = items[i].get("reason", "")
+                        items[i]["reason"] = f"{existing_reason} [综合 {source_i}+{source_j} 报道]".strip()
+    
+    # Build deduplicated list preserving order
+    result = [item for idx, item in enumerate(items) if idx not in merged_into]
+    
+    if len(items) != len(result):
+        logger.info(f"Deduplication: {len(items)} -> {result.__len__()} items ({len(items) - len(result)} duplicates removed)")
+    
+    return result
+
+
 # Localized strings - extensible for any language
 LOCALE_STRINGS = {
     "zh": {
@@ -646,6 +719,10 @@ def format_single_item(item: Dict[str, Any], index: int, lang: str = "zh") -> st
     summary_escaped = html.escape(summary) if summary else ""
     reason_escaped = html.escape(reason) if reason else ""
 
+    # T2: Normalize dashes (double em-dash to single)
+    title_escaped = title_escaped.replace("——", "—")
+    summary_escaped = summary_escaped.replace("——", "—") if summary_escaped else ""
+
     # Title is now plain text (no hyperlink)
     # Users must use "查看原文" button to access original content
     # This ensures all traffic goes through the monitored button
@@ -737,6 +814,9 @@ def prepare_digest_messages(
     date_str = datetime.now().strftime("%Y-%m-%d")
     locale = get_locale(lang)
     category_names = get_category_names(lang)
+
+    # T1: Apply cross-source deduplication
+    filtered_items = deduplicate_by_similarity(filtered_items)
 
     # Group items by section (4 categories now)
     must_read = [item for item in filtered_items if item.get("section") == "must_read"]

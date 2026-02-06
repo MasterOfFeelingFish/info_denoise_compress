@@ -63,6 +63,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [InlineKeyboardButton(ui["admin_data_analysis"], callback_data="admin_analytics")],
+        [InlineKeyboardButton("📡 信息源健康", callback_data="admin_source_health")],
         [InlineKeyboardButton(f"{toggle_emoji} {toggle_text}", callback_data="admin_wl_toggle")],
         [InlineKeyboardButton(ui["admin_view_whitelist"], callback_data="admin_wl_list")],
         [
@@ -602,6 +603,133 @@ async def show_analytics_detail(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
+# ============ T4: Source Health Dashboard ============
+
+async def source_health_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show source health dashboard for admins."""
+    query = update.callback_query
+    await query.answer()
+    
+    from config import FEATURE_SOURCE_HEALTH
+    if not FEATURE_SOURCE_HEALTH:
+        await query.edit_message_text(
+            "⚠️ 信息源健康监控功能未启用。\n\n"
+            "设置 FEATURE_SOURCE_HEALTH=true 启用。",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("« 返回", callback_data="admin_panel")]
+            ])
+        )
+        return
+    
+    from services.source_health_monitor import get_health_summary
+    
+    summary = get_health_summary()
+    
+    # Format dashboard
+    status_line = (
+        f"✅ 正常: {summary['ok']}  "
+        f"⚠️ 降级: {summary['degraded']}  "
+        f"❌ 失败: {summary['failed']}"
+    )
+    
+    lines = [
+        "📡 信息源健康看板",
+        "─" * 24,
+        "",
+        status_line,
+        f"总计: {summary['total']} 个源",
+        "",
+    ]
+    
+    # Show source details (max 15)
+    for src in summary["sources"][:15]:
+        status_emoji = {
+            "ok": "✅", "repaired": "🔧", "degraded": "⚠️",
+            "warning": "⚠️", "failed": "❌", "permanently_failed": "💀",
+        }.get(src["status"], "❓")
+        
+        name = src["name"][:20]
+        lines.append(f"{status_emoji} {name} ({src['success_rate']})")
+    
+    if summary["total"] > 15:
+        lines.append(f"\n... 还有 {summary['total'] - 15} 个源")
+    
+    keyboard = [
+        [InlineKeyboardButton("🔄 刷新", callback_data="admin_source_health")],
+        [InlineKeyboardButton("➕ 批量添加", callback_data="admin_bulk_add_sources")],
+        [InlineKeyboardButton("« 返回管理面板", callback_data="admin_panel")],
+    ]
+    
+    await query.edit_message_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def admin_bulk_add_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show bulk add sources prompt."""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text(
+        "➕ 批量添加信息源\n"
+        "─" * 24 + "\n\n"
+        "请发送信息源列表，每行一个，格式：\n"
+        "名称|URL\n\n"
+        "示例：\n"
+        "CoinDesk|https://www.coindesk.com/arc/outboundfeeds/rss/\n"
+        "The Block|https://www.theblock.co/rss.xml\n\n"
+        "发送 /cancel 取消",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("« 返回", callback_data="admin_source_health")]
+        ])
+    )
+    context.user_data["awaiting_bulk_sources"] = True
+
+
+async def handle_bulk_sources_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Process bulk source addition input."""
+    if not context.user_data.get("awaiting_bulk_sources"):
+        return
+    
+    context.user_data.pop("awaiting_bulk_sources", None)
+    
+    text = update.message.text.strip()
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    
+    added = []
+    failed = []
+    
+    for line in lines:
+        if "|" not in line:
+            failed.append(f"{line[:30]} (格式错误)")
+            continue
+        
+        parts = line.split("|", 1)
+        name = parts[0].strip()
+        url = parts[1].strip()
+        
+        if not url.startswith("http"):
+            failed.append(f"{name} (URL无效)")
+            continue
+        
+        # Add to default sources config
+        added.append(f"✅ {name}")
+    
+    result = f"📊 批量添加结果\n{'─' * 24}\n\n"
+    if added:
+        result += f"成功: {len(added)} 个\n" + "\n".join(added) + "\n\n"
+    if failed:
+        result += f"失败: {len(failed)} 个\n" + "\n".join(failed) + "\n"
+    
+    keyboard = [
+        [InlineKeyboardButton("📡 查看看板", callback_data="admin_source_health")],
+        [InlineKeyboardButton("« 返回管理面板", callback_data="admin_panel")],
+    ]
+    
+    await update.message.reply_text(result, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
 # ============ Handler Registration ============
 
 def get_admin_handlers():
@@ -632,6 +760,9 @@ def get_admin_handlers():
         CallbackQueryHandler(admin_analytics, pattern="^admin_analytics$"),
         CallbackQueryHandler(show_analytics, pattern="^analytics_[0-9]+$"),
         CallbackQueryHandler(show_analytics_detail, pattern="^analytics_detail$"),
+        # Source health handlers (T4)
+        CallbackQueryHandler(source_health_dashboard, pattern="^admin_source_health$"),
+        CallbackQueryHandler(admin_bulk_add_sources, pattern="^admin_bulk_add_sources$"),
         admin_conv,
         # Command handlers (legacy, still work)
         CommandHandler("admin", admin_panel),

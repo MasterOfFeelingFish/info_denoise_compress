@@ -6,9 +6,14 @@ import json
 import logging
 from dotenv import load_dotenv
 
-# Explicitly load .env from current directory
+# Load environment: .env.test takes priority over .env (for development/testing)
+test_env_path = os.path.join(os.path.dirname(__file__), '.env.test')
 env_path = os.path.join(os.path.dirname(__file__), '.env')
-if os.path.exists(env_path):
+
+if os.path.exists(test_env_path):
+    load_dotenv(test_env_path, override=True)
+    print("⚠️  Loaded .env.test (TEST MODE)")
+elif os.path.exists(env_path):
     load_dotenv(env_path, override=True)
 else:
     load_dotenv(override=True)
@@ -341,6 +346,37 @@ def _parse_sources_env() -> dict:
 
     return result
 
+
+# ============ Feature Flags (Sprint1 新功能开关，默认全部关闭) ============
+FEATURE_SOURCE_HEALTH = os.getenv("FEATURE_SOURCE_HEALTH", "false").lower() == "true"
+FEATURE_PAYMENT = os.getenv("FEATURE_PAYMENT", "false").lower() == "true"
+FEATURE_GROUP_CHAT = os.getenv("FEATURE_GROUP_CHAT", "false").lower() == "true"
+
+# ============ Source Health Configuration ============
+SOURCE_HEALTH_DIR = os.path.join(DATA_DIR, "source_health")
+
+# ============ Payment Configuration ============
+PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN", "")
+PLAN_CONFIG_FILE = os.path.join(DATA_DIR, "plan_config.json")
+
+# ============ Group Chat Configuration ============
+GROUP_CONFIGS_DIR = os.path.join(DATA_DIR, "group_configs")
+
+# ============ Noise Prefix Configuration (T2: 简报视觉重构) ============
+# RSS 内容中常见的噪音前缀，抓取后自动清除
+NOISE_PREFIXES = [
+    "blockbeats 消息，",
+    "BlockBeats 消息，",
+    "转发 ",
+    "深潮 TechFlow 消息，",
+    "Odaily 星球日报讯，",
+    "金色财经报道，",
+    "PANews ",
+]
+# Support additional prefixes from environment
+_extra_prefixes = os.getenv("NOISE_PREFIXES", "")
+if _extra_prefixes:
+    NOISE_PREFIXES.extend([p.strip() for p in _extra_prefixes.split(",") if p.strip()])
 
 # Load default sources: env > hardcoded defaults
 _env_sources = _parse_sources_env()

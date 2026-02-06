@@ -20,6 +20,32 @@ from config import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
+
+def clean_noise_prefix(title: str) -> str:
+    """
+    T2: Remove common noise prefixes from RSS item titles.
+    
+    Cleans prefixes like "BlockBeats 消息，", "转发 ", etc.
+    Also cleans date prefixes like "1月26日，".
+    """
+    if not title:
+        return title
+    
+    from config import NOISE_PREFIXES
+    
+    cleaned = title
+    for prefix in NOISE_PREFIXES:
+        if cleaned.lower().startswith(prefix.lower()):
+            cleaned = cleaned[len(prefix):].lstrip()
+            break
+    
+    # Also clean date prefixes: "X月X日，" pattern
+    import re
+    cleaned = re.sub(r'^\d{1,2}月\d{1,2}日[，,]?\s*', '', cleaned)
+    
+    return cleaned.strip()
+
+
 # Path to shared sources.json
 SOURCES_FILE = os.path.join(DATA_DIR, "sources.json")
 
@@ -214,7 +240,7 @@ async def fetch_single_source(
             
             item = {
                 "id": generate_item_id(entry, name),
-                "title": entry.get("title", "Untitled"),
+                "title": clean_noise_prefix(entry.get("title", "Untitled")),
                 "summary": extract_summary(entry),
                 "link": link,
                 "source": name,

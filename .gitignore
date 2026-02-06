@@ -44,6 +44,7 @@ nul
 # Sensitive files
 .env
 bot/.env
+bot/.env.test
 *.env.local
 *.env.production
 **/secrets/
@@ -54,6 +55,11 @@ credentials*.json
 
 # Runtime data
 data/
+data_dev/
+data_test/
+
+# Dev compose
+docker-compose.dev.yml
 
 # Claude Code
 .claude/

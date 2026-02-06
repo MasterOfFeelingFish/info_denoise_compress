@@ -288,7 +288,8 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "help_stats_desc": "  查看你的注册时间、反馈历史、满意度趋势。",
         "help_feedback_title": "反馈机制",
         "help_feedback_desc": "  每条推送消息都有反馈按钮（👍/👎）。\n  你的反馈会被收集并在每日凌晨批量更新偏好画像，\n  次日推送将体现你的最新偏好。",
-        "help_footer": "有问题？使用上方命令或主菜单操作。",
+        "help_community_link": "💬 社群交流：https://t.me/web3dailydigest",
+        "help_footer": "有问题？使用上方命令或主菜单操作。\n\n💬 加入社群：https://t.me/web3dailydigest",
         
         # ============ 管理员 ============
         "admin_no_permission": "🔒 无权限",
@@ -886,7 +887,8 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "help_stats_desc": "  View registration date, feedback history, satisfaction trends.",
         "help_feedback_title": "Feedback System",
         "help_feedback_desc": "  Each message has feedback buttons (👍/👎).\n  Feedback collected and profile updated daily at midnight.\n  Next day's push reflects your latest preferences.",
-        "help_footer": "Questions? Use commands above or main menu.",
+        "help_community_link": "💬 Community: https://t.me/web3dailydigest",
+        "help_footer": "Questions? Use commands above or main menu.\n\n💬 Join community: https://t.me/web3dailydigest",
         
         # ============ Admin ============
         "admin_no_permission": "🔒 No Permission",
