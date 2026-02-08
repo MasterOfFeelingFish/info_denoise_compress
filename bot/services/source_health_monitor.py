@@ -172,7 +172,13 @@ async def attempt_ai_repair(
     health_record: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Use AI to analyze the error and suggest a repair URL.
+    Use AI with web search to analyze the error and suggest a repair URL.
+    
+    Strategy:
+    1. Prefer call_gemini_with_search (AI + Google Search) for real-time
+       internet access, so AI can actually look up the current RSS URL.
+    2. Fallback to call_llm_json (no internet) if Gemini search unavailable.
+    3. All suggested URLs are verified via _test_url before accepting.
     
     Args:
         source_url: The failing RSS URL
@@ -182,72 +188,165 @@ async def attempt_ai_repair(
     Returns:
         Result dict with 'status', 'new_url' (if found), and 'analysis'
     """
+    error_type = health_record.get("error_type", "unknown")
+    error_detail = health_record.get("last_error", "No details")
+    failures = health_record.get("consecutive_failures", 0)
+
+    # Build repair prompt (used by both search and non-search paths)
+    search_prompt = (
+        f"I need to find the current working RSS feed URL for '{source_name}'.\n\n"
+        f"The previous URL was: {source_url}\n"
+        f"It has been failing with error: {error_type} - {error_detail}\n"
+        f"It has failed {failures} consecutive times.\n\n"
+        f"Please search the internet to find:\n"
+        f"1. The current official RSS feed URL for {source_name}\n"
+        f"2. Any alternative RSS/Atom feed URLs for this source\n"
+        f"3. Whether the site has changed its RSS structure recently\n\n"
+        f"Respond with ONLY a JSON object (no markdown, no code fences):\n"
+        f'{{\n'
+        f'    "analysis": "Brief analysis of why the old URL broke and what you found",\n'
+        f'    "suggested_urls": ["url1", "url2"],\n'
+        f'    "confidence": "high/medium/low"\n'
+        f'}}'
+    )
+
+    system_instruction = (
+        "You are an RSS feed repair specialist with internet access. "
+        "Search the web to find the current working RSS/Atom feed URL "
+        "for the given source. Prioritize official feeds over third-party. "
+        "Only include URLs that you have strong evidence are valid RSS feeds. "
+        "Respond with ONLY valid JSON, no markdown formatting."
+    )
+
+    result = None
+    method_used = "none"
+
+    # --- Strategy 1: Gemini with Google Search (preferred) ---
     try:
-        from services.llm_factory import call_llm_json
-        from utils.prompt_loader import get_prompt
+        from services.gemini import call_gemini_with_search
         
-        error_type = health_record.get("error_type", "unknown")
-        error_detail = health_record.get("last_error", "No details")
-        failures = health_record.get("consecutive_failures", 0)
-        
-        # Build repair prompt
-        prompt = f"""Analyze this failing RSS source and suggest repair:
-
-Source Name: {source_name}
-Current URL: {source_url}
-Error Type: {error_type}
-Error Detail: {error_detail}
-Consecutive Failures: {failures}
-
-Please respond with JSON:
-{{
-    "analysis": "Brief analysis of the problem",
-    "suggested_urls": ["url1", "url2"],
-    "confidence": "high/medium/low"
-}}"""
-        
-        result, model = await call_llm_json(
-            prompt=prompt,
-            system_instruction="You are an RSS feed repair specialist. Analyze failing RSS feeds and suggest alternative URLs. Only suggest URLs that are likely to work based on common RSS patterns.",
-            context="source-repair"
+        logger.info(f"AI repair for {source_name}: using Gemini + Google Search")
+        raw_text = await call_gemini_with_search(
+            prompt=search_prompt,
+            system_instruction=system_instruction,
+            temperature=0.3,
         )
+        method_used = "gemini_search"
         
-        if result is None:
-            return {"status": "repair_failed", "reason": "ai_unavailable"}
+        # Parse JSON from the response text
+        result = _extract_json_from_text(raw_text)
+        if result:
+            logger.info(f"AI repair (search) analysis: {result.get('analysis', '')[:100]}")
         
-        # Test suggested URLs
-        suggested_urls = result.get("suggested_urls", [])
-        for url in suggested_urls[:3]:  # Test up to 3 suggestions
-            if await _test_url(url):
-                logger.info(f"AI repair found working URL for {source_name}: {url}")
-                return {
-                    "status": "repaired",
-                    "new_url": url,
-                    "analysis": result.get("analysis", ""),
-                }
-        
-        return {
-            "status": "repair_failed",
-            "reason": "no_working_url",
-            "analysis": result.get("analysis", ""),
-            "tried_urls": suggested_urls,
-        }
-        
+    except NotImplementedError:
+        logger.info(f"AI repair for {source_name}: Gemini search not available, falling back")
     except Exception as e:
-        logger.error(f"AI repair failed for {source_name}: {e}")
-        return {"status": "repair_failed", "reason": str(e)}
+        logger.warning(f"AI repair (search) failed for {source_name}: {e}, falling back")
+
+    # --- Strategy 2: Fallback to regular LLM (no internet) ---
+    if result is None:
+        try:
+            from services.llm_factory import call_llm_json
+            
+            logger.info(f"AI repair for {source_name}: using LLM (no search)")
+            fallback_prompt = (
+                f"Analyze this failing RSS source and suggest repair:\n\n"
+                f"Source Name: {source_name}\n"
+                f"Current URL: {source_url}\n"
+                f"Error Type: {error_type}\n"
+                f"Error Detail: {error_detail}\n"
+                f"Consecutive Failures: {failures}\n\n"
+                f"Based on your knowledge of common RSS feed URL patterns, "
+                f"suggest possible alternative URLs.\n\n"
+                f"Respond with JSON:\n"
+                f'{{\n'
+                f'    "analysis": "Brief analysis of the problem",\n'
+                f'    "suggested_urls": ["url1", "url2"],\n'
+                f'    "confidence": "high/medium/low"\n'
+                f'}}'
+            )
+            
+            result, model = await call_llm_json(
+                prompt=fallback_prompt,
+                system_instruction="You are an RSS feed repair specialist. Analyze failing RSS feeds and suggest alternative URLs based on common RSS patterns.",
+                context="source-repair"
+            )
+            method_used = f"llm_fallback({model})" if result else "none"
+            
+        except Exception as e:
+            logger.error(f"AI repair (fallback) also failed for {source_name}: {e}")
+            return {"status": "repair_failed", "reason": str(e)}
+
+    if result is None:
+        return {"status": "repair_failed", "reason": "ai_unavailable"}
+
+    # --- Verify suggested URLs ---
+    suggested_urls = result.get("suggested_urls", [])
+    analysis = result.get("analysis", "")
+    
+    logger.info(f"AI repair for {source_name}: testing {len(suggested_urls)} suggested URLs (method: {method_used})")
+    
+    for url in suggested_urls[:5]:  # Test up to 5 suggestions
+        if await _test_url(url):
+            logger.info(f"AI repair found working URL for {source_name}: {url} (via {method_used})")
+            return {
+                "status": "repaired",
+                "new_url": url,
+                "analysis": analysis,
+                "method": method_used,
+            }
+    
+    return {
+        "status": "repair_failed",
+        "reason": "no_working_url",
+        "analysis": analysis,
+        "tried_urls": suggested_urls,
+        "method": method_used,
+    }
+
+
+def _extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+    """Extract JSON object from AI response text that may contain markdown or extra text."""
+    import re
+    
+    if not text:
+        return None
+    
+    # Try direct parse first
+    try:
+        return json.loads(text.strip())
+    except (json.JSONDecodeError, ValueError):
+        pass
+    
+    # Try extracting from markdown code fence
+    code_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if code_match:
+        try:
+            return json.loads(code_match.group(1).strip())
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+    # Try finding first { ... } block
+    brace_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+    logger.warning(f"Failed to extract JSON from AI response: {text[:200]}")
+    return None
 
 
 async def _test_url(url: str) -> bool:
     """Test if a URL returns valid RSS content."""
     try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    text = await resp.text()
-                    # Simple check for RSS/XML content
-                    return "<rss" in text.lower() or "<feed" in text.lower() or "<xml" in text.lower()
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                text = resp.text
+                return "<rss" in text.lower() or "<feed" in text.lower() or "<?xml" in text.lower()
         return False
     except Exception:
         return False
@@ -305,6 +404,23 @@ async def send_health_notification(
     # Update notification timestamp
     record["last_notification"] = datetime.now().isoformat()
     _save_health_record(source_url, record)
+    
+    # Actually send the notification via Bot API
+    try:
+        from config import ADMIN_TELEGRAM_IDS
+        if admin_only and ADMIN_TELEGRAM_IDS:
+            # Import lazily to avoid circular imports
+            from telegram import Bot
+            from config import TELEGRAM_BOT_TOKEN
+            if TELEGRAM_BOT_TOKEN:
+                bot = Bot(token=TELEGRAM_BOT_TOKEN)
+                for admin_id in ADMIN_TELEGRAM_IDS:
+                    try:
+                        await bot.send_message(chat_id=admin_id, text=msg)
+                    except Exception as send_err:
+                        logger.warning(f"Failed to send health notification to admin {admin_id}: {send_err}")
+    except Exception as e:
+        logger.warning(f"Failed to send health notifications: {e}")
     
     logger.info(f"Health notification: {source_name} -> {status}")
     return True
