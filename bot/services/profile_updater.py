@@ -60,12 +60,10 @@ def format_feedbacks_for_ai(feedbacks: List[Dict[str, Any]]) -> str:
             # Report click events with titles (strong positive signal)
             # User actively clicked to read the full article
             if clicks:
-                click_titles = [i.get("title", "Unknown")[:50] for i in clicks]
                 entry += f"\n  📖 {len(clicks)} clicked"
             
             # Report dislike events with titles (negative signal)
             if dislikes:
-                dislike_titles = [i.get("title", "Unknown")[:50] for i in dislikes]
                 entry += f"\n  👎 {len(dislikes)} disliked"
             
             # Report like events (explicit positive)
