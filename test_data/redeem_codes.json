@@ -1,0 +1,10 @@
+{
+  "codes": [
+    {
+      "code": "TEST-DEBUG-001",
+      "plan": "pro",
+      "duration_days": 30,
+      "used": false
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+{
+  "source_url": "https://api.theblockbeats.news/v1/open-api/home-xml",
+  "source_name": "The Block Beats",
+  "status": "ok",
+  "consecutive_failures": 0,
+  "total_checks": 111,
+  "total_successes": 109,
+  "last_check": "2026-02-11T11:00:01.476537",
+  "last_success": "2026-02-11T11:00:01.476537",
+  "last_error": null,
+  "error_type": null,
+  "repair_attempts": 0,
+  "repair_status": null,
+  "repaired_url": null,
+  "last_notification": null,
+  "history": [
+    {
+      "time": "2026-02-10T18:00:05.251796",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-10T19:00:01.400294",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-10T20:00:01.579293",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-10T21:00:01.839988",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-10T22:00:04.687575",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-10T23:00:01.331706",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-10T23:29:52.284763",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T00:00:01.572250",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T00:59:52.746067",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T01:00:00.400927",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T02:00:01.458155",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T03:00:01.651394",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T04:00:01.944165",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T05:00:01.508333",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T06:00:02.607816",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T07:00:02.514124",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T08:00:02.690238",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T09:00:02.353575",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T10:00:01.570688",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    },
+    {
+      "time": "2026-02-11T11:00:01.476537",
+      "success": true,
+      "error_type": null,
+      "items_count": 10
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "source_url": "https://u.today/rss",
+  "source_name": "U.Today",
+  "status": "ok",
+  "consecutive_failures": 0,
+  "total_checks": 2,
+  "total_successes": 2,
+  "last_check": "2026-02-11T04:30:52.834993",
+  "last_success": "2026-02-11T04:30:52.834993",
+  "last_error": null,
+  "error_type": null,
+  "repair_attempts": 0,
+  "repair_status": null,
+  "repaired_url": null,
+  "last_notification": null,
+  "history": [
+    {
+      "time": "2026-02-10T04:30:52.454526",
+      "success": true,
+      "error_type": null,
+      "items_count": 28
+    },
+    {
+      "time": "2026-02-11T04:30:52.834993",
+      "success": true,
+      "error_type": null,
+      "items_count": 29
+    }
+  ]
+}

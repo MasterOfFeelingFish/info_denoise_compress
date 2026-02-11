@@ -1,0 +1,138 @@
+{
+  "source_url": "https://rss.app/feeds/1eJwBA9j6nznaf3N.xml",
+  "source_name": "@Twitter Bundle 3",
+  "status": "failed",
+  "consecutive_failures": 111,
+  "total_checks": 111,
+  "total_successes": 0,
+  "last_check": "2026-02-11T11:00:01.083100",
+  "last_success": null,
+  "last_error": "HTTP 402",
+  "error_type": "402",
+  "repair_attempts": 3,
+  "repair_status": "permanently_failed",
+  "repaired_url": null,
+  "last_notification": "2026-02-10T22:00:03.243368",
+  "history": [
+    {
+      "time": "2026-02-10T18:00:01.029335",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T19:00:01.077898",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T20:00:01.077902",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T21:00:01.329393",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T22:00:03.241544",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T23:00:01.017241",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T23:29:51.941995",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T00:00:01.212249",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T00:59:52.435645",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T01:00:00.063429",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T02:00:01.041608",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T03:00:01.025471",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T04:00:01.100206",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T05:00:01.044609",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T06:00:01.645515",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T07:00:01.857238",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T08:00:01.804986",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T09:00:01.908838",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T10:00:01.142134",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T11:00:01.083100",
+      "success": false,
+      "error_type": "402",
+      "items_count": 0
+    }
+  ]
+}

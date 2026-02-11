@@ -1,0 +1,21 @@
+[用户语言]
+English
+
+[用户类型]
+Active memecoin speculator and trend tracker.
+
+[关注领域]
+- Memecoins across Solana, Ethereum, and Base ecosystems.
+- Viral social media trends and community-driven developments.
+- On-chain data alerts, whale movements, and liquidity tracking.
+- Emerging token launches and market sentiment shifts.
+
+[内容偏好]
+- Comprehensive coverage: real-time news, deep project analysis, and technical indicators.
+- High-frequency updates including social media buzz and price action alerts.
+
+[明确不喜欢]
+
+
+[宏观偏好]
+low

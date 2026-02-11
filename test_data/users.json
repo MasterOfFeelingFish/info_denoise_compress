@@ -1,0 +1,24 @@
+{
+  "users": [
+    {
+      "id": "user_001",
+      "telegram_id": "100000001",
+      "username": "test_user_alpha",
+      "first_name": "Alice",
+      "language": "zh",
+      "created": "2026-02-07T07:18:18.542806",
+      "last_active": "2026-02-07T07:18:18.542812",
+      "last_push_time": "2026-02-11T00:59:53.985066"
+    },
+    {
+      "id": "user_002",
+      "telegram_id": "100000002",
+      "username": "test_user_beta",
+      "first_name": "Bob",
+      "language": "zh",
+      "created": "2026-02-07T16:59:49.938499",
+      "last_active": "2026-02-07T16:59:49.938505",
+      "last_push_time": "2026-02-10T23:29:53.938093"
+    }
+  ]
+}

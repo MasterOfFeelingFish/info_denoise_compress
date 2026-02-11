@@ -1,0 +1,30 @@
+{
+  "source_url": "https://cryptoslate.com/feed/",
+  "source_name": "CryptoSlate",
+  "status": "warning",
+  "consecutive_failures": 2,
+  "total_checks": 2,
+  "total_successes": 0,
+  "last_check": "2026-02-11T04:30:52.755781",
+  "last_success": null,
+  "last_error": "HTTP 403",
+  "error_type": "403",
+  "repair_attempts": 0,
+  "repair_status": null,
+  "repaired_url": null,
+  "last_notification": null,
+  "history": [
+    {
+      "time": "2026-02-10T04:30:52.383255",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T04:30:52.755781",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    }
+  ]
+}

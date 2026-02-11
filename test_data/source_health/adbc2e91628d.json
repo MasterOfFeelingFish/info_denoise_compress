@@ -1,0 +1,138 @@
+{
+  "source_url": "https://techflowpost.substack.com/feed",
+  "source_name": "TechFlow Post",
+  "status": "failed",
+  "consecutive_failures": 111,
+  "total_checks": 111,
+  "total_successes": 0,
+  "last_check": "2026-02-11T11:00:01.506738",
+  "last_success": null,
+  "last_error": "HTTP 403",
+  "error_type": "403",
+  "repair_attempts": 3,
+  "repair_status": "permanently_failed",
+  "repaired_url": null,
+  "last_notification": "2026-02-10T22:00:04.711130",
+  "history": [
+    {
+      "time": "2026-02-10T18:00:05.284712",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T19:00:01.425280",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T20:00:01.604629",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T21:00:01.858019",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T22:00:04.709177",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T23:00:01.356313",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-10T23:29:52.308631",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T00:00:01.602381",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T00:59:52.769780",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T01:00:00.432400",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T02:00:01.492377",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T03:00:01.678561",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T04:00:01.974422",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T05:00:01.542600",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T06:00:02.646554",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T07:00:02.563214",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T08:00:02.730568",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T09:00:02.390352",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T10:00:01.607302",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    },
+    {
+      "time": "2026-02-11T11:00:01.506738",
+      "success": false,
+      "error_type": "403",
+      "items_count": 0
+    }
+  ]
+}

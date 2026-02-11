@@ -1,0 +1,138 @@
+{
+  "source_url": "https://defirate.com/feed",
+  "source_name": "DeFi Rate",
+  "status": "ok",
+  "consecutive_failures": 0,
+  "total_checks": 111,
+  "total_successes": 111,
+  "last_check": "2026-02-11T11:00:02.872894",
+  "last_success": "2026-02-11T11:00:02.872894",
+  "last_error": null,
+  "error_type": null,
+  "repair_attempts": 0,
+  "repair_status": null,
+  "repaired_url": null,
+  "last_notification": null,
+  "history": [
+    {
+      "time": "2026-02-10T18:00:07.315468",
+      "success": true,
+      "error_type": null,
+      "items_count": 2
+    },
+    {
+      "time": "2026-02-10T19:00:02.858292",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-10T20:00:03.042327",
+      "success": true,
+      "error_type": null,
+      "items_count": 2
+    },
+    {
+      "time": "2026-02-10T21:00:03.045868",
+      "success": true,
+      "error_type": null,
+      "items_count": 2
+    },
+    {
+      "time": "2026-02-10T22:00:07.019118",
+      "success": true,
+      "error_type": null,
+      "items_count": 1
+    },
+    {
+      "time": "2026-02-10T23:00:02.677799",
+      "success": true,
+      "error_type": null,
+      "items_count": 1
+    },
+    {
+      "time": "2026-02-10T23:29:53.889412",
+      "success": true,
+      "error_type": null,
+      "items_count": 1
+    },
+    {
+      "time": "2026-02-11T00:00:02.906234",
+      "success": true,
+      "error_type": null,
+      "items_count": 2
+    },
+    {
+      "time": "2026-02-11T00:59:53.928880",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T01:00:01.589192",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T02:00:02.905587",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T03:00:03.118432",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T04:00:03.275935",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T05:00:03.477046",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T06:00:03.997855",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T07:00:03.968498",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T08:00:03.946305",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T09:00:03.742647",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T10:00:02.820607",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    },
+    {
+      "time": "2026-02-11T11:00:02.872894",
+      "success": true,
+      "error_type": null,
+      "items_count": 3
+    }
+  ]
+}

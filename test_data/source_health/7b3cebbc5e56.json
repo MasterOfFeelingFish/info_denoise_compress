@@ -1,0 +1,138 @@
+{
+  "source_url": "https://www.techflowpost.com/api/client/common/rss.xml",
+  "source_name": "TechFlow 快讯",
+  "status": "ok",
+  "consecutive_failures": 0,
+  "total_checks": 111,
+  "total_successes": 111,
+  "last_check": "2026-02-11T11:00:02.193804",
+  "last_success": "2026-02-11T11:00:02.193804",
+  "last_error": null,
+  "error_type": null,
+  "repair_attempts": 0,
+  "repair_status": null,
+  "repaired_url": null,
+  "last_notification": null,
+  "history": [
+    {
+      "time": "2026-02-10T18:00:05.897945",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-10T19:00:02.143197",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-10T20:00:02.348434",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-10T21:00:02.325164",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-10T22:00:06.188708",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-10T23:00:01.862987",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-10T23:29:53.063249",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T00:00:02.201442",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T00:59:53.243424",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T01:00:00.892356",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T02:00:02.164334",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T03:00:02.402868",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T04:00:02.555632",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T05:00:02.087166",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T06:00:03.260889",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T07:00:03.178417",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T08:00:03.212363",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T09:00:02.987393",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T10:00:02.103233",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    },
+    {
+      "time": "2026-02-11T11:00:02.193804",
+      "success": true,
+      "error_type": null,
+      "items_count": 50
+    }
+  ]
+}
