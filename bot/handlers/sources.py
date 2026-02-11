@@ -148,6 +148,9 @@ async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def start_source_suggestion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the source suggestion conversation."""
+    from utils.conv_manager import activate_conv
+    activate_conv(context, "sources")
+
     query = update.callback_query
     await safe_answer_callback_query(query)
 
@@ -168,6 +171,9 @@ async def start_source_suggestion(update: Update, context: ContextTypes.DEFAULT_
 
 async def start_add_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start adding a Twitter RSS feed."""
+    from utils.conv_manager import activate_conv
+    activate_conv(context, "sources")
+
     query = update.callback_query
     await safe_answer_callback_query(query)
 
@@ -203,8 +209,8 @@ async def start_add_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return AWAITING_TWITTER_ADD
 
 
-async def show_twitter_tutorial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show Twitter RSS tutorial."""
+async def show_twitter_tutorial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show Twitter RSS tutorial. Returns AWAITING_TWITTER_ADD to stay in conversation."""
     query = update.callback_query
     await safe_answer_callback_query(query)
 
@@ -228,14 +234,25 @@ async def show_twitter_tutorial(update: Update, context: ContextTypes.DEFAULT_TY
         f"{ui['twitter_tutorial_step5']}\n\n"
         f"{ui['divider']}\n"
         f"{ui['twitter_tutorial_tip']}\n\n"
-        f"{ui['twitter_tutorial_future']}",
+        f"{ui['twitter_tutorial_future']}\n\n"
+        f"👇 {ui.get('twitter_paste_hint', '获取到 RSS 地址后，直接粘贴到此聊天窗口发送即可。')}",
         reply_markup=reply_markup,
         disable_web_page_preview=True
     )
+    return AWAITING_TWITTER_ADD
 
 
 async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle Twitter RSS feed addition - only accepts RSS URL."""
+    from utils.conv_manager import is_active_conv
+    if not is_active_conv(context, "sources"):
+        logger.info("Sources text handler yielding - another conversation is active")
+        await update.message.reply_text(
+            "⚠️ 信息源操作已中断。请重新点击添加按钮。\n"
+            "Source action interrupted. Please click the add button again."
+        )
+        return ConversationHandler.END
+
     from services.rss_fetcher import validate_rss_url, add_source
 
     telegram_id = str(update.effective_user.id)
@@ -318,6 +335,9 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def start_add_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start adding a website RSS feed."""
+    from utils.conv_manager import activate_conv
+    activate_conv(context, "sources")
+
     query = update.callback_query
     await safe_answer_callback_query(query)
 
@@ -337,6 +357,10 @@ async def start_add_website(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle website RSS feed addition."""
+    from utils.conv_manager import is_active_conv
+    if not is_active_conv(context, "sources"):
+        return ConversationHandler.END
+
     from services.rss_fetcher import validate_url, auto_detect_rss
 
     telegram_id = str(update.effective_user.id)
@@ -425,6 +449,10 @@ async def handle_website_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_source_suggestion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user's source suggestion."""
+    from utils.conv_manager import is_active_conv
+    if not is_active_conv(context, "sources"):
+        return ConversationHandler.END
+
     user = update.effective_user
     telegram_id = str(user.id)
     suggestion = update.message.text
@@ -448,6 +476,9 @@ async def handle_source_suggestion(update: Update, context: ContextTypes.DEFAULT
 
 async def start_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start bulk source import conversation."""
+    from utils.conv_manager import activate_conv
+    activate_conv(context, "sources")
+
     query = update.callback_query
     await safe_answer_callback_query(query)
 
@@ -472,6 +503,10 @@ async def start_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def handle_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle bulk source import."""
+    from utils.conv_manager import is_active_conv
+    if not is_active_conv(context, "sources"):
+        return ConversationHandler.END
+
     from services.rss_fetcher import validate_twitter_handle, validate_url, auto_detect_rss
 
     telegram_id = str(update.effective_user.id)
@@ -779,6 +814,8 @@ def get_sources_handler() -> ConversationHandler:
             ],
             AWAITING_TWITTER_ADD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_twitter_add),
+                CallbackQueryHandler(show_twitter_tutorial, pattern="^twitter_tutorial$"),
+                CallbackQueryHandler(start_add_twitter, pattern="^sources_add_twitter$"),
             ],
             AWAITING_WEBSITE_ADD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_website_add),
@@ -790,6 +827,7 @@ def get_sources_handler() -> ConversationHandler:
         fallbacks=[
             CommandHandler("cancel", cancel_sources),
         ],
+        conversation_timeout=300,  # Auto-cancel after 5 minutes idle
     )
 
 
@@ -803,5 +841,5 @@ def get_sources_callbacks():
         CallbackQueryHandler(handle_delete_twitter, pattern="^del_tw_"),
         CallbackQueryHandler(handle_delete_website, pattern="^del_web_"),
         CallbackQueryHandler(sources_back, pattern="^sources_back$"),
-        CallbackQueryHandler(show_twitter_tutorial, pattern="^twitter_tutorial$"),
+        # Note: twitter_tutorial is handled inside ConversationHandler states (AWAITING_TWITTER_ADD)
     ]

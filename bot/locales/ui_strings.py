@@ -29,8 +29,14 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "onboarding_confirm_title": "确认偏好",
         "onboarding_confirm_prompt": "以上是我对你兴趣的理解。\n\n确认后，你将：\n• 体验默认信息源的内容\n• 随时可以添加自己的信息源\n• 每天 9:00 收到个性化简报",
         "btn_confirm": "确认",
+        "btn_adjust_profile": "✏️ 调整画像",
         "btn_restart": "重新开始",
         "btn_cancel": "取消",
+        "adjust_profile_prompt": "✏️ 请告诉我你想怎么调整画像：",
+        "adjust_profile_current": "当前画像：",
+        "adjust_profile_hint": "例如：「去掉 NFT 相关的，多加一些 DeFi 协议的内容」\n\n👇 直接在聊天窗口输入你的修改意见：",
+        "profile_adjusted": "画像已更新 ✨",
+        "adjust_limit_reached": "⚠️ 画像已调整 3 次，请确认当前画像或重新开始。",
         
         # ============ 偏好设置 ============
         "settings_title": "偏好设置",
@@ -86,7 +92,8 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "twitter_step3_title": "━━━ 第三步：提交给我们 ━━━",
         "twitter_step3_desc": "请直接发送 RSS 地址，例如：\nhttps://rss.app/feeds/xxxxxxxx.xml",
         "twitter_future_hint": "🚀 这是临时方案。后续付费版本中，AI 将根据\n你的画像自动发现优质信息源，无需手动配置。",
-        "twitter_input_prompt": "发送 RSS 地址 或 /cancel 取消",
+        "twitter_input_prompt": "👇 直接在此聊天窗口粘贴 RSS 地址并发送，或 /cancel 取消",
+        "twitter_paste_hint": "获取到 RSS 地址后，直接粘贴到此聊天窗口发送即可。",
         "btn_view_tutorial": "查看教程",
         
         # Twitter 教程
@@ -288,8 +295,8 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "help_stats_desc": "  查看你的注册时间、反馈历史、满意度趋势。",
         "help_feedback_title": "反馈机制",
         "help_feedback_desc": "  每条推送消息都有反馈按钮（👍/👎）。\n  你的反馈会被收集并在每日凌晨批量更新偏好画像，\n  次日推送将体现你的最新偏好。",
-        "help_community_link": "💬 社群交流：https://t.me/web3dailydigest",
-        "help_footer": "有问题？使用上方命令或主菜单操作。\n\n💬 加入社群：https://t.me/web3dailydigest",
+        "help_community_link": "💬 社群交流：https://t.me/voiverse",
+        "help_footer": "有问题？使用上方命令或主菜单操作。\n\n💬 加入社群：https://t.me/voiverse",
         
         # ============ 管理员 ============
         "admin_no_permission": "🔒 无权限",
@@ -438,7 +445,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "fetching_content": "🔍 抓取最新内容",
         "ai_filtering": "🤖 AI 智能筛选",
         "generating_report": "📊 生成个性化简报",
-        "expected_time": "预计需要 10-20 秒，请稍候...",
+        "expected_time": "⏳ 正在处理，请稍候...",
         "opening_article": "📖 正在打开原文...",
         "retrying": "正在重试...",
         
@@ -628,8 +635,14 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "onboarding_confirm_title": "Confirm Preferences",
         "onboarding_confirm_prompt": "This is my understanding of your interests.\n\nAfter confirming, you will:\n• Experience content from default sources\n• Add your own sources anytime\n• Receive personalized digest daily at 9:00 AM",
         "btn_confirm": "Confirm",
+        "btn_adjust_profile": "✏️ Adjust Profile",
         "btn_restart": "Start Over",
         "btn_cancel": "Cancel",
+        "adjust_profile_prompt": "✏️ Tell me how you'd like to adjust your profile:",
+        "adjust_profile_current": "Current profile:",
+        "adjust_profile_hint": "For example: \"Remove NFT stuff, add more DeFi protocol content\"\n\n👇 Type your adjustment in the chat:",
+        "profile_adjusted": "Profile updated ✨",
+        "adjust_limit_reached": "⚠️ Profile adjusted 3 times. Please confirm or start over.",
         
         # ============ Settings ============
         "settings_title": "Preferences",
@@ -685,7 +698,8 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "twitter_step3_title": "━━━ Step 3: Submit to Us ━━━",
         "twitter_step3_desc": "Send the RSS URL directly, e.g.:\nhttps://rss.app/feeds/xxxxxxxx.xml",
         "twitter_future_hint": "🚀 This is a temporary solution. In future paid versions,\nAI will auto-discover quality sources based on your profile.",
-        "twitter_input_prompt": "Send RSS URL or /cancel",
+        "twitter_input_prompt": "👇 Paste the RSS URL directly in this chat and send, or /cancel",
+        "twitter_paste_hint": "Once you have the RSS URL, just paste it in this chat and send.",
         "btn_view_tutorial": "View Tutorial",
         
         # Twitter Tutorial
@@ -887,8 +901,8 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "help_stats_desc": "  View registration date, feedback history, satisfaction trends.",
         "help_feedback_title": "Feedback System",
         "help_feedback_desc": "  Each message has feedback buttons (👍/👎).\n  Feedback collected and profile updated daily at midnight.\n  Next day's push reflects your latest preferences.",
-        "help_community_link": "💬 Community: https://t.me/web3dailydigest",
-        "help_footer": "Questions? Use commands above or main menu.\n\n💬 Join community: https://t.me/web3dailydigest",
+        "help_community_link": "💬 Community: https://t.me/voiverse",
+        "help_footer": "Questions? Use commands above or main menu.\n\n💬 Join community: https://t.me/voiverse",
         
         # ============ Admin ============
         "admin_no_permission": "🔒 No Permission",
@@ -1037,7 +1051,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "fetching_content": "🔍 Fetching latest content",
         "ai_filtering": "🤖 AI filtering",
         "generating_report": "📊 Generating personalized report",
-        "expected_time": "This may take 10-20 seconds...",
+        "expected_time": "⏳ Processing, please wait...",
         "opening_article": "📖 Opening article...",
         "retrying": "Retrying...",
         
@@ -1227,8 +1241,14 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "onboarding_confirm_title": "設定の確認",
         "onboarding_confirm_prompt": "これがあなたの興味の理解です。\n\n確認後：\n• デフォルト情報源のコンテンツを体験\n• いつでも情報源を追加可能\n• 毎日9:00にダイジェストを受信",
         "btn_confirm": "確認",
+        "btn_adjust_profile": "✏️ プロフィール調整",
         "btn_restart": "やり直す",
         "btn_cancel": "キャンセル",
+        "adjust_profile_prompt": "✏️ プロフィールの調整内容を教えてください：",
+        "adjust_profile_current": "現在のプロフィール：",
+        "adjust_profile_hint": "例：「NFT関連を削除して、DeFiプロトコルの内容を増やして」\n\n👇 チャットに入力してください：",
+        "profile_adjusted": "プロフィール更新済み ✨",
+        "adjust_limit_reached": "⚠️ プロフィールは3回調整済みです。確認またはやり直してください。",
         
         # ============ 設定 ============
         "settings_title": "設定",
@@ -1408,7 +1428,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "fetching_content": "🔍 最新コンテンツを取得中",
         "ai_filtering": "🤖 AIフィルタリング中",
         "generating_report": "📊 パーソナライズレポートを生成中",
-        "expected_time": "10〜20秒かかります...",
+        "expected_time": "⏳ 処理中です、お待ちください...",
         "opening_article": "📖 記事を開いています...",
         "retrying": "再試行中...",
         
@@ -1598,8 +1618,14 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "onboarding_confirm_title": "설정 확인",
         "onboarding_confirm_prompt": "이것이 당신의 관심사에 대한 이해입니다.\n\n확인 후:\n• 기본 소스의 콘텐츠 경험\n• 언제든지 소스 추가 가능\n• 매일 오전 9시에 다이제스트 수신",
         "btn_confirm": "확인",
+        "btn_adjust_profile": "✏️ 프로필 조정",
         "btn_restart": "다시 시작",
         "btn_cancel": "취소",
+        "adjust_profile_prompt": "✏️ 프로필을 어떻게 조정하고 싶은지 알려주세요:",
+        "adjust_profile_current": "현재 프로필:",
+        "adjust_profile_hint": "예: 「NFT 관련 내용을 빼고 DeFi 프로토콜 내용을 추가해줘」\n\n👇 채팅창에 입력하세요:",
+        "profile_adjusted": "프로필 업데이트 완료 ✨",
+        "adjust_limit_reached": "⚠️ 프로필이 3회 조정되었습니다. 확인하거나 다시 시작하세요.",
         
         # ============ 설정 ============
         "settings_title": "설정",
@@ -1779,7 +1805,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "fetching_content": "🔍 최신 콘텐츠 가져오는 중",
         "ai_filtering": "🤖 AI 필터링 중",
         "generating_report": "📊 맞춤 리포트 생성 중",
-        "expected_time": "10-20초 정도 소요됩니다...",
+        "expected_time": "⏳ 처리 중입니다. 잠시만 기다려 주세요...",
         "opening_article": "📖 기사를 여는 중...",
         "retrying": "재시도 중...",
         
@@ -1970,14 +1996,16 @@ class LocaleDict(dict):
             return default if default is not None else f"[{key}]"
 
 
-def get_ui_locale(lang: str) -> Dict[str, str]:
+def get_ui_locale(lang: str, telegram_id: str = None) -> Dict[str, str]:
     """
     Get UI strings for a language.
     
     Falls back to English for missing keys, then to Chinese.
+    For unsupported languages: checks cached AI translations if telegram_id is provided.
     
     Args:
-        lang: Language code (e.g., "zh", "en", "ja", "ko")
+        lang: Language code (e.g., "zh", "en", "ja", "ko", "ru")
+        telegram_id: Optional user ID to look up cached translations for unsupported languages
         
     Returns:
         Dictionary of UI strings for the language with fallback support
@@ -1987,7 +2015,21 @@ def get_ui_locale(lang: str) -> Dict[str, str]:
     if lang == "en":
         return en_dict
     
-    lang_dict = UI_STRINGS.get(lang, en_dict)
+    lang_dict = UI_STRINGS.get(lang, None)
     
-    # Return a LocaleDict that falls back to English for missing keys
-    return LocaleDict(lang_dict, en_dict)
+    if lang_dict is not None:
+        # Supported language found
+        return LocaleDict(lang_dict, en_dict)
+    
+    # Unsupported language: check cached AI translations if telegram_id provided
+    if telegram_id:
+        try:
+            from services.language_service import load_ui_cache
+            cached = load_ui_cache(telegram_id)
+            if cached:
+                return LocaleDict(cached, en_dict)
+        except Exception:
+            pass
+    
+    # Fallback to English
+    return LocaleDict(en_dict, en_dict)

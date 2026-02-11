@@ -16,8 +16,9 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-# Conversation state for adding user
+# Conversation states for admin flows
 WAITING_FOR_USER_ID = 100
+WAITING_FOR_BULK_SOURCES = 101
 
 
 def is_admin(user_id: int) -> bool:
@@ -64,6 +65,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(ui["admin_data_analysis"], callback_data="admin_analytics")],
         [InlineKeyboardButton("📡 信息源健康", callback_data="admin_source_health")],
+        [InlineKeyboardButton("📢 群组管理", callback_data="admin_group_manage")],
+        [InlineKeyboardButton("🎫 生成兑换码", callback_data="admin_gen_code")],
         [InlineKeyboardButton(f"{toggle_emoji} {toggle_text}", callback_data="admin_wl_toggle")],
         [InlineKeyboardButton(ui["admin_view_whitelist"], callback_data="admin_wl_list")],
         [
@@ -150,6 +153,9 @@ async def admin_wl_list_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 async def admin_wl_add_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Prompt admin to enter user ID to add."""
+    from utils.conv_manager import activate_conv
+    activate_conv(context, "admin")
+
     query = update.callback_query
     await query.answer()
 
@@ -173,6 +179,9 @@ async def admin_wl_add_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def admin_wl_del_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Prompt admin to enter user ID to remove."""
+    from utils.conv_manager import activate_conv
+    activate_conv(context, "admin")
+
     query = update.callback_query
     await query.answer()
 
@@ -666,8 +675,11 @@ async def source_health_dashboard(update: Update, context: ContextTypes.DEFAULT_
     )
 
 
-async def admin_bulk_add_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show bulk add sources prompt."""
+async def admin_bulk_add_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show bulk add sources prompt. Returns WAITING_FOR_BULK_SOURCES state."""
+    from utils.conv_manager import activate_conv
+    activate_conv(context, "admin")
+
     query = update.callback_query
     await query.answer()
     
@@ -684,16 +696,11 @@ async def admin_bulk_add_sources(update: Update, context: ContextTypes.DEFAULT_T
             [InlineKeyboardButton("« 返回", callback_data="admin_source_health")]
         ])
     )
-    context.user_data["awaiting_bulk_sources"] = True
+    return WAITING_FOR_BULK_SOURCES
 
 
-async def handle_bulk_sources_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Process bulk source addition input."""
-    if not context.user_data.get("awaiting_bulk_sources"):
-        return
-    
-    context.user_data.pop("awaiting_bulk_sources", None)
-    
+async def handle_bulk_sources_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Process bulk source addition input. Called within admin ConversationHandler."""
     text = update.message.text.strip()
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     
@@ -713,8 +720,15 @@ async def handle_bulk_sources_input(update: Update, context: ContextTypes.DEFAUL
             failed.append(f"{name} (URL无效)")
             continue
         
-        # Add to default sources config
-        added.append(f"✅ {name}")
+        # Add to default sources config and persist
+        try:
+            from services.rss_fetcher import add_source
+            if add_source("websites", name, url):
+                added.append(f"✅ {name}")
+            else:
+                failed.append(f"{name} (保存失败)")
+        except Exception as e:
+            failed.append(f"{name} ({str(e)[:30]})")
     
     result = f"📊 批量添加结果\n{'─' * 24}\n\n"
     if added:
@@ -728,6 +742,133 @@ async def handle_bulk_sources_input(update: Update, context: ContextTypes.DEFAUL
     ]
     
     await update.message.reply_text(result, reply_markup=InlineKeyboardMarkup(keyboard))
+    return ConversationHandler.END
+
+
+# ============ Group Management Dashboard (B2) ============
+
+async def admin_group_manage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show group management dashboard for admin."""
+    query = update.callback_query
+    await query.answer()
+    
+    if not is_admin(query.from_user.id):
+        await query.answer("No permission", show_alert=True)
+        return
+    
+    from config import FEATURE_GROUP_CHAT
+    if not FEATURE_GROUP_CHAT:
+        await query.edit_message_text(
+            "⚠️ 群聊功能未启用。\n\n设置 FEATURE_GROUP_CHAT=true 启用。",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("« 返回", callback_data="admin_panel")]
+            ])
+        )
+        return
+    
+    from handlers.group import get_all_group_configs
+    from config import GROUP_CONFIGS_DIR
+    import os
+    
+    # Get ALL configs (not just enabled ones)
+    all_configs = []
+    if os.path.exists(GROUP_CONFIGS_DIR):
+        for filename in os.listdir(GROUP_CONFIGS_DIR):
+            if filename.endswith(".json"):
+                filepath = os.path.join(GROUP_CONFIGS_DIR, filename)
+                try:
+                    import json as _json
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        all_configs.append(_json.load(f))
+                except Exception:
+                    continue
+    
+    if not all_configs:
+        text = (
+            "📢 群组管理\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "暂无已配置的群组。\n\n"
+            "在群组中发送 /setup 开始配置。"
+        )
+        keyboard = [[InlineKeyboardButton("« 返回管理面板", callback_data="admin_panel")]]
+    else:
+        lines = ["📢 群组管理", "━━━━━━━━━━━━━━━━━━━━━", ""]
+        keyboard = []
+        for cfg in all_configs:
+            gid = cfg.get("group_id", "?")
+            title = cfg.get("group_title", "Unknown")
+            enabled = cfg.get("enabled", True)
+            push_hour = cfg.get("push_hour", 9)
+            last_push = cfg.get("last_push_date", "从未推送")
+            
+            status = "✅" if enabled else "❌"
+            toggle_label = "禁用" if enabled else "启用"
+            
+            lines.append(f"{status} {title}")
+            lines.append(f"  推送: {push_hour}:00 | 上次: {last_push}")
+            lines.append(f"  ID: {gid}")
+            lines.append("")
+            
+            keyboard.append([InlineKeyboardButton(
+                f"{'🔴 禁用' if enabled else '🟢 启用'} {title[:15]}",
+                callback_data=f"admin_group_toggle_{gid}"
+            )])
+        
+        text = "\n".join(lines)
+        keyboard.append([InlineKeyboardButton("« 返回管理面板", callback_data="admin_panel")])
+    
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def admin_group_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle group enabled/disabled status."""
+    query = update.callback_query
+    await query.answer()
+    
+    if not is_admin(query.from_user.id):
+        return
+    
+    group_id = query.data.replace("admin_group_toggle_", "")
+    
+    from handlers.group import load_group_config, save_group_config
+    config = load_group_config(group_id)
+    if config:
+        config["enabled"] = not config.get("enabled", True)
+        save_group_config(group_id, config)
+        status = "启用" if config["enabled"] else "禁用"
+        await query.answer(f"已{status}群组 {config.get('group_title', group_id)}", show_alert=True)
+    
+    # Refresh dashboard
+    await admin_group_manage(update, context)
+
+
+# ============ Admin Redeem Code Generation (C1) ============
+
+async def admin_gen_code_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate a redemption code from admin panel."""
+    query = update.callback_query
+    await query.answer()
+    
+    if not is_admin(query.from_user.id):
+        return
+    
+    from handlers.payment import generate_redeem_code
+    code = generate_redeem_code(days=30, created_by=str(query.from_user.id))
+    
+    await query.edit_message_text(
+        f"🎫 兑换码已生成\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📋 Code: <code>{code}</code>\n"
+        f"⏳ 有效期: 30 天\n\n"
+        f"将此码发给付费用户，用户在 Bot 中选择\n"
+        f"「🎫 兑换码」输入即可升级 Pro。\n\n"
+        f"💡 使用 /gencode [天数] 可自定义有效期",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎫 再生成一个", callback_data="admin_gen_code")],
+            [InlineKeyboardButton("« 返回管理面板", callback_data="admin_panel")],
+        ])
+    )
 
 
 # ============ Handler Registration ============
@@ -739,14 +880,19 @@ def get_admin_handlers():
         entry_points=[
             CallbackQueryHandler(admin_wl_add_callback, pattern="^admin_wl_add$"),
             CallbackQueryHandler(admin_wl_del_callback, pattern="^admin_wl_del$"),
+            CallbackQueryHandler(admin_bulk_add_sources, pattern="^admin_bulk_add_sources$"),
         ],
         states={
             WAITING_FOR_USER_ID: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_id_input),
             ],
+            WAITING_FOR_BULK_SOURCES: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_bulk_sources_input),
+            ],
         },
         fallbacks=[
             CallbackQueryHandler(cancel_admin_action, pattern="^admin_panel$"),
+            CallbackQueryHandler(source_health_dashboard, pattern="^admin_source_health$"),
         ],
         per_message=False,
     )
@@ -762,7 +908,12 @@ def get_admin_handlers():
         CallbackQueryHandler(show_analytics_detail, pattern="^analytics_detail$"),
         # Source health handlers (T4)
         CallbackQueryHandler(source_health_dashboard, pattern="^admin_source_health$"),
-        CallbackQueryHandler(admin_bulk_add_sources, pattern="^admin_bulk_add_sources$"),
+        # Group management handler
+        CallbackQueryHandler(admin_group_manage, pattern="^admin_group_manage$"),
+        CallbackQueryHandler(admin_group_toggle, pattern="^admin_group_toggle_"),
+        # Redeem code generation handler
+        CallbackQueryHandler(admin_gen_code_callback, pattern="^admin_gen_code$"),
+        # Admin ConversationHandler (whitelist add/del + bulk source add)
         admin_conv,
         # Command handlers (legacy, still work)
         CommandHandler("admin", admin_panel),

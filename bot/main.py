@@ -42,6 +42,8 @@ from handlers.feedback import get_feedback_handlers
 from handlers.settings import get_settings_handler, get_settings_callbacks
 from handlers.sources import get_sources_handler, get_sources_callbacks
 from handlers.admin import get_admin_handlers
+from handlers.payment import get_payment_handlers
+from handlers.group import get_group_handler, get_group_callbacks, handle_bot_removed
 from services.rate_limiter import get_rate_limiter
 
 
@@ -480,6 +482,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             InlineKeyboardButton(ui["menu_preferences"], callback_data="update_preferences"),
         ],
         [InlineKeyboardButton(ui["menu_sources"], callback_data="manage_sources")],
+        [InlineKeyboardButton(
+            ui.get("help_group_setup", "📢 群组推送指南"),
+            callback_data="group_setup_guide"
+        )],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -695,6 +701,17 @@ async def post_init(application: Application) -> None:
 
     logger.info("Scheduled data cleanup at 00:30 Beijing Time")
 
+    # T7: Group digest push — check every hour if any group is due for push
+    from config import FEATURE_GROUP_CHAT
+    if FEATURE_GROUP_CHAT:
+        application.job_queue.run_repeating(
+            callback=group_digest_push_job,
+            interval=3600,  # Check every hour
+            first=120,  # Start 2 minutes after boot
+            name="group_digest_push"
+        )
+        logger.info("Scheduled group digest push job (hourly check)")
+
     # Schedule prefetch jobs (if enabled)
     # 预抓取任务：每隔 PREFETCH_INTERVAL_HOURS 小时执行一次
     if PREFETCH_INTERVAL_HOURS > 0:
@@ -804,6 +821,85 @@ async def prefetch_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     except Exception as e:
         logger.error(f"Prefetch job failed: {e}", exc_info=True)
+
+
+async def group_digest_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    T7: Scheduled job to push daily digest to configured groups.
+    Checks each group's push_hour and sends public digest if it's time.
+    """
+    from handlers.group import get_all_group_configs
+    from services.rss_fetcher import fetch_all_sources
+
+    beijing_tz = ZoneInfo("Asia/Shanghai")
+    current_hour = datetime.now(beijing_tz).hour
+
+    try:
+        configs = get_all_group_configs()
+        if not configs:
+            return
+
+        for group_config in configs:
+            push_hour = group_config.get("push_hour", 9)
+            if current_hour != push_hour:
+                continue
+
+            group_id = group_config.get("group_id")
+            if not group_id:
+                continue
+
+            # Check if already pushed today
+            today = datetime.now().strftime("%Y-%m-%d")
+            last_push = group_config.get("last_push_date")
+            if last_push == today:
+                continue
+
+            try:
+                # Generate and send group digest
+                profile = group_config.get("profile", "Web3 general news")
+                language = group_config.get("language", "zh")
+
+                # Fetch public sources
+                raw_content = await fetch_all_sources(hours_back=24)
+                if not raw_content:
+                    continue
+
+                # Try to generate group digest, fall back to simple notification
+                try:
+                    from services.digest_processor import generate_group_digest
+                    digest_text = await generate_group_digest(raw_content, profile, language)
+                except (ImportError, AttributeError):
+                    # generate_group_digest not yet implemented, send simple summary
+                    digest_text = f"📰 Web3 每日简报\n📅 {today}\n\n今日共收集 {len(raw_content)} 条信息。\n使用 /start 私聊 Bot 获取个性化推荐。"
+
+                # Add group CTA footer
+                footer = (
+                    "\n\n━━━━━━━━━━━━━━━━━━━━━\n"
+                    "🤖 想获得个性化推荐？\n"
+                    "私聊发送 /start，配置属于您自己偏好的 Web3 信息降噪 Bot\n"
+                    "Send \"/start\" in a private message to configure your own preferred web3 noise reduction bot.\n"
+                    "━━━━━━━━━━━━━━━━━━━━━"
+                )
+
+                await context.bot.send_message(
+                    chat_id=group_id,
+                    text=digest_text + footer,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
+
+                # Update last push date
+                from handlers.group import save_group_config
+                group_config["last_push_date"] = today
+                save_group_config(group_id, group_config)
+
+                logger.info(f"Group digest pushed to {group_id}")
+
+            except Exception as e:
+                logger.error(f"Failed to push digest to group {group_id}: {e}")
+
+    except Exception as e:
+        logger.error(f"Group digest push job failed: {e}", exc_info=True)
 
 
 async def rate_limit_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -961,6 +1057,61 @@ def main() -> None:
     application.add_handler(CommandHandler("testprofile", test_profile_command))
     application.add_handler(CommandHandler("testprefetch", test_prefetch_command))
     application.add_handler(CommandHandler("stats", stats_command))
+
+    # Payment handlers (T5)
+    for handler in get_payment_handlers():
+        application.add_handler(handler)
+    logger.info("Payment handlers registered")
+
+    # Group chat handlers (T7)
+    group_handler = get_group_handler()
+    if group_handler:
+        application.add_handler(group_handler)
+    for callback in get_group_callbacks():
+        application.add_handler(callback)
+    # Bot removal detection
+    from telegram.ext import ChatMemberHandler
+    application.add_handler(ChatMemberHandler(handle_bot_removed, ChatMemberHandler.MY_CHAT_MEMBER))
+    logger.info("Group chat handlers registered")
+
+    # Group setup guide callback (private chat)
+    async def group_setup_guide_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show group setup guide when clicked from help menu."""
+        query = update.callback_query
+        await query.answer()
+        from handlers.group import setup_command
+        # Create a fake update with message for setup_command
+        # The setup_command will detect private chat and show the guide
+        guide_text = (
+            "📋 群组推送配置指南\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📌 如何将 Bot 添加到群组：\n\n"
+            "1️⃣ 打开你的 Telegram 群组\n"
+            "2️⃣ 点击群组名称 → 「添加成员」\n"
+            "3️⃣ 搜索 @learnfi_bot 并添加\n"
+            "4️⃣ 将 Bot 设为「管理员」（需要发消息权限）\n"
+            "5️⃣ 在群组中发送 /setup 开始配置\n\n"
+            "⚙️ 配置流程：\n"
+            "• 描述群组关注的 Web3 方向（如 DeFi、Layer2）\n"
+            "• 选择每日推送时间\n"
+            "• 选择推送语言\n\n"
+            "配置完成后，Bot 每天定时在群里推送 Web3 简报 📰\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Setup Guide for Groups\n\n"
+            "1. Open your Telegram group\n"
+            "2. Tap group name → Add Members\n"
+            "3. Search @learnfi_bot and add\n"
+            "4. Make Bot an Admin (needs send messages)\n"
+            "5. Send /setup in the group to configure"
+        )
+        await query.edit_message_text(
+            guide_text,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("« 返回帮助 / Back to Help", callback_data="show_help")]
+            ])
+        )
+
+    application.add_handler(CallbackQueryHandler(group_setup_guide_callback, pattern="^group_setup_guide$"))
 
     # Callback for help from unknown message
     application.add_handler(CallbackQueryHandler(show_help_callback, pattern="^show_help$"))

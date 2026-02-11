@@ -788,14 +788,19 @@ class TestTwitterSourceGuide:
         assert AWAITING_TWITTER_ADD is not None
         assert isinstance(AWAITING_TWITTER_ADD, int)
 
-    def test_twitter_tutorial_callback_registered(self):
-        """twitter_tutorial callback should be registered"""
-        from handlers.sources import get_sources_callbacks
+    def test_twitter_tutorial_in_conversation_handler(self):
+        """twitter_tutorial callback should be in ConversationHandler states"""
+        from handlers.sources import get_sources_handler, AWAITING_TWITTER_ADD
+        from telegram.ext import CallbackQueryHandler
         
-        callbacks = get_sources_callbacks()
-        patterns = [cb.pattern.pattern for cb in callbacks]
+        handler = get_sources_handler()
+        state_handlers = handler.states.get(AWAITING_TWITTER_ADD, [])
+        callback_patterns = [
+            h.pattern.pattern for h in state_handlers
+            if isinstance(h, CallbackQueryHandler) and hasattr(h, 'pattern')
+        ]
         
-        assert "^twitter_tutorial$" in patterns
+        assert "^twitter_tutorial$" in callback_patterns
 
     def test_sources_add_twitter_callback_in_conversation(self):
         """sources_add_twitter should be in conversation handler entry points"""
@@ -837,6 +842,7 @@ class TestHandleTwitterAdd:
         mock_update.message = mock_message
         
         mock_context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+        mock_context.user_data = {"_active_text_conv": "sources"}
         
         # Call function
         result = await handle_twitter_add(mock_update, mock_context)
@@ -867,6 +873,7 @@ class TestHandleTwitterAdd:
         mock_update.message = mock_message
         
         mock_context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+        mock_context.user_data = {"_active_text_conv": "sources"}
         
         # Mock track_event to avoid side effects
         with patch("handlers.sources.track_event"):

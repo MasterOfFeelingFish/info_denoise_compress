@@ -195,6 +195,35 @@ def extract_twitter_author(link: str) -> str:
         return ""
 
 
+async def _trigger_auto_repair(source_url: str, source_name: str) -> None:
+    """
+    T3: Trigger AI auto-repair for a failing source.
+    Called when consecutive_failures >= 3. Runs in background to not block fetching.
+    """
+    from config import FEATURE_SOURCE_HEALTH
+    if not FEATURE_SOURCE_HEALTH:
+        return
+    try:
+        from services.source_health_monitor import check_and_repair, send_health_notification
+        result = await check_and_repair(source_url, source_name)
+        action = result.get("action") or result.get("status", "unknown")
+        logger.info(f"Auto-repair for {source_name}: {action}")
+
+        if action == "repaired":
+            new_url = result.get("new_url", "")
+            await send_health_notification(
+                source_url, source_name, "repaired",
+                detail=f"AI found new URL: {new_url}"
+            )
+        elif action in ("permanently_failed", "repair_failed"):
+            await send_health_notification(
+                source_url, source_name, "failed",
+                detail=f"AI repair {action}: {result.get('reason', '')}"
+            )
+    except Exception as e:
+        logger.warning(f"Auto-repair failed for {source_name}: {e}")
+
+
 async def fetch_single_source(
     client: httpx.AsyncClient,
     name: str,
@@ -253,12 +282,57 @@ async def fetch_single_source(
 
         logger.info(f"Fetched {len(items)} items from {name}")
 
+        # T3: Record successful health status
+        try:
+            from services.source_health_monitor import record_health_status
+            record_health_status(
+                source_url=url, source_name=name,
+                success=True, items_count=len(items)
+            )
+        except Exception as health_err:
+            logger.debug(f"Health record skipped for {name}: {health_err}")
+
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error fetching {name}: {e.response.status_code}")
+        # T3: Record HTTP error health status
+        try:
+            from services.source_health_monitor import record_health_status
+            record = record_health_status(
+                source_url=url, source_name=name, success=False,
+                error_type=str(e.response.status_code),
+                error_detail=f"HTTP {e.response.status_code}"
+            )
+            # T3: Trigger AI auto-repair if consecutive failures >= 3
+            if record.get("consecutive_failures", 0) >= 3:
+                await _trigger_auto_repair(url, name)
+        except Exception:
+            pass
     except httpx.TimeoutException:
         logger.error(f"Timeout fetching {name}")
+        try:
+            from services.source_health_monitor import record_health_status
+            record = record_health_status(
+                source_url=url, source_name=name, success=False,
+                error_type="timeout", error_detail="Request timed out"
+            )
+            # T3: Trigger AI auto-repair if consecutive failures >= 3
+            if record.get("consecutive_failures", 0) >= 3:
+                await _trigger_auto_repair(url, name)
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"Error fetching {name}: {e}")
+        try:
+            from services.source_health_monitor import record_health_status
+            record = record_health_status(
+                source_url=url, source_name=name, success=False,
+                error_type="exception", error_detail=str(e)[:200]
+            )
+            # T3: Trigger AI auto-repair if consecutive failures >= 3
+            if record.get("consecutive_failures", 0) >= 3:
+                await _trigger_auto_repair(url, name)
+        except Exception:
+            pass
 
     return items
 

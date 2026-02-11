@@ -63,7 +63,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         from handlers.admin import is_admin
         
         lang = get_user_language(telegram_id)
-        ui = get_ui_locale(lang)
+        # For unsupported languages, trigger async AI translation (caches for future use)
+        if lang not in ("zh", "en", "ja", "ko"):
+            try:
+                from services.language_service import get_ui_strings
+                ui = await get_ui_strings(telegram_id)
+            except Exception:
+                ui = get_ui_locale(lang, telegram_id=telegram_id)
+        else:
+            ui = get_ui_locale(lang, telegram_id=telegram_id)
         
         keyboard = [
             [InlineKeyboardButton(ui["menu_view_digest"], callback_data="view_digest")],
@@ -149,6 +157,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 @whitelist_required
 async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Begin the AI-driven preference collection (3 rounds)."""
+    from utils.conv_manager import activate_conv
+    activate_conv(context, "onboarding")
+
     query = update.callback_query
     
     # Get language from context (set during start) or default
@@ -204,6 +215,10 @@ async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user response in round 1, proceed to round 2."""
+    from utils.conv_manager import is_active_conv
+    if not is_active_conv(context, "onboarding"):
+        return ConversationHandler.END
+
     lang = context.user_data.get("language", "zh")
     user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
@@ -249,6 +264,10 @@ async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user response in round 2, proceed to round 3 (confirmation)."""
+    from utils.conv_manager import is_active_conv
+    if not is_active_conv(context, "onboarding"):
+        return ConversationHandler.END
+
     lang = context.user_data.get("language", "zh")
     user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
@@ -297,10 +316,15 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Store the generated profile summary
     context.user_data["profile_summary"] = ai_response
+    context.user_data["_profile_adjusted"] = False  # Track if user has used their one adjustment
 
-    # Add confirmation buttons
+    # Add confirmation buttons with one-time adjust option
     keyboard = [
         [InlineKeyboardButton(ui["btn_confirm"], callback_data="confirm_profile")],
+        [InlineKeyboardButton(
+            ui.get("btn_adjust_profile", "✏️ 调整画像"),
+            callback_data="adjust_profile"
+        )],
         [InlineKeyboardButton(ui["btn_restart"], callback_data="start_onboarding")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -323,8 +347,10 @@ async def retry_round_2_callback(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer(ui["retrying"])
 
-    # Get round 1 data
-    round_1 = context.user_data.get("onboarding_round_1")
+    # Get round 1 data from conversation_history
+    conversation_history = context.user_data.get("conversation_history", [])
+    round_1_entries = [h for h in conversation_history if h.get("round") == 1]
+    round_1 = round_1_entries[-1]["user_input"] if round_1_entries else None
     if not round_1:
         await query.edit_message_text(
             ui["retry_failed"],
@@ -362,6 +388,111 @@ async def retry_round_2_callback(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return ConversationHandler.END
+
+
+async def adjust_profile_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show prompt for user to describe profile adjustments. One-time only."""
+    query = update.callback_query
+    lang = context.user_data.get("language", "zh")
+    ui = get_ui_locale(lang)
+    await safe_answer_callback_query(query)
+
+    # Guard: only allow one adjustment
+    if context.user_data.get("_profile_adjusted"):
+        await query.edit_message_text(
+            f"{context.user_data.get('profile_summary', '')}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(ui["btn_confirm"], callback_data="confirm_profile")],
+                [InlineKeyboardButton(ui["btn_restart"], callback_data="start_onboarding")],
+            ])
+        )
+        return CONFIRM_PROFILE
+
+    profile_summary = context.user_data.get("profile_summary", "")
+
+    await query.edit_message_text(
+        f"{ui.get('adjust_profile_prompt', '✏️ 请告诉我你想怎么调整画像：')}\n\n"
+        f"{ui.get('adjust_profile_current', '当前画像：')}\n{profile_summary}\n\n"
+        f"{ui.get('adjust_profile_hint', '例如：「去掉 NFT 相关的，多加一些 DeFi 协议的内容」\n直接在聊天窗口输入你的修改意见：')}"
+    )
+
+    return ONBOARDING_ROUND_3  # Reuse round 3 state for adjustment text input
+
+
+async def handle_profile_adjustment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle user's profile adjustment request, regenerate profile."""
+    from utils.conv_manager import is_active_conv
+    if not is_active_conv(context, "onboarding"):
+        return ConversationHandler.END
+
+    lang = context.user_data.get("language", "zh")
+    user_language = context.user_data.get("language_native", get_language_native_name(lang))
+    ui = get_ui_locale(lang)
+
+    adjustment_text = update.message.text
+    current_profile = context.user_data.get("profile_summary", "")
+    history = context.user_data.get("conversation_history", [])
+
+    # Show typing indicator
+    await update.message.chat.send_action(ChatAction.TYPING)
+
+    # Build context for AI
+    round_1 = history[0]["user_input"] if len(history) > 0 else ""
+    round_2 = history[1]["user_input"] if len(history) > 1 else ""
+
+    system_instruction = get_prompt(
+        "onboarding_round3.txt",
+        round_1=round_1,
+        round_2=round_2,
+        user_language=user_language
+    )
+
+    try:
+        ai_response = await call_gemini(
+            prompt=(
+                f"Previous profile: '{current_profile}'\n"
+                f"User adjustment request: '{adjustment_text}'\n"
+                f"Original conversation - Round 1: '{round_1}', Round 2: '{round_2}'\n"
+                f"Please regenerate the profile incorporating the user's adjustments."
+            ),
+            system_instruction=system_instruction,
+            temperature=0.7
+        )
+    except Exception as e:
+        logger.error(f"Profile adjustment failed: {e}")
+        # On error, still allow the one adjustment attempt
+        keyboard = [
+            [InlineKeyboardButton(ui["btn_confirm"], callback_data="confirm_profile")],
+            [InlineKeyboardButton(
+                ui.get("btn_adjust_profile", "✏️ 调整画像"),
+                callback_data="adjust_profile"
+            )],
+            [InlineKeyboardButton(ui["btn_restart"], callback_data="start_onboarding")],
+        ]
+        await update.message.reply_text(
+            ui["ai_unavailable"],
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return CONFIRM_PROFILE
+
+    # Update stored profile
+    context.user_data["profile_summary"] = ai_response
+    context.user_data["_profile_adjusted"] = True  # Mark adjustment used
+
+    # After adjustment: only Confirm or Restart (no more adjust)
+    keyboard = [
+        [InlineKeyboardButton(ui["btn_confirm"], callback_data="confirm_profile")],
+        [InlineKeyboardButton(ui["btn_restart"], callback_data="start_onboarding")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    step_text = ui["onboarding_step"].format(current=3, total=3)
+    await update.message.reply_text(
+        f"{step_text} {ui.get('profile_adjusted', '画像已更新 ✨')}\n\n{ai_response}",
+        reply_markup=reply_markup
+    )
+
+    return CONFIRM_PROFILE
 
 
 async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -531,11 +662,19 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     
     # Get user's language setting
     lang = get_user_language(telegram_id)
-    ui = get_ui_locale(lang)
+    ui = get_ui_locale(lang, telegram_id=telegram_id)
 
     if existing_user:
         from handlers.admin import is_admin
         
+        # For unsupported languages, use cached or async-translated UI
+        if lang not in ("zh", "en", "ja", "ko"):
+            try:
+                from services.language_service import get_ui_strings
+                ui = await get_ui_strings(telegram_id)
+            except Exception:
+                pass  # ui already set above
+
         keyboard = [
             [InlineKeyboardButton(ui["menu_view_digest"], callback_data="view_digest")],
             [
@@ -867,13 +1006,13 @@ async def trigger_first_digest(update: Update, context: ContextTypes.DEFAULT_TYP
 
     telegram_id = str(query.from_user.id)
 
-    # Show progress message
+    # Show progress message - describe actual business flow
     await query.edit_message_text(
         "正在生成你的首份简报...\n\n"
-        "🔍 抓取最新内容\n"
-        "🤖 AI 智能筛选\n"
-        "📊 生成个性化简报\n\n"
-        "预计需要 10-20 秒，请稍候..."
+        "🔍 第一步：从信息源抓取最新内容\n"
+        "🤖 第二步：AI 智能筛选去重\n"
+        "📊 第三步：生成个性化简报\n\n"
+        "⏳ 正在处理，请稍候..."
     )
 
     try:
@@ -1013,6 +1152,10 @@ async def add_custom_sources(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_add_source(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user adding a source."""
+    from utils.conv_manager import is_active_conv
+    if not is_active_conv(context, "onboarding"):
+        return ConversationHandler.END
+
     from services.rss_fetcher import validate_twitter_handle, validate_url
     from utils.json_storage import get_user_sources, save_user_sources
     from urllib.parse import urlparse
@@ -1411,8 +1554,12 @@ def get_start_handler() -> ConversationHandler:
             ONBOARDING_ROUND_2: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_round_2),
             ],
+            ONBOARDING_ROUND_3: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_profile_adjustment),
+            ],
             CONFIRM_PROFILE: [
                 CallbackQueryHandler(confirm_profile, pattern="^confirm_profile$"),
+                CallbackQueryHandler(adjust_profile_prompt, pattern="^adjust_profile$"),
                 CallbackQueryHandler(start_onboarding, pattern="^start_onboarding$"),
             ],
             SOURCE_CHOICE: [
@@ -1438,4 +1585,5 @@ def get_start_handler() -> ConversationHandler:
             CallbackQueryHandler(start_onboarding, pattern="^start_onboarding$"),
             CallbackQueryHandler(learn_more, pattern="^learn_more$"),
         ],
+        conversation_timeout=600,  # Auto-cancel after 10 minutes idle
     )

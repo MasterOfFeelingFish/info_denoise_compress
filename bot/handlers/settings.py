@@ -112,6 +112,9 @@ async def view_current_profile(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def start_profile_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the profile update conversation."""
+    from utils.conv_manager import activate_conv
+    activate_conv(context, "settings")
+
     query = update.callback_query
     await safe_answer_callback_query(query)
 
@@ -148,6 +151,19 @@ async def start_profile_update(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_profile_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle user's profile update input."""
+    from utils.conv_manager import is_active_conv, clear_active_conv
+
+    # Check if this conversation is still the active one
+    if not is_active_conv(context, "settings"):
+        logger.info("Settings text handler yielding - another conversation is active")
+        await update.message.reply_text(
+            "⚠️ 偏好更新已取消（你已切换到其他操作）。\n"
+            "请重新发送你的输入。\n\n"
+            "Profile update cancelled. Please resend your input."
+        )
+        return ConversationHandler.END
+
+    clear_active_conv(context)
     user = update.effective_user
     telegram_id = str(user.id)
     user_input = update.message.text
@@ -332,6 +348,7 @@ def get_settings_handler() -> ConversationHandler:
         fallbacks=[
             CommandHandler("cancel", cancel_settings),
         ],
+        conversation_timeout=300,  # Auto-cancel after 5 minutes idle
     )
 
 

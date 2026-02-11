@@ -114,8 +114,26 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     chat = update.effective_chat
     if not chat or chat.type not in ("group", "supergroup"):
         await update.message.reply_text(
-            "⚠️ /setup 命令仅在群组中使用。\n"
-            "Please use /setup in a group chat."
+            "📋 群组推送配置指南\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📌 如何将 Bot 添加到群组：\n\n"
+            "1️⃣ 打开你的 Telegram 群组\n"
+            "2️⃣ 点击群组名称 → 「添加成员」\n"
+            "3️⃣ 搜索 @learnfi_bot 并添加\n"
+            "4️⃣ 将 Bot 设为「管理员」（需要发消息权限）\n"
+            "5️⃣ 在群组中发送 /setup 开始配置\n\n"
+            "⚙️ 配置流程：\n"
+            "• 描述群组关注的 Web3 方向（如 DeFi、Layer2）\n"
+            "• 选择每日推送时间\n"
+            "• 选择推送语言\n\n"
+            "配置完成后，Bot 每天定时在群里推送 Web3 简报 📰\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Setup Guide for Groups\n\n"
+            "1. Open your Telegram group\n"
+            "2. Tap group name → Add Members\n"
+            "3. Search @learnfi_bot and add\n"
+            "4. Make Bot an Admin (needs send messages)\n"
+            "5. Send /setup in the group to configure"
         )
         return ConversationHandler.END
     
@@ -242,14 +260,49 @@ async def handle_language_choice(update: Update, context: ContextTypes.DEFAULT_T
     
     lang_names = {"zh": "中文", "en": "English", "ja": "日本語", "ko": "한국어"}
     
+    # Localized setup completion messages
+    _setup_complete_msgs = {
+        "zh": (
+            "✅ 群组配置完成!\n\n"
+            "📋 偏好: {profile}\n"
+            "⏰ 推送: 每天 {hour}:00 (北京时间)\n"
+            "🌐 语言: {lang_name}\n\n"
+            "🤖 Bot 将每天在指定时间推送 Web3 简报。\n"
+            "使用 /setup 随时更新配置。"
+        ),
+        "en": (
+            "✅ Group setup complete!\n\n"
+            "📋 Interests: {profile}\n"
+            "⏰ Push: daily at {hour}:00 (Beijing time)\n"
+            "🌐 Language: {lang_name}\n\n"
+            "🤖 Bot will push Web3 digest at the scheduled time.\n"
+            "Use /setup to update anytime."
+        ),
+        "ja": (
+            "✅ グループ設定完了!\n\n"
+            "📋 関心: {profile}\n"
+            "⏰ 配信: 毎日 {hour}:00 (北京時間)\n"
+            "🌐 言語: {lang_name}\n\n"
+            "🤖 Bot が指定時間に Web3 ダイジェストを配信します。\n"
+            "/setup でいつでも設定変更できます。"
+        ),
+        "ko": (
+            "✅ 그룹 설정 완료!\n\n"
+            "📋 관심사: {profile}\n"
+            "⏰ 발송: 매일 {hour}:00 (베이징 시간)\n"
+            "🌐 언어: {lang_name}\n\n"
+            "🤖 Bot이 지정된 시간에 Web3 다이제스트를 발송합니다.\n"
+            "/setup 으로 언제든 설정을 변경하세요."
+        ),
+    }
+    msg_template = _setup_complete_msgs.get(lang, _setup_complete_msgs["en"])
+    
     await query.edit_message_text(
-        f"✅ 群组配置完成!\n\n"
-        f"📋 偏好: {config['profile']}\n"
-        f"⏰ 推送: 每天 {config['push_hour']}:00\n"
-        f"🌐 语言: {lang_names.get(lang, lang)}\n\n"
-        f"🤖 Bot 将每天在指定时间推送 Web3 简报。\n"
-        f"使用 /setup 随时更新配置。\n\n"
-        f"Setup complete! Bot will push daily digest at {config['push_hour']}:00."
+        msg_template.format(
+            profile=config['profile'],
+            hour=config['push_hour'],
+            lang_name=lang_names.get(lang, lang),
+        )
     )
     
     # Clear chat data
