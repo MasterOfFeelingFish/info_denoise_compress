@@ -61,16 +61,16 @@ def format_feedbacks_for_ai(feedbacks: List[Dict[str, Any]]) -> str:
             # User actively clicked to read the full article
             if clicks:
                 click_titles = [i.get("title", "Unknown")[:50] for i in clicks]
-                entry += f"\n  📖 User clicked to read ({len(clicks)} items): {', '.join(click_titles)}"
+                entry += f"\n  📖 {len(clicks)} clicked"
             
             # Report dislike events with titles (negative signal)
             if dislikes:
                 dislike_titles = [i.get("title", "Unknown")[:50] for i in dislikes]
-                entry += f"\n  👎 User marked not interested ({len(dislikes)} items): {', '.join(dislike_titles)}"
+                entry += f"\n  👎 {len(dislikes)} disliked"
             
             # Report like events (explicit positive)
             if likes:
-                entry += f"\n  👍 User liked {len(likes)} items"
+                entry += f"\n  👍 {len(likes)} liked"
 
         formatted.append(entry)
 
