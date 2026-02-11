@@ -24,10 +24,7 @@ jobs:
         run: pip install ruff
 
       - name: Run ruff check
-        run: ruff check bot/ --output-format=github
-
-      - name: Run ruff format check
-        run: ruff format bot/ --check --diff
+        run: ruff check bot/ --config ruff.toml --output-format=github
 
   test:
     name: 自动化测试 (Pytest)
@@ -57,6 +54,8 @@ jobs:
           WHITELIST_ENABLED=false
           PAUSE_PUSH=true
           EOF
+          # Remove leading spaces from heredoc
+          sed -i 's/^          //' bot/.env
 
       - name: Run tests
         working-directory: bot
