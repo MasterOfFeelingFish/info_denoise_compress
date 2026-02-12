@@ -286,21 +286,18 @@ class TestT3SourceHealthMonitor:
         result = await check_and_repair(url, "PermFail")
         assert result["action"] == "permanently_failed"
 
-    def test_notification_rate_limit(self, tmp_data_dir):
+    @pytest.mark.asyncio
+    async def test_notification_rate_limit(self, tmp_data_dir):
         """Same status notification should not repeat within 24h."""
         from services.source_health_monitor import send_health_notification
 
         url = "https://notify.example.com/rss"
         # First notification should succeed
-        result1 = asyncio.get_event_loop().run_until_complete(
-            send_health_notification(url, "NotifyTest", "degraded")
-        )
+        result1 = await send_health_notification(url, "NotifyTest", "degraded")
         assert result1 is True
 
         # Second within 24h should be rate-limited
-        result2 = asyncio.get_event_loop().run_until_complete(
-            send_health_notification(url, "NotifyTest", "degraded")
-        )
+        result2 = await send_health_notification(url, "NotifyTest", "degraded")
         assert result2 is False
 
 

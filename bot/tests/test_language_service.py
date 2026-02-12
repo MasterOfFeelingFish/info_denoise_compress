@@ -60,7 +60,7 @@ def test_1_2_get_language_native_name():
         all_passed = False
     
     print(f"\nTest 1.2 Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_normalize_language_code():
@@ -91,7 +91,7 @@ def test_normalize_language_code():
             all_passed = False
     
     print(f"\nTest Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_1_3_get_ui_strings_supported():
@@ -113,7 +113,7 @@ def test_1_3_get_ui_strings_supported():
             all_passed = False
     
     print(f"\nTest 1.3 Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_ui_version_constant():
@@ -138,7 +138,7 @@ def test_ui_version_constant():
         all_passed = False
     
     print(f"\nTest Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_translation_temperature_config():
@@ -171,7 +171,7 @@ def test_translation_temperature_config():
         all_passed = False
     
     print(f"\nTest Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_ui_cache_version_check():
@@ -227,7 +227,7 @@ def test_ui_cache_version_check():
     clear_ui_cache(test_telegram_id)
     
     print(f"\nTest Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_ui_cache_operations():
@@ -285,7 +285,7 @@ def test_ui_cache_operations():
         all_passed = False
     
     print(f"\nTest 2.1 Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_3_1_prompt_language_placeholder():
@@ -345,7 +345,7 @@ def test_3_1_prompt_language_placeholder():
         all_passed = False
     
     print(f"\nTest 3.1 Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_5_1_settings_language_import():
@@ -378,7 +378,7 @@ def test_5_1_settings_language_import():
         all_passed = False
     
     print(f"\nTest 5.1 Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_update_user_language():
@@ -420,7 +420,7 @@ def test_update_user_language():
     update_user_language(test_telegram_id, original_lang or "en")
     
     print(f"\nTest 5.2 Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_6_1_report_generator_import():
@@ -445,7 +445,7 @@ def test_6_1_report_generator_import():
         all_passed = False
     
     print(f"\nTest 6.1 Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def test_all_modules_import():
@@ -469,7 +469,7 @@ def test_all_modules_import():
             all_passed = False
     
     print(f"\nTest Result: {'PASSED' if all_passed else 'FAILED'}")
-    return all_passed
+    assert all_passed
 
 
 def run_all_tests():
