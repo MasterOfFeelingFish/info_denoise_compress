@@ -51,31 +51,31 @@ async def show_plans(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     current_plan = get_user_plan(telegram_id)
     
     plan_text = (
-        f"💳 {ui.get('payment_plans_title', 'Subscription Plans')}\n"
+        f"💳 {ui['payment_plans_title']}\n"
         f"{'─' * 24}\n\n"
-        f"{ui.get('current_plan', 'Current plan')}: {current_plan.upper()}\n\n"
+        f"{ui['current_plan']}: {current_plan.upper()}\n\n"
         f"🆓 Free\n"
-        f"  • {ui.get('plan_free_digest', 'Daily digest (15 items)')}\n"
-        f"  • {ui.get('plan_free_chat', 'AI chat (5/day)')}\n\n"
-        f"⭐ Pro — $4.99/{ui.get('per_month', 'month')}\n"
-        f"  • {ui.get('plan_pro_digest', 'Daily digest (30 items)')}\n"
-        f"  • {ui.get('plan_pro_chat', 'AI chat (50/day)')}\n"
-        f"  • {ui.get('plan_pro_sources', 'Custom sources (20)')}\n"
-        f"  • {ui.get('plan_pro_alerts', 'Source health alerts')}\n"
-        f"  • {ui.get('plan_pro_priority', 'Priority push')}\n"
+        f"  • {ui['plan_free_digest']}\n"
+        f"  • {ui['plan_free_chat']}\n\n"
+        f"⭐ Pro — $4.99/{ui['per_month']}\n"
+        f"  • {ui['plan_pro_digest']}\n"
+        f"  • {ui['plan_pro_chat']}\n"
+        f"  • {ui['plan_pro_sources']}\n"
+        f"  • {ui['plan_pro_alerts']}\n"
+        f"  • {ui['plan_pro_priority']}\n"
     )
     
     keyboard = []
     if current_plan != "pro":
         keyboard.append([InlineKeyboardButton(
-            ui.get("btn_subscribe_pro", "⭐ Subscribe Pro ($4.99/mo)"),
+            ui['btn_subscribe_pro'],
             callback_data="payment_subscribe_pro"
         )])
         keyboard.append([InlineKeyboardButton(
-            ui.get("btn_redeem_code", "🎫 兑换码 / Redeem Code"),
+            ui['btn_redeem_code'],
             callback_data="payment_redeem"
         )])
-    keyboard.append([InlineKeyboardButton(ui.get("back", "Back"), callback_data="back_to_start")])
+    keyboard.append([InlineKeyboardButton(ui['back'], callback_data="back_to_start")])
     
     if query:
         await query.edit_message_text(plan_text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -100,20 +100,20 @@ async def initiate_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         from config import ADMIN_TELEGRAM_IDS
         admin_list = ", ".join([f"[Admin](tg://user?id={aid})" for aid in ADMIN_TELEGRAM_IDS[:2]])
         await query.edit_message_text(
-            f"💳 {ui.get('payment_manual_title', '升级 Pro 方式')}\n"
+            f"💳 {ui['payment_manual_title']}\n"
             f"{'─' * 24}\n\n"
-            f"📩 **方式一：联系管理员**\n"
-            f"私信管理员 {admin_list} 转账后获取兑换码\n\n"
-            f"🎫 **方式二：已有兑换码**\n"
-            f"如果已有兑换码，点击下方按钮输入\n\n"
-            f"💰 价格: $4.99/月 (支持 USDT/微信/支付宝)",
+            f"**{ui['payment_manual_contact']}**\n"
+            f"{ui['payment_manual_contact_desc'].format(admins=admin_list)}\n\n"
+            f"**{ui['payment_manual_redeem']}**\n"
+            f"{ui['payment_manual_redeem_desc']}\n\n"
+            f"{ui['payment_manual_price']}",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton(
-                    ui.get("btn_redeem_code", "🎫 输入兑换码"),
+                    ui['btn_redeem_code'],
                     callback_data="payment_redeem"
                 )],
-                [InlineKeyboardButton(ui.get("back", "Back"), callback_data="payment_plans")]
+                [InlineKeyboardButton(ui['back'], callback_data="payment_plans")]
             ])
         )
         return
@@ -159,14 +159,14 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if success:
         await update.message.reply_text(
-            f"🎉 {ui.get('payment_success', 'Payment successful!')}\n\n"
-            f"{ui.get('plan_upgraded', 'Your plan has been upgraded to Pro.')}\n"
-            f"{ui.get('enjoy_features', 'Enjoy all Pro features!')}"
+            f"🎉 {ui['payment_success']}\n\n"
+            f"{ui['plan_upgraded']}\n"
+            f"{ui['enjoy_features']}"
         )
     else:
         await update.message.reply_text(
-            f"⚠️ {ui.get('payment_error', 'Payment received but upgrade failed.')}\n"
-            f"{ui.get('contact_admin', 'Please contact admin.')}"
+            f"⚠️ {ui['payment_error']}\n"
+            f"{ui['contact_admin']}"
         )
 
 
@@ -251,12 +251,12 @@ async def payment_redeem_prompt(update: Update, context: ContextTypes.DEFAULT_TY
     ui = get_ui_locale(lang)
 
     await query.edit_message_text(
-        f"🎫 {ui.get('redeem_title', '输入兑换码')}\n"
+        f"🎫 {ui['redeem_title']}\n"
         f"{'─' * 24}\n\n"
-        f"{ui.get('redeem_prompt', '请在聊天窗口输入你的兑换码：')}\n\n"
-        f"👇 {ui.get('redeem_hint', '直接输入兑换码并发送，或 /cancel 取消')}",
+        f"{ui['redeem_prompt']}\n\n"
+        f"👇 {ui['redeem_hint']}",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(ui.get("cancel", "Cancel"), callback_data="payment_plans")]
+            [InlineKeyboardButton(ui['cancel'], callback_data="payment_plans")]
         ])
     )
     return AWAITING_REDEEM_CODE
@@ -279,29 +279,29 @@ async def handle_redeem_code(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if success:
         await update.message.reply_text(
-            f"🎉 {ui.get('redeem_success', '兑换成功！')}\n\n"
-            f"{ui.get('plan_upgraded', 'Your plan has been upgraded to Pro.')}\n"
-            f"⏳ {ui.get('redeem_duration', '有效期')}: {days} {ui.get('days', '天')}\n\n"
-            f"{ui.get('enjoy_features', 'Enjoy all Pro features!')}",
+            f"🎉 {ui['redeem_success']}\n\n"
+            f"{ui['plan_upgraded']}\n"
+            f"⏳ {ui['redeem_duration']}: {days} {ui['days']}\n\n"
+            f"{ui['enjoy_features']}",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(ui.get("back_to_main", "Main Menu"), callback_data="back_to_start")]
+                [InlineKeyboardButton(ui['back_to_main'], callback_data="back_to_start")]
             ])
         )
     elif status == "already_used":
         await update.message.reply_text(
-            f"⚠️ {ui.get('redeem_already_used', '该兑换码已被使用。')}\n"
-            f"{ui.get('contact_admin', 'Please contact admin.')}",
+            f"⚠️ {ui['redeem_already_used']}\n"
+            f"{ui['contact_admin']}",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(ui.get("btn_redeem_code", "🎫 重新输入"), callback_data="payment_redeem")],
-                [InlineKeyboardButton(ui.get("back", "Back"), callback_data="payment_plans")]
+                [InlineKeyboardButton(ui['btn_redeem_code'], callback_data="payment_redeem")],
+                [InlineKeyboardButton(ui['back'], callback_data="payment_plans")]
             ])
         )
     else:
         await update.message.reply_text(
-            f"❌ {ui.get('redeem_invalid', '无效的兑换码。请检查后重试。')}\n",
+            f"❌ {ui['redeem_invalid']}\n",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(ui.get("btn_redeem_code", "🎫 重新输入"), callback_data="payment_redeem")],
-                [InlineKeyboardButton(ui.get("back", "Back"), callback_data="payment_plans")]
+                [InlineKeyboardButton(ui['btn_redeem_code'], callback_data="payment_redeem")],
+                [InlineKeyboardButton(ui['back'], callback_data="payment_plans")]
             ])
         )
 
@@ -327,14 +327,16 @@ async def admin_generate_code(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     code = generate_redeem_code(days=days, created_by=str(user.id))
 
+    lang = get_user_language(str(user.id))
+    ui = get_ui_locale(lang)
+
     await update.message.reply_text(
-        f"🎫 兑换码已生成\n"
+        f"{ui['admin_code_generated']}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"📋 Code: `{code}`\n"
-        f"⏳ 有效期: {days} 天\n"
-        f"👤 创建者: {user.first_name}\n\n"
-        f"将此码发给用户，用户在 Bot 中点击\n"
-        f"「🎫 兑换码」按钮输入即可升级 Pro。",
+        f"⏳ {ui['admin_code_duration'].format(days=days)}\n"
+        f"👤 {ui['admin_code_creator'].format(name=user.first_name)}\n\n"
+        f"{ui['admin_code_instruction']}",
         parse_mode="Markdown"
     )
 

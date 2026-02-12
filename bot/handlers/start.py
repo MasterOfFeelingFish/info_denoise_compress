@@ -410,10 +410,11 @@ async def adjust_profile_prompt(update: Update, context: ContextTypes.DEFAULT_TY
 
     profile_summary = context.user_data.get("profile_summary", "")
 
+    adjust_hint_default = '例如：「去掉 NFT 相关的，多加一些 DeFi 协议的内容」\n直接在聊天窗口输入你的修改意见：'
     await query.edit_message_text(
         f"{ui.get('adjust_profile_prompt', '✏️ 请告诉我你想怎么调整画像：')}\n\n"
         f"{ui.get('adjust_profile_current', '当前画像：')}\n{profile_summary}\n\n"
-        f"{ui.get('adjust_profile_hint', '例如：「去掉 NFT 相关的，多加一些 DeFi 协议的内容」\n直接在聊天窗口输入你的修改意见：')}"
+        f"{ui.get('adjust_profile_hint', adjust_hint_default)}"
     )
 
     return ONBOARDING_ROUND_3  # Reuse round 3 state for adjustment text input
@@ -699,20 +700,20 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
     else:
         keyboard = [
-            [InlineKeyboardButton(ui.get("btn_start", "开始使用"), callback_data="start_onboarding")],
-            [InlineKeyboardButton(ui.get("btn_learn_more", "了解更多"), callback_data="learn_more")],
+            [InlineKeyboardButton(ui["start_setup"], callback_data="start_onboarding")],
+            [InlineKeyboardButton(ui["learn_more"], callback_data="learn_more")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            f"{ui.get('onboarding_title', 'Web3 每日简报')}\n"
+            f"{ui['onboarding_title']}\n"
             f"{ui['divider']}\n\n"
-            f"{ui.get('onboarding_welcome', '你的个性化情报助手。')}\n\n"
-            f"{ui.get('onboarding_what_we_do', '我们做什么')}:\n"
-            f"  • {ui.get('feature_scan', '每日扫描 50+ 信息源')}\n"
-            f"  • {ui.get('feature_filter', '过滤噪音，精选内容')}\n"
-            f"  • {ui.get('feature_push', '推送真正重要的信息')}\n\n"
-            f"{ui.get('time_save', '每天节省约 2 小时阅读时间')}",
+            f"{ui['onboarding_welcome']}\n\n"
+            f"{ui['learn_more_what']}\n"
+            f"  {ui['learn_more_scan']}\n"
+            f"  {ui['learn_more_filter']}\n"
+            f"  {ui['learn_more_push']}\n\n"
+            f"{ui['learn_more_time_save']}",
             reply_markup=reply_markup
         )
 
@@ -986,7 +987,7 @@ async def view_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 {ui['divider']}
 
-{ui.get('stats_settings_hint', '使用 /settings 调整偏好设置。')}"""
+{ui['stats_settings_hint']}"""
 
     keyboard = [
         [
@@ -1156,7 +1157,7 @@ async def handle_add_source(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not is_active_conv(context, "onboarding"):
         return ConversationHandler.END
 
-    from services.rss_fetcher import validate_twitter_handle, validate_url
+    from services.rss_fetcher import twitter_handle_to_rss, validate_url
     from utils.json_storage import get_user_sources, save_user_sources
     from urllib.parse import urlparse
 
@@ -1169,25 +1170,30 @@ async def handle_add_source(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     success = False
     added_name = ""
 
-    # Try Twitter
-    if text.startswith("@") or not text.startswith("http"):
-        validation = await validate_twitter_handle(text)
-        if validation["valid"]:
-            handle = validation["handle"]
-            if handle not in user_sources.get("twitter", {}):
-                user_sources.setdefault("twitter", {})[handle] = ""
-                added_name = handle
-                success = True
+    # Determine input type
+    is_handle = (
+        text.startswith("@") or
+        (not text.startswith("http") and "/" not in text and len(text) <= 16)
+    )
 
-    # Try website RSS
-    else:
+    if is_handle:
+        # Twitter @username → auto-convert to RSS
+        result = await twitter_handle_to_rss(text)
+        if result["success"]:
+            feed_title = result["title"]
+            feed_url = result["url"]
+            if feed_title not in user_sources.get("twitter", {}):
+                user_sources.setdefault("twitter", {})[feed_title] = feed_url
+                added_name = f"{result['handle']} ({feed_title})"
+                success = True
+    elif text.startswith("http"):
+        # Website RSS URL
         validation = await validate_url(text)
         if validation["valid"]:
             url = validation["url"]
-            # Extract domain name as source name
             parsed = urlparse(url)
             domain = parsed.netloc.replace("www.", "")
-            name = domain.split(".")[0].title()  # e.g., "theblock.co" -> "Theblock"
+            name = domain.split(".")[0].title()
 
             if name not in user_sources.get("websites", {}):
                 user_sources.setdefault("websites", {})[name] = url

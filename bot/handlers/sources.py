@@ -243,25 +243,85 @@ async def show_twitter_tutorial(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle Twitter RSS feed addition - only accepts RSS URL."""
+    """Handle Twitter source addition - supports @username and direct RSS URL."""
     from utils.conv_manager import is_active_conv
     if not is_active_conv(context, "sources"):
         logger.info("Sources text handler yielding - another conversation is active")
-        await update.message.reply_text(
-            "⚠️ 信息源操作已中断。请重新点击添加按钮。\n"
-            "Source action interrupted. Please click the add button again."
-        )
+        telegram_id = str(update.effective_user.id)
+        lang = get_user_language(telegram_id)
+        ui = get_ui_locale(lang)
+        await update.message.reply_text(ui.get("source_action_interrupted", "⚠️ Source action interrupted. Please click the add button again."))
         return ConversationHandler.END
 
-    from services.rss_fetcher import validate_rss_url, add_source
+    from services.rss_fetcher import validate_rss_url, twitter_handle_to_rss
 
     telegram_id = str(update.effective_user.id)
     lang = get_user_language(telegram_id)
     ui = get_ui_locale(lang)
-    url = update.message.text.strip()
+    user_input = update.message.text.strip()
 
-    # Check if input looks like a URL
-    if not url.startswith("http"):
+    feed_title = None
+    feed_url = None
+    entries_count = 0
+
+    # Determine input type: @username or RSS URL
+    is_handle = (
+        user_input.startswith("@") or
+        (not user_input.startswith("http") and not "/" in user_input and len(user_input) <= 16)
+    )
+
+    if is_handle:
+        # --- Mode 1: @username → auto-convert to RSS ---
+        await update.message.reply_text(ui.get("twitter_converting", "🔄 Converting Twitter handle to RSS feed..."))
+
+        result = await twitter_handle_to_rss(user_input)
+
+        if not result["success"]:
+            keyboard = [
+                [InlineKeyboardButton(ui["btn_retry"], callback_data="sources_add_twitter")],
+                [InlineKeyboardButton(ui["btn_view_tutorial"], callback_data="twitter_tutorial")],
+                [InlineKeyboardButton(ui["back"], callback_data="sources_twitter")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                f"{ui.get('twitter_convert_failed', '❌ Failed to convert Twitter handle to RSS')}\n"
+                f"{ui['divider']}\n\n"
+                f"{html.escape(result.get('error', 'Unknown error'))}\n\n"
+                f"{ui.get('twitter_convert_fallback', 'You can also paste a direct RSS URL (e.g. from rss.app).')}",
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+
+        feed_title = result["title"]
+        feed_url = result["url"]
+        entries_count = result.get("entries_count", 0)
+
+    elif user_input.startswith("http"):
+        # --- Mode 2: Direct RSS URL (original behavior) ---
+        validation = await validate_rss_url(user_input)
+
+        if not validation["valid"]:
+            keyboard = [
+                [InlineKeyboardButton(ui["btn_view_tutorial"], callback_data="twitter_tutorial")],
+                [InlineKeyboardButton(ui["btn_retry"], callback_data="sources_add_twitter")],
+                [InlineKeyboardButton(ui["back"], callback_data="sources_twitter")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                f"{ui['twitter_add_failed']}\n"
+                f"{ui['divider']}\n\n"
+                f"{html.escape(validation['error'])}\n\n"
+                f"{ui['twitter_check_retry']}",
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+
+        feed_title = validation.get("title", "Twitter List RSS")
+        feed_url = user_input
+        entries_count = validation.get("entries_count", 0)
+
+    else:
+        # --- Invalid input format ---
         keyboard = [
             [InlineKeyboardButton(ui["btn_view_tutorial"], callback_data="twitter_tutorial")],
             [InlineKeyboardButton(ui["btn_retry"], callback_data="sources_add_twitter")],
@@ -271,36 +331,13 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(
             f"{ui['twitter_format_error']}\n"
             f"{ui['divider']}\n\n"
-            f"{ui['twitter_format_hint']}",
+            f"{ui.get('twitter_format_hint_v2', 'Send a Twitter username (e.g. @VitalikButerin) or a direct RSS URL.')}",
             reply_markup=reply_markup
         )
         return ConversationHandler.END
 
-    # Validate RSS URL (checks accessibility and content format)
-    validation = await validate_rss_url(url)
-    
-    if not validation["valid"]:
-        keyboard = [
-            [InlineKeyboardButton(ui["btn_view_tutorial"], callback_data="twitter_tutorial")],
-            [InlineKeyboardButton(ui["btn_retry"], callback_data="sources_add_twitter")],
-            [InlineKeyboardButton(ui["back"], callback_data="sources_twitter")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            f"{ui['twitter_add_failed']}\n"
-            f"{ui['divider']}\n\n"
-            f"{html.escape(validation['error'])}\n\n"
-            f"{ui['twitter_check_retry']}",
-            reply_markup=reply_markup
-        )
-        return ConversationHandler.END
-
-    # RSS validation passed, add to user's sources
-    feed_title = validation.get("title", "Twitter List RSS")
-    entries_count = validation.get("entries_count", 0)
-    
-    # Add to user's sources with the feed title as name
-    success = add_user_source(telegram_id, "twitter", feed_title, url)
+    # --- Add to user's sources ---
+    success = add_user_source(telegram_id, "twitter", feed_title, feed_url)
 
     keyboard = [
         [InlineKeyboardButton(ui["btn_add_more"], callback_data="sources_add_twitter")],
@@ -309,9 +346,8 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if success:
-        # 埋点：添加信息源
-        track_event(telegram_id, "source_added", {"category": "twitter", "name": feed_title, "url": url})
-        
+        track_event(telegram_id, "source_added", {"category": "twitter", "name": feed_title, "url": feed_url})
+
         await update.message.reply_text(
             f"{ui['twitter_add_success']}\n"
             f"{ui['divider']}\n\n"
@@ -320,7 +356,7 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"{ui['twitter_next_digest']}",
             reply_markup=reply_markup
         )
-        logger.info(f"Added Twitter RSS for user {telegram_id}: {feed_title} ({url})")
+        logger.info(f"Added Twitter source for user {telegram_id}: {feed_title} ({feed_url})")
     else:
         await update.message.reply_text(
             f"{ui['twitter_add_failed']}\n"
@@ -328,7 +364,7 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"{ui['twitter_save_failed']}",
             reply_markup=reply_markup
         )
-        logger.warning(f"Failed to add Twitter RSS for user {telegram_id}: {url}")
+        logger.warning(f"Failed to add Twitter source for user {telegram_id}: {feed_url}")
 
     return ConversationHandler.END
 

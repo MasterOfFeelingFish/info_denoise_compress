@@ -359,7 +359,8 @@ async def fetch_all_sources(
 
     async with httpx.AsyncClient(
         headers={
-            "User-Agent": "Web3DailyDigest/1.0 (+https://github.com/web3digest)"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "application/rss+xml, application/xml, text/xml, */*",
         },
         follow_redirects=True
     ) as client:
@@ -563,7 +564,7 @@ async def validate_twitter_handle(handle: str) -> Dict[str, Any]:
         return {
             "valid": False,
             "handle": handle,
-            "error": "Twitter 账号格式无效。请使用 1-15 个字母、数字或下划线。"
+            "error": "Twitter handle format invalid. Use 1-15 alphanumeric characters or underscores."
         }
 
     return {
@@ -571,6 +572,95 @@ async def validate_twitter_handle(handle: str) -> Dict[str, Any]:
         "handle": f"@{handle}",
         "error": None
     }
+
+
+def _build_twitter_rss_url(username: str) -> str:
+    """
+    Build RSS URL for a Twitter username using the configured service.
+    
+    Args:
+        username: Twitter username without @ prefix
+        
+    Returns:
+        RSS URL string
+    """
+    from config import TWITTER_RSS_SERVICE, TWITTER_RSS_BASE_URL
+    
+    if TWITTER_RSS_SERVICE == "nitter":
+        return f"{TWITTER_RSS_BASE_URL}/{username}/rss"
+    elif TWITTER_RSS_SERVICE == "custom":
+        # Custom URL template: {username} is replaced
+        return TWITTER_RSS_BASE_URL.replace("{username}", username)
+    else:
+        # Default: RSSHub
+        return f"{TWITTER_RSS_BASE_URL}/twitter/user/{username}"
+
+
+async def twitter_handle_to_rss(handle: str) -> Dict[str, Any]:
+    """
+    Convert a Twitter @handle to a validated RSS feed URL.
+    
+    Uses the configured TWITTER_RSS_SERVICE (RSSHub / Nitter / custom) to
+    generate a feed URL, then validates it actually returns RSS content.
+    
+    Args:
+        handle: Twitter handle (with or without @), e.g. "@VitalikButerin" or "VitalikButerin"
+        
+    Returns:
+        Dict with:
+        - success: bool
+        - url: RSS URL (if success)
+        - title: Feed title (if success) 
+        - entries_count: number of entries (if success)
+        - handle: normalized @handle
+        - error: error message (if failed)
+    """
+    # Validate handle format first
+    validation = await validate_twitter_handle(handle)
+    if not validation["valid"]:
+        return {
+            "success": False,
+            "handle": handle,
+            "error": validation["error"]
+        }
+    
+    normalized_handle = validation["handle"]  # e.g. "@VitalikButerin"
+    username = normalized_handle[1:]  # e.g. "VitalikButerin"
+    
+    # Build RSS URL from configured service
+    rss_url = _build_twitter_rss_url(username)
+    logger.info(f"Converting Twitter handle {normalized_handle} → {rss_url}")
+    
+    # Validate the generated RSS URL
+    rss_validation = await validate_rss_url(rss_url)
+    
+    if rss_validation.get("valid"):
+        feed_title = rss_validation.get("title", "")
+        # Use a friendlier title if the feed title is generic
+        if not feed_title or feed_title.lower() in ("rss", "feed", "atom"):
+            feed_title = f"Twitter @{username}"
+        
+        return {
+            "success": True,
+            "url": rss_url,
+            "title": feed_title,
+            "entries_count": rss_validation.get("entries_count", 0),
+            "handle": normalized_handle,
+            "error": None
+        }
+    else:
+        from config import TWITTER_RSS_SERVICE, TWITTER_RSS_BASE_URL
+        error_detail = rss_validation.get("error", "Unknown error")
+        logger.warning(
+            f"Twitter RSS conversion failed for {normalized_handle}: "
+            f"service={TWITTER_RSS_SERVICE}, url={rss_url}, error={error_detail}"
+        )
+        return {
+            "success": False,
+            "url": rss_url,
+            "handle": normalized_handle,
+            "error": error_detail
+        }
 
 
 async def validate_url(url: str) -> Dict[str, Any]:
@@ -655,9 +745,12 @@ async def validate_rss_url(url: str) -> Dict[str, Any]:
     # Fetch and validate RSS content
     try:
         async with httpx.AsyncClient(
-            timeout=15.0,
+            timeout=20.0,
             follow_redirects=True,
-            headers={"User-Agent": "Web3DailyDigest/1.0 (+https://github.com/web3digest)"}
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Accept": "application/rss+xml, application/xml, text/xml, */*",
+            }
         ) as client:
             response = await client.get(url)
             
