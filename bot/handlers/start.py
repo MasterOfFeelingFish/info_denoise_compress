@@ -268,6 +268,11 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not is_active_conv(context, "onboarding"):
         return ConversationHandler.END
 
+    # Fix4: Anti-debounce — prevent duplicate submissions
+    if context.user_data.get("processing_round2"):
+        return ONBOARDING_ROUND_2
+    context.user_data["processing_round2"] = True
+
     lang = context.user_data.get("language", "zh")
     user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
@@ -304,6 +309,12 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     except Exception as e:
         logger.error(f"Onboarding round 3 failed: {e}")
+        context.user_data.pop("processing_round2", None)
+        # Fix1: Clean up progress message on error
+        try:
+            await progress_msg.delete()
+        except Exception:
+            pass
         keyboard = [
             [InlineKeyboardButton(ui["retry"], callback_data="retry_round_2")],
             [InlineKeyboardButton(ui["back_to_main"], callback_data="back_to_start")],
@@ -318,6 +329,12 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data["profile_summary"] = ai_response
     context.user_data["_profile_adjusted"] = False  # Track if user has used their one adjustment
 
+    # Fix1: Delete progress message now that profile is ready
+    try:
+        await progress_msg.delete()
+    except Exception:
+        pass  # Ignore if already deleted or permission issue
+
     # Add confirmation buttons with one-time adjust option
     keyboard = [
         [InlineKeyboardButton(ui["btn_confirm"], callback_data="confirm_profile")],
@@ -330,11 +347,43 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     step_text = ui["onboarding_step"].format(current=3, total=3)
-    await update.message.reply_text(
-        f"{step_text} {ui['onboarding_confirm_prefs']}\n\n{ai_response}",
-        reply_markup=reply_markup
-    )
 
+    # Fix2: Truncate AI response if too long for Telegram (4096 char limit)
+    confirm_prefix = f"{step_text} {ui['onboarding_confirm_prefs']}\n\n"
+    max_response_len = 4000 - len(confirm_prefix)
+    if len(ai_response) > max_response_len:
+        ai_response = ai_response[:max_response_len] + "..."
+        context.user_data["profile_summary"] = ai_response  # Update stored version too
+
+    # Fix2: Wrap in try-except to prevent silent failure
+    try:
+        await update.message.reply_text(
+            f"{confirm_prefix}{ai_response}",
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        logger.error(f"Failed to send profile confirmation: {e}")
+        # Fallback: try sending a shorter version
+        try:
+            short_response = ai_response[:1000] + "..." if len(ai_response) > 1000 else ai_response
+            await update.message.reply_text(
+                f"{confirm_prefix}{short_response}",
+                reply_markup=reply_markup
+            )
+        except Exception as e2:
+            logger.error(f"Fallback profile confirmation also failed: {e2}")
+            context.user_data.pop("processing_round2", None)
+            keyboard_err = [
+                [InlineKeyboardButton(ui["retry"], callback_data="retry_round_2")],
+                [InlineKeyboardButton(ui["back_to_main"], callback_data="back_to_start")],
+            ]
+            await update.message.reply_text(
+                ui.get("error_occurred", "An error occurred. Please try again."),
+                reply_markup=InlineKeyboardMarkup(keyboard_err)
+            )
+            return ConversationHandler.END
+
+    context.user_data.pop("processing_round2", None)
     return CONFIRM_PROFILE
 
 
@@ -557,11 +606,14 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             [InlineKeyboardButton(ui.get("retry", "Retry"), callback_data="confirm_profile")],
             [InlineKeyboardButton(ui.get("back_to_main", "Back to Main"), callback_data="back_to_start")],
         ]
-        await query.edit_message_text(
-            ui.get("error_occurred", "An error occurred. Please try again later."),
+        # Fix3: Use send_message instead of edit_message_text to preserve
+        # the profile summary message (don't overwrite user's profile preview)
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=ui.get("error_occurred", "An error occurred. Please try again later."),
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        return ConversationHandler.END
+        return CONFIRM_PROFILE
 
     # Pass user_id to avoid re-querying users.json (Windows file lock race condition)
     save_user_profile(telegram_id, full_profile, user_id=user_id)
