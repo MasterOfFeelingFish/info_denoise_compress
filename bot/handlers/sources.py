@@ -267,7 +267,7 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Determine input type: @username or RSS URL
     is_handle = (
         user_input.startswith("@") or
-        (not user_input.startswith("http") and not "/" in user_input and len(user_input) <= 16)
+        (not user_input.startswith("http") and "/" not in user_input and len(user_input) <= 16)
     )
 
     if is_handle:
