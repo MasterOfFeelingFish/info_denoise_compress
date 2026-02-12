@@ -32,7 +32,11 @@ Users often can't fully express their real needs. Even if they say "I only care 
 ## Filtering Rules
 1. Total: {min_items}-{max_items} items
 2. Strictly filter out user's "explicitly dislikes" (except must_read)
-3. **DEDUP**: Same event from multiple sources → keep only ONE
+3. **DEDUP (CRITICAL)**:
+   - Same event from multiple sources → keep ONLY ONE (the most informative version)
+   - "Same event" includes: identical news, same announcement from different media, same data/stat reported by different outlets
+   - Even if titles differ, if the CORE EVENT is the same → it's a duplicate
+   - When keeping one version, prefer: official source > media report > retweet/repost
 4. **SOURCE DIVERSITY**: Include 2-3 Twitter items if available
 5. **Short ≠ Unimportant**: Tweets are often first-hand info, don't ignore due to brevity
 

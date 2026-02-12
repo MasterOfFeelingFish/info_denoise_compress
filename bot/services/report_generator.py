@@ -26,14 +26,131 @@ SEPARATOR_LENGTH = 28
 logger = logging.getLogger(__name__)
 
 
+def _normalize_text(text: str) -> str:
+    """
+    规范化文本：去除标点、多余空白、统一大小写。
+    同时处理中英文混合内容。
+    """
+    if not text:
+        return ""
+    # 去除常见新闻前缀
+    cleaned = re.sub(
+        r'^(BlockBeats\s*消息[，,]?\s*\d+\s*月\s*\d+\s*日[，,]?\s*'
+        r'|据.*?[，,]\s*'
+        r'|消息[，,]\s*'
+        r'|【.*?】\s*'
+        r'|\d+\s*月\s*\d+\s*日[，,]?\s*'
+        r'|Breaking:\s*'
+        r'|BREAKING:\s*'
+        r'|Update:\s*'
+        r'|Just in:\s*)',
+        '',
+        text,
+        flags=re.IGNORECASE
+    ).strip()
+    # 去除标点符号（中英文）
+    cleaned = re.sub(r'[^\w\s]', '', cleaned)
+    # 统一空白
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip().lower()
+    return cleaned
+
+
+def _tokenize(text: str) -> List[str]:
+    """
+    简单分词：对英文按空格分词，对中文按单字分词。
+    返回去重后的 token 列表。
+    """
+    if not text:
+        return []
+    tokens = []
+    for char in text:
+        if '\u4e00' <= char <= '\u9fff':
+            # CJK 字符：单字作为 token
+            tokens.append(char)
+        elif char == ' ':
+            tokens.append(' ')
+        else:
+            tokens.append(char)
+    # 按空格合并英文 token
+    result = []
+    current_word = []
+    for t in tokens:
+        if t == ' ':
+            if current_word:
+                result.append(''.join(current_word))
+                current_word = []
+        else:
+            current_word.append(t)
+    if current_word:
+        result.append(''.join(current_word))
+    return result
+
+
+def _word_overlap_ratio(text_a: str, text_b: str) -> float:
+    """
+    计算两段文本的词级别 Jaccard 相似度。
+    """
+    tokens_a = set(_tokenize(_normalize_text(text_a)))
+    tokens_b = set(_tokenize(_normalize_text(text_b)))
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = len(tokens_a & tokens_b)
+    union = len(tokens_a | tokens_b)
+    return intersection / union if union > 0 else 0.0
+
+
+def _extract_key_terms(text: str, top_n: int = 8) -> set:
+    """
+    从文本中提取关键词（去除停用词后的高信息量词汇）。
+    用于跨源语义去重。
+    """
+    STOP_WORDS = {
+        # English
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+        'should', 'may', 'might', 'shall', 'can', 'to', 'of', 'in', 'for',
+        'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+        'before', 'after', 'above', 'below', 'between', 'and', 'but', 'or',
+        'not', 'no', 'so', 'if', 'than', 'too', 'very', 'just', 'about',
+        'up', 'out', 'its', 'it', 'this', 'that', 'these', 'those', 'he',
+        'she', 'they', 'we', 'you', 'i', 'me', 'him', 'her', 'us', 'them',
+        'my', 'your', 'his', 'our', 'their', 'what', 'which', 'who', 'whom',
+        'when', 'where', 'why', 'how', 'all', 'each', 'every', 'both',
+        'few', 'more', 'most', 'other', 'some', 'such', 'only', 'own',
+        'same', 'also', 'new', 'says', 'said', 'according',
+        # Chinese common
+        '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一',
+        '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着',
+        '没有', '看', '好', '自己', '这', '他', '她', '它', '们', '那',
+        '被', '从', '把', '让', '用', '为', '与', '及', '等', '将', '已',
+        '而', '但', '如', '或', '即', '若', '因', '于', '其', '中', '对',
+        '表示', '认为', '可以', '目前', '以及', '通过', '进行', '据悉',
+    }
+    tokens = _tokenize(_normalize_text(text))
+    # 过滤停用词和过短 token
+    key_tokens = [t for t in tokens if t not in STOP_WORDS and len(t) > 1]
+    # 取前 N 个（保持出现顺序，靠前的通常更重要）
+    seen = set()
+    result = set()
+    for t in key_tokens:
+        if t not in seen:
+            seen.add(t)
+            result.add(t)
+            if len(result) >= top_n:
+                break
+    return result
+
+
 def is_summary_duplicate(title: str, summary: str) -> bool:
     """
-    判断摘要是否与标题内容重复。
+    判断摘要是否与标题内容重复（增强版）。
     
-    常见情况：
-    - BlockBeats 等源的摘要以标题内容开头
-    - 摘要直接复制标题
-    - 摘要以"据xxx，[标题内容]..."开头
+    检测策略（任一命中即视为重复）：
+    1. 前缀匹配：摘要去除新闻前缀后以标题内容开头
+    2. 子串匹配：标题出现在摘要中，且占比超过阈值
+    3. 词级别 Jaccard 相似度：> 0.65 视为重复
+    4. SequenceMatcher 模糊匹配：> 0.75 视为重复
+    5. 包含度检查：标题关键词大部分出现在摘要中
     
     Args:
         title: 标题文本
@@ -45,70 +162,185 @@ def is_summary_duplicate(title: str, summary: str) -> bool:
     if not title or not summary:
         return False
     
-    # 规范化：去除常见前缀如 "BlockBeats 消息，1月26日，"
-    summary_clean = re.sub(
-        r'^(BlockBeats\s*消息[，,]?\s*\d+\s*月\s*\d+\s*日[，,]?\s*'
-        r'|据.*?[，,]\s*'
-        r'|消息[，,]\s*'
-        r'|【.*?】\s*'
-        r'|\d+\s*月\s*\d+\s*日[，,]?\s*)',
-        '', 
-        summary,
-        flags=re.IGNORECASE
-    ).strip()
-    
-    title_clean = title.strip().rstrip('。，.!！?？')
+    title_clean = _normalize_text(title)
+    summary_clean = _normalize_text(summary)
     
     # 如果标题很短（少于5个字符），不做去重处理
     if len(title_clean) < 5:
         return False
     
-    # 如果摘要核心内容以标题开头，认为是重复
+    # 1. 前缀匹配
     if summary_clean.startswith(title_clean):
         return True
     
-    # 如果标题是摘要的子串（在前50字内），且占比超过 80%
-    if title_clean in summary_clean[:len(title_clean) + 30]:
-        # 检查重复比例
+    # 2. 子串匹配（标题出现在摘要的任意位置）
+    if title_clean in summary_clean:
         overlap_ratio = len(title_clean) / len(summary_clean) if summary_clean else 0
-        if overlap_ratio > 0.6:
+        if overlap_ratio > 0.4:
             return True
     
-    # 检查标题和摘要的相似度（简单 Jaccard 相似度）
-    title_chars = set(title_clean)
-    summary_start_chars = set(summary_clean[:len(title_clean) + 20])
+    # 3. 词级别 Jaccard 相似度
+    word_sim = _word_overlap_ratio(title, summary)
+    if word_sim > 0.65:
+        return True
     
-    if title_chars and summary_start_chars:
-        intersection = len(title_chars & summary_start_chars)
-        union = len(title_chars | summary_start_chars)
-        similarity = intersection / union if union > 0 else 0
-        
-        # 如果相似度超过 85%，认为是重复
-        if similarity > 0.85:
+    # 4. SequenceMatcher 模糊匹配（捕捉改写/重排序）
+    from difflib import SequenceMatcher
+    seq_sim = SequenceMatcher(None, title_clean, summary_clean).ratio()
+    if seq_sim > 0.75:
+        return True
+    
+    # 5. 关键词包含度：标题关键词有 80%+ 出现在摘要中
+    title_terms = _extract_key_terms(title, top_n=6)
+    if len(title_terms) >= 2:
+        summary_terms = _extract_key_terms(summary, top_n=15)
+        overlap = title_terms & summary_terms
+        containment = len(overlap) / len(title_terms)
+        if containment >= 0.8:
             return True
     
     return False
 
 
-def deduplicate_by_similarity(items: List[Dict[str, Any]], threshold: float = 0.8) -> List[Dict[str, Any]]:
+def _compute_cross_similarity(item_a: Dict[str, Any], item_b: Dict[str, Any]) -> float:
     """
-    T1: Cross-source semantic deduplication using title similarity.
+    计算两条新闻的综合相似度（多维度加权）。
     
-    When multiple sources report the same event, keep only the most
-    complete version (longest summary). Uses difflib.SequenceMatcher
-    for fuzzy title matching.
+    维度：
+    1. 标题 SequenceMatcher 相似度 (权重 0.40)
+    2. 标题词级别 Jaccard 相似度 (权重 0.25)
+    3. 摘要词级别 Jaccard 相似度 (权重 0.15)
+    4. 关键词重合度 (权重 0.20)
+    
+    Returns:
+        0.0 ~ 1.0 的综合相似度分数
+    """
+    from difflib import SequenceMatcher
+    
+    title_a = item_a.get("title", "").strip()
+    title_b = item_b.get("title", "").strip()
+    summary_a = item_a.get("summary", "") or ""
+    summary_b = item_b.get("summary", "") or ""
+    
+    # Dimension 1: Title SequenceMatcher
+    title_seq_sim = 0.0
+    if title_a and title_b:
+        title_seq_sim = SequenceMatcher(
+            None, _normalize_text(title_a), _normalize_text(title_b)
+        ).ratio()
+    
+    # Dimension 2: Title word-level Jaccard
+    title_word_sim = _word_overlap_ratio(title_a, title_b)
+    
+    # Dimension 3: Summary word-level Jaccard
+    summary_word_sim = 0.0
+    if summary_a and summary_b:
+        summary_word_sim = _word_overlap_ratio(summary_a, summary_b)
+    
+    # Dimension 4: Key terms overlap (title + summary combined)
+    combined_a = f"{title_a} {summary_a}"
+    combined_b = f"{title_b} {summary_b}"
+    terms_a = _extract_key_terms(combined_a, top_n=10)
+    terms_b = _extract_key_terms(combined_b, top_n=10)
+    
+    keyword_sim = 0.0
+    if terms_a and terms_b:
+        intersection = len(terms_a & terms_b)
+        union = len(terms_a | terms_b)
+        keyword_sim = intersection / union if union > 0 else 0.0
+    
+    # Weighted combination
+    combined_score = (
+        title_seq_sim * 0.40 +
+        title_word_sim * 0.25 +
+        summary_word_sim * 0.15 +
+        keyword_sim * 0.20
+    )
+    
+    # Bonus: 如果标题非常相似（> 0.85），直接提高综合分数
+    # 这确保标题几乎相同的条目一定被去重
+    if title_seq_sim > 0.85:
+        combined_score = max(combined_score, title_seq_sim)
+    
+    # Bonus: 如果关键词高度重合（> 0.7），也提高分数
+    # 这捕捉标题不同但说的是同一事件的情况
+    if keyword_sim > 0.7 and summary_word_sim > 0.5:
+        combined_score = max(combined_score, 0.75)
+    
+    return combined_score
+
+
+def _pick_best_item(item_a: Dict[str, Any], item_b: Dict[str, Any]) -> tuple:
+    """
+    在两条重复新闻中选择保留哪条。
+    
+    优先级：
+    1. 有摘要的优先
+    2. 摘要更长的优先（信息更丰富）
+    3. section 优先级更高的优先（must_read > macro_insights > recommended > other）
+    4. 有链接的优先
+    
+    Returns:
+        (keeper, merged) 元组
+    """
+    section_priority = {"must_read": 0, "macro_insights": 1, "recommended": 2, "other": 3}
+    
+    summary_a = item_a.get("summary", "") or ""
+    summary_b = item_b.get("summary", "") or ""
+    
+    # 评分系统
+    score_a = 0
+    score_b = 0
+    
+    # 有摘要 +2
+    if summary_a:
+        score_a += 2
+    if summary_b:
+        score_b += 2
+    
+    # 摘要长度
+    if len(summary_a) > len(summary_b):
+        score_a += 1
+    elif len(summary_b) > len(summary_a):
+        score_b += 1
+    
+    # Section 优先级
+    sec_a = section_priority.get(item_a.get("section", "other"), 3)
+    sec_b = section_priority.get(item_b.get("section", "other"), 3)
+    if sec_a < sec_b:
+        score_a += 1
+    elif sec_b < sec_a:
+        score_b += 1
+    
+    # 有链接 +1
+    if item_a.get("link"):
+        score_a += 1
+    if item_b.get("link"):
+        score_b += 1
+    
+    if score_b > score_a:
+        return (item_b, item_a)
+    return (item_a, item_b)
+
+
+def deduplicate_by_similarity(items: List[Dict[str, Any]], threshold: float = 0.65) -> List[Dict[str, Any]]:
+    """
+    跨源语义去重（增强版）。
+    
+    使用多维度相似度计算（标题 SequenceMatcher + 词级 Jaccard + 
+    摘要相似度 + 关键词重合度），比单纯标题匹配更准确。
+    
+    当多个来源报道同一事件时，保留信息最丰富的版本。
     
     Args:
-        items: List of content items with 'title' and 'summary' fields
-        threshold: Similarity threshold (0.0-1.0), default 0.8
+        items: 内容条目列表，包含 'title' 和 'summary' 字段
+        threshold: 综合相似度阈值 (0.0-1.0)，默认 0.65
         
     Returns:
-        Deduplicated list of items
+        去重后的列表
     """
     if not items or len(items) <= 1:
         return items
-    
-    from difflib import SequenceMatcher
     
     # Track which items to keep (by index)
     merged_into = {}  # index -> merged_target_index
@@ -116,6 +348,7 @@ def deduplicate_by_similarity(items: List[Dict[str, Any]], threshold: float = 0.
     for i in range(len(items)):
         if i in merged_into:
             continue
+        
         title_i = items[i].get("title", "").strip()
         if not title_i:
             continue
@@ -127,38 +360,44 @@ def deduplicate_by_similarity(items: List[Dict[str, Any]], threshold: float = 0.
             if not title_j:
                 continue
             
-            # Calculate similarity
-            similarity = SequenceMatcher(None, title_i.lower(), title_j.lower()).ratio()
+            # 计算综合相似度
+            similarity = _compute_cross_similarity(items[i], items[j])
             
             if similarity >= threshold:
-                # Keep the one with longer summary (more complete)
-                summary_i = items[i].get("summary", "") or ""
-                summary_j = items[j].get("summary", "") or ""
+                keeper, merged = _pick_best_item(items[i], items[j])
+                keeper_idx = i if keeper is items[i] else j
+                merged_idx = j if keeper is items[i] else i
                 
-                if len(summary_j) > len(summary_i):
-                    # j is more complete, merge i into j
-                    merged_into[i] = j
-                    # Add "综合多家报道" note to the keeper's reason
-                    source_i = items[i].get("source", "")
-                    source_j = items[j].get("source", "")
-                    if source_i != source_j:
-                        existing_reason = items[j].get("reason", "")
-                        items[j]["reason"] = f"{existing_reason} [综合 {source_i}+{source_j} 报道]".strip()
+                merged_into[merged_idx] = keeper_idx
+                
+                # 标注综合来源
+                source_keeper = keeper.get("source", "")
+                source_merged = merged.get("source", "")
+                if source_keeper and source_merged and source_keeper != source_merged:
+                    existing_reason = keeper.get("reason", "")
+                    keeper["reason"] = f"{existing_reason} [综合 {source_keeper}+{source_merged} 报道]".strip()
+                
+                # 如果被合并的有更好的摘要片段，补充到 keeper
+                merged_summary = merged.get("summary", "") or ""
+                keeper_summary = keeper.get("summary", "") or ""
+                if merged_summary and not keeper_summary:
+                    keeper["summary"] = merged_summary
+                
+                logger.debug(
+                    f"Dedup merge: [{merged_idx}] \"{items[merged_idx].get('title', '')[:40]}\" "
+                    f"-> [{keeper_idx}] \"{items[keeper_idx].get('title', '')[:40]}\" "
+                    f"(sim={similarity:.2f})"
+                )
+                
+                if merged_idx == i:
                     break  # i is merged, move to next i
-                else:
-                    # i is more complete, merge j into i
-                    merged_into[j] = i
-                    source_i = items[i].get("source", "")
-                    source_j = items[j].get("source", "")
-                    if source_i != source_j:
-                        existing_reason = items[i].get("reason", "")
-                        items[i]["reason"] = f"{existing_reason} [综合 {source_i}+{source_j} 报道]".strip()
     
     # Build deduplicated list preserving order
     result = [item for idx, item in enumerate(items) if idx not in merged_into]
     
-    if len(items) != len(result):
-        logger.info(f"Deduplication: {len(items)} -> {result.__len__()} items ({len(items) - len(result)} duplicates removed)")
+    removed = len(items) - len(result)
+    if removed > 0:
+        logger.info(f"Deduplication: {len(items)} -> {len(result)} items ({removed} duplicates removed)")
     
     return result
 
