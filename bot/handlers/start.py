@@ -79,15 +79,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                 InlineKeyboardButton(ui["menu_preferences"], callback_data="update_preferences"),
                 InlineKeyboardButton(ui["menu_sources"], callback_data="manage_sources"),
             ],
-            [
-                InlineKeyboardButton(ui["menu_stats"], callback_data="view_stats"),
-            ],
+            [InlineKeyboardButton(ui["menu_stats"], callback_data="view_stats")],
         ]
-        
-        # Add admin panel button for admins only
+        try:
+            from config import FEATURE_PAYMENT
+            if FEATURE_PAYMENT:
+                keyboard.append([InlineKeyboardButton(ui["menu_subscribe"], callback_data="payment_plans")])
+        except Exception:
+            pass
         if is_admin(user.id):
             keyboard.append([InlineKeyboardButton(ui["menu_admin"], callback_data="admin_panel")])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.message.reply_text(
@@ -736,11 +737,14 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             ],
             [InlineKeyboardButton(ui["menu_stats"], callback_data="view_stats")],
         ]
-        
-        # Add admin panel button for admins only
+        try:
+            from config import FEATURE_PAYMENT
+            if FEATURE_PAYMENT:
+                keyboard.append([InlineKeyboardButton(ui["menu_subscribe"], callback_data="payment_plans")])
+        except Exception:
+            pass
         if is_admin(user.id):
             keyboard.append([InlineKeyboardButton(ui["menu_admin"], callback_data="admin_panel")])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
@@ -1152,6 +1156,9 @@ async def skip_first_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await safe_answer_callback_query(query)
 
     user = update.effective_user
+    telegram_id = str(user.id)
+    from utils.json_storage import set_onboarding_paid_redeem_available
+    set_onboarding_paid_redeem_available(telegram_id)
 
     keyboard = [
         [
@@ -1295,6 +1302,10 @@ async def finish_adding_sources(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await safe_answer_callback_query(query)
 
+    telegram_id = str(query.from_user.id)
+    from utils.json_storage import set_onboarding_paid_redeem_available
+    set_onboarding_paid_redeem_available(telegram_id)
+
     count = context.user_data.get("added_sources_count", 0)
 
     # Boundary: 0 sources
@@ -1328,7 +1339,8 @@ async def finish_with_default(update: Update, context: ContextTypes.DEFAULT_TYPE
     await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
-    from utils.json_storage import get_user_sources, save_user_sources
+    from utils.json_storage import get_user_sources, save_user_sources, set_onboarding_paid_redeem_available
+    set_onboarding_paid_redeem_available(telegram_id)
     from config import DEFAULT_USER_SOURCES
     import asyncio
 
@@ -1369,6 +1381,9 @@ async def use_default_sources_no_push(update: Update, context: ContextTypes.DEFA
     await safe_answer_callback_query(query)
 
     user = update.effective_user
+    telegram_id = str(user.id)
+    from utils.json_storage import set_onboarding_paid_redeem_available
+    set_onboarding_paid_redeem_available(telegram_id)
 
     keyboard = [
         [
@@ -1425,6 +1440,10 @@ async def finish_sources_no_push(update: Update, context: ContextTypes.DEFAULT_T
     await safe_answer_callback_query(query)
 
     user = update.effective_user
+    telegram_id = str(user.id)
+    from utils.json_storage import set_onboarding_paid_redeem_available
+    set_onboarding_paid_redeem_available(telegram_id)
+
     added_count = context.user_data.get("added_sources_count", 0)
 
     keyboard = [

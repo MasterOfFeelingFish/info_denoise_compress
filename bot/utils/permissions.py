@@ -135,6 +135,7 @@ def get_user_plan(telegram_id: str) -> str:
 def check_feature(telegram_id: str, feature: str) -> bool:
     """
     Check if a user has access to a specific feature.
+    Free users who completed onboarding get one-time redeem for paid features (e.g. custom_sources).
     
     Args:
         telegram_id: User's Telegram ID
@@ -150,13 +151,22 @@ def check_feature(telegram_id: str, feature: str) -> bool:
     plan = get_user_plan(telegram_id)
     config = _load_plan_config()
     plan_config = config.get(plan, config.get("free", {}))
-    
-    return plan_config.get("features", {}).get(feature, False)
+    allowed = plan_config.get("features", {}).get(feature, False)
+    if allowed:
+        return True
+    # Free user: allow once if onboarding redeem available
+    if plan == "free":
+        from utils.json_storage import get_user
+        user = get_user(telegram_id)
+        if user and user.get("onboarding_paid_redeem_available"):
+            return True
+    return False
 
 
 def get_feature_limit(telegram_id: str, feature: str) -> int:
     """
     Get the limit for a feature based on user's plan.
+    Free users with onboarding redeem get limit 1 for custom_sources_max (one free slot).
     
     Args:
         telegram_id: User's Telegram ID
@@ -172,8 +182,14 @@ def get_feature_limit(telegram_id: str, feature: str) -> int:
     plan = get_user_plan(telegram_id)
     config = _load_plan_config()
     plan_config = config.get(plan, config.get("free", {}))
-    
-    return plan_config.get("limits", {}).get(feature, 0)
+    limit = plan_config.get("limits", {}).get(feature, 0)
+    # Free user with onboarding redeem: allow 1 custom source
+    if plan == "free" and feature == "custom_sources_max" and limit == 0:
+        from utils.json_storage import get_user
+        user = get_user(telegram_id)
+        if user and user.get("onboarding_paid_redeem_available"):
+            return 1
+    return limit
 
 
 def require_plan(feature: str):

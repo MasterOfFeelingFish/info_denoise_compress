@@ -20,6 +20,7 @@ from telegram.ext import (
 
 from services.rss_fetcher import get_user_source_list
 from utils.telegram_utils import safe_answer_callback_query
+from utils.permissions import require_plan
 from utils.json_storage import (
     get_user,
     add_user_source,
@@ -228,8 +229,9 @@ async def start_source_suggestion(update: Update, context: ContextTypes.DEFAULT_
     return AWAITING_SOURCE_SUGGESTION
 
 
+@require_plan("custom_sources")
 async def start_add_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start adding a Twitter RSS feed."""
+    """Start adding a Twitter RSS feed (Pro or one-time onboarding redeem)."""
     from utils.conv_manager import activate_conv
     activate_conv(context, "sources")
 
@@ -428,8 +430,9 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
+@require_plan("custom_sources")
 async def start_add_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start adding a website RSS feed."""
+    """Start adding a website RSS feed (Pro or one-time onboarding redeem)."""
     from utils.conv_manager import activate_conv
     activate_conv(context, "sources")
 
@@ -569,8 +572,9 @@ async def handle_source_suggestion(update: Update, context: ContextTypes.DEFAULT
     return ConversationHandler.END
 
 
+@require_plan("custom_sources")
 async def start_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start bulk source import conversation."""
+    """Start bulk source import conversation (Pro or one-time onboarding redeem)."""
     from utils.conv_manager import activate_conv
     activate_conv(context, "sources")
 

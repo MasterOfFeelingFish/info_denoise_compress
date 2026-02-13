@@ -267,6 +267,34 @@ def set_user_subscribe_updates(telegram_id: str, subscribed: bool) -> bool:
     return False
 
 
+def set_onboarding_paid_redeem_available(telegram_id: str) -> bool:
+    """Set onboarding-paid-redeem available for user (after completing onboarding)."""
+    data = _read_json(USERS_FILE)
+    for user in data.get("users", []):
+        if user.get("telegram_id") == telegram_id:
+            user["onboarding_paid_redeem_available"] = True
+            result = _write_json(USERS_FILE, data)
+            if result:
+                logger.info(f"Set onboarding_paid_redeem_available for {telegram_id}")
+            return result
+    return False
+
+
+def consume_onboarding_redeem(telegram_id: str) -> bool:
+    """Consume the one-time paid feature redeem (e.g. after adding first custom source)."""
+    data = _read_json(USERS_FILE)
+    for user in data.get("users", []):
+        if user.get("telegram_id") == telegram_id:
+            if not user.get("onboarding_paid_redeem_available"):
+                return False
+            user["onboarding_paid_redeem_available"] = False
+            result = _write_json(USERS_FILE, data)
+            if result:
+                logger.info(f"Consumed onboarding_paid_redeem for {telegram_id}")
+            return result
+    return False
+
+
 def get_subscribed_users() -> List[Dict[str, Any]]:
     """Get all users who are subscribed to system updates.
     
@@ -709,18 +737,48 @@ def save_user_sources(telegram_id: str, sources: Dict[str, Dict[str, str]]) -> b
 
 
 def add_user_source(telegram_id: str, category: str, name: str, url: str) -> bool:
-    """Add a custom source to user's configuration."""
+    """Add a custom source to user's configuration.
+    Enforces custom_sources_max limit; consumes onboarding redeem when free user adds first source.
+    """
     custom = get_user_custom_sources(telegram_id)
+    count_before = sum(len(v) for v in custom.values())
+    is_new = name not in custom.get(category, {})
+
+    try:
+        from utils.permissions import get_user_plan, get_feature_limit
+        limit = get_feature_limit(telegram_id, "custom_sources_max")
+        if limit is not None and count_before >= limit:
+            logger.info(f"User {telegram_id} custom source limit reached ({count_before} >= {limit})")
+            return False
+    except Exception:
+        pass
 
     if category not in custom:
         custom[category] = {}
 
     custom[category][name] = url
-    
+
     # Rebuild full sources for save (which will extract custom again)
     full_sources = get_user_sources(telegram_id)
     full_sources.setdefault(category, {})[name] = url
-    return save_user_sources(telegram_id, full_sources)
+    ok = save_user_sources(telegram_id, full_sources)
+    if not ok:
+        return False
+
+    # Consume onboarding one-time redeem when free user adds their first custom source
+    if is_new and count_before == 0:
+        try:
+            from utils.permissions import get_user_plan
+            user = get_user(telegram_id)
+            if (
+                user
+                and get_user_plan(telegram_id) == "free"
+                and user.get("onboarding_paid_redeem_available")
+            ):
+                consume_onboarding_redeem(telegram_id)
+        except Exception:
+            pass
+    return True
 
 
 def remove_user_source(telegram_id: str, category: str, name: str) -> bool:

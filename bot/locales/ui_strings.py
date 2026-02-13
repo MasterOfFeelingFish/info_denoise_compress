@@ -13,6 +13,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "menu_preferences": "偏好设置",
         "menu_sources": "信息源",
         "menu_stats": "查看统计",
+        "menu_subscribe": "⭐ 升级 Pro / 兑换码",
         "menu_admin": "🛡️ 管理员控制台",
         
         # ============ 欢迎消息 ============
@@ -736,6 +737,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "menu_preferences": "Preferences",
         "menu_sources": "Sources",
         "menu_stats": "View Stats",
+        "menu_subscribe": "⭐ Upgrade Pro / Redeem Code",
         "menu_admin": "🛡️ Admin Panel",
         
         # ============ Welcome Messages ============
@@ -1459,6 +1461,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "menu_preferences": "設定",
         "menu_sources": "情報源",
         "menu_stats": "統計を見る",
+        "menu_subscribe": "⭐ Pro にアップグレード / コード",
         "menu_admin": "🛡️ 管理パネル",
         
         # ============ ウェルカムメッセージ ============
@@ -1931,6 +1934,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "menu_preferences": "설정",
         "menu_sources": "소스",
         "menu_stats": "통계 보기",
+        "menu_subscribe": "⭐ Pro 업그레이드 / 교환 코드",
         "menu_admin": "🛡️ 관리자 패널",
         
         # ============ 환영 메시지 ============
