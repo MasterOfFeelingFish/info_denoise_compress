@@ -559,11 +559,59 @@ def get_raw_content(date: Optional[str] = None) -> Dict[str, Any]:
 #
 
 
-def get_user_sources(telegram_id: str) -> Dict[str, Dict[str, str]]:
+def _source_key(category: str, name: str) -> str:
+    """Unique key for a source (used in disabled list)."""
+    return f"{category}:{name}"
+
+
+def get_disabled_sources_set(telegram_id: str) -> set:
+    """Get set of disabled source keys for the user. Keys are 'category:name'."""
+    user = get_user(telegram_id)
+    if not user:
+        return set()
+    _ensure_dir(USER_SOURCES_DIR)
+    sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
+    if not os.path.exists(sources_path):
+        return set()
+    data = _read_json(sources_path)
+    return set(data.get("disabled", []))
+
+
+def set_source_enabled(telegram_id: str, category: str, name: str, enabled: bool) -> bool:
+    """Enable or disable a source. Disabled sources are not fetched for digest."""
+    user = get_user(telegram_id)
+    if not user:
+        return False
+    _ensure_dir(USER_SOURCES_DIR)
+    sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
+    data = _read_json(sources_path) if os.path.exists(sources_path) else {}
+    disabled = list(data.get("disabled", []))
+    key = _source_key(category, name)
+    if enabled:
+        if key in disabled:
+            disabled.remove(key)
+    else:
+        if key not in disabled:
+            disabled.append(key)
+    data["disabled"] = disabled
+    data.setdefault("user_id", user["id"])
+    data.setdefault("telegram_id", telegram_id)
+    data["updated"] = datetime.now().isoformat()
+    if "custom_sources" not in data:
+        data["custom_sources"] = data.get("custom_sources", {})
+    result = _write_json(sources_path, data)
+    if result:
+        logger.info(f"Source {category}/{name} enabled={enabled} for user {user['id']}")
+    return result
+
+
+def get_user_sources(telegram_id: str, include_disabled: bool = True) -> Dict[str, Dict[str, str]]:
     """Get user's RSS source configuration.
     
     Returns merged sources: DEFAULT_USER_SOURCES + user's custom sources.
     Default sources always apply globally; user custom sources are additive.
+    
+    When include_disabled=False, disabled sources are excluded (for fetching digest).
     """
     import copy
     
@@ -578,7 +626,6 @@ def get_user_sources(telegram_id: str) -> Dict[str, Dict[str, str]]:
     sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
 
     if not os.path.exists(sources_path):
-        # No custom sources yet, just return defaults
         return merged
 
     data = _read_json(sources_path)
@@ -589,6 +636,15 @@ def get_user_sources(telegram_id: str) -> Dict[str, Dict[str, str]]:
         if category not in merged:
             merged[category] = {}
         merged[category].update(sources)
+    
+    if not include_disabled:
+        disabled = set(data.get("disabled", []))
+        for category in list(merged.keys()):
+            for name in list(merged.get(category, {}).keys()):
+                if _source_key(category, name) in disabled:
+                    del merged[category][name]
+            if not merged.get(category):
+                del merged[category]
     
     return merged
 
@@ -636,11 +692,14 @@ def save_user_sources(telegram_id: str, sources: Dict[str, Dict[str, str]]) -> b
         if custom_cat:
             custom_sources[category] = custom_cat
 
+    # Preserve disabled list when saving
+    existing = _read_json(sources_path) if os.path.exists(sources_path) else {}
     data = {
         "user_id": user["id"],
         "telegram_id": telegram_id,
         "updated": datetime.now().isoformat(),
         "custom_sources": custom_sources,
+        "disabled": existing.get("disabled", []),
     }
 
     result = _write_json(sources_path, data)

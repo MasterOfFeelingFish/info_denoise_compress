@@ -422,7 +422,7 @@ async def fetch_user_sources(
     """
     from utils.json_storage import get_user_sources
 
-    user_sources = get_user_sources(telegram_id)
+    user_sources = get_user_sources(telegram_id, include_disabled=False)
 
     if not user_sources or all(len(v) == 0 for v in user_sources.values()):
         logger.warning(f"No sources configured for user {telegram_id}")
@@ -510,7 +510,7 @@ async def prefetch_all_user_sources() -> Dict[str, Any]:
         if not telegram_id:
             continue
 
-        user_sources = get_user_sources(telegram_id)
+        user_sources = get_user_sources(telegram_id, include_disabled=False)
         for category, sources in user_sources.items():
             if category not in all_sources:
                 all_sources[category] = {}

@@ -90,27 +90,49 @@ def get_all_group_configs() -> list:
     return configs
 
 
-def _get_ui_for_group(update: Update, context: ContextTypes.DEFAULT_TYPE, group_id: str = None):
+def _get_ui_for_group(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    group_id: str = None,
+    prefer_user_language: bool = False,
+):
     """
     Get UI strings for group context.
-    
-    Priority:
-    1. Existing group config language (if group already configured)
-    2. Admin user's Telegram language setting
-    3. Fallback to English
+
+    When prefer_user_language is False (default):
+      1. Existing group config language (if group already configured)
+      2. Admin user's Telegram language_code
+      3. Fallback to English
+
+    When prefer_user_language is True (e.g. first-time setup / welcome):
+      1. Admin user's Telegram language_code (so current admin sees their own language)
+      2. Existing group config language
+      3. Fallback to English
     """
+    user = update.effective_user
+    raw_code = getattr(user, "language_code", None) if user else None
+    user_lang = normalize_language_code(raw_code) if raw_code else None
+
+    if prefer_user_language:
+        # First-time setup / welcome: use admin's language so they see their client language
+        resolved = user_lang or "en"
+        logger.info(
+            "Group setup UI: user_id=%s, language_code=%s, resolved=%s",
+            user.id if user else None,
+            raw_code,
+            resolved,
+        )
+        return get_ui_locale(resolved)
+
     # Try existing group config language
     if group_id:
         config = load_group_config(group_id)
         if config and config.get("language"):
             return get_ui_locale(config["language"])
-    
-    # Use the user's Telegram language
-    user = update.effective_user
-    if user and user.language_code:
-        lang = normalize_language_code(user.language_code)
-        return get_ui_locale(lang)
-    
+
+    if user_lang:
+        return get_ui_locale(user_lang)
+
     return get_ui_locale("en")
 
 
@@ -140,8 +162,8 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     
     chat = update.effective_chat
     if not chat or chat.type not in ("group", "supergroup"):
-        # Not in a group - show setup guide
-        ui = _get_ui_for_group(update, context)
+        # Not in a group - show setup guide (use current user's language)
+        ui = _get_ui_for_group(update, context, prefer_user_language=True)
         await update.message.reply_text(
             f"{ui['group_guide_title']}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -159,13 +181,16 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     
     # Check admin permission
     if not await _is_group_admin(update, context):
-        ui = _get_ui_for_group(update, context)
+        ui = _get_ui_for_group(update, context, prefer_user_language=True)
         await update.message.reply_text(ui['group_admin_only'])
         return ConversationHandler.END
     
     group_id = str(chat.id)
     existing = load_group_config(group_id)
-    ui = _get_ui_for_group(update, context, group_id)
+    # For "already configured" screen use group's saved language; for new-group welcome use admin's language
+    ui = _get_ui_for_group(
+        update, context, group_id, prefer_user_language=(not existing)
+    )
     
     if existing:
         keyboard = [
@@ -178,7 +203,7 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             f"{ui['group_label_name']}: {existing.get('group_title', chat.title)}\n"
             f"{ui['group_label_interests']}: {existing.get('profile', 'N/A')}\n"
             f"{ui['group_label_push_time']}: {existing.get('push_hour', 9)}:00\n"
-            f"{ui['group_label_language']}: {existing.get('language', 'zh')}\n\n"
+            f"{ui['group_label_language']}: {existing.get('language', 'en')}\n\n"
             f"{ui['group_choose_action']}",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -193,11 +218,11 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def handle_group_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle group profile input."""
+    """Handle group profile input (first-time setup flow: use client language)."""
     profile = update.message.text.strip()
     chat = update.effective_chat
     group_id = str(chat.id) if chat else None
-    ui = _get_ui_for_group(update, context, group_id)
+    ui = _get_ui_for_group(update, context, group_id, prefer_user_language=True)
     
     if len(profile) < 3:
         await update.message.reply_text(ui['group_input_too_short'])
@@ -228,7 +253,7 @@ async def handle_group_profile(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def handle_push_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle push time selection."""
+    """Handle push time selection (first-time setup flow: use client language)."""
     query = update.callback_query
     await query.answer()
     
@@ -237,7 +262,7 @@ async def handle_push_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     chat = update.effective_chat
     group_id = str(chat.id) if chat else None
-    ui = _get_ui_for_group(update, context, group_id)
+    ui = _get_ui_for_group(update, context, group_id, prefer_user_language=True)
     
     keyboard = [
         [
@@ -316,7 +341,7 @@ async def handle_group_view(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"{ui['group_view_title']}\n\n"
             f"{ui['group_label_interests']}: {config.get('profile', 'N/A')}\n"
             f"{ui['group_label_push_time']}: {config.get('push_hour', 9)}:00\n"
-            f"{ui['group_label_language']}: {config.get('language', 'zh')}\n"
+            f"{ui['group_label_language']}: {config.get('language', 'en')}\n"
             f"{ui['group_label_status']}: {status}\n"
             f"{ui['group_label_created']}: {config.get('created', 'N/A')[:10]}\n\n"
             f"{ui['group_view_footer']}"

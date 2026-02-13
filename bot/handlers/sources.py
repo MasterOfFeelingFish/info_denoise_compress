@@ -20,7 +20,15 @@ from telegram.ext import (
 
 from services.rss_fetcher import get_user_source_list
 from utils.telegram_utils import safe_answer_callback_query
-from utils.json_storage import get_user, add_user_source, remove_user_source, track_event, get_user_language
+from utils.json_storage import (
+    get_user,
+    add_user_source,
+    remove_user_source,
+    get_user_language,
+    get_disabled_sources_set,
+    set_source_enabled,
+    track_event,
+)
 from locales.ui_strings import get_ui_locale
 
 logger = logging.getLogger(__name__)
@@ -53,24 +61,33 @@ async def sources_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Get source counts for this user
+    # Get source counts and enabled/disabled for this user
     sources = get_user_source_list(telegram_id)
-    twitter_count = len(sources.get("twitter", []))
-    website_count = len(sources.get("websites", []))
+    disabled = get_disabled_sources_set(telegram_id)
+    twitter_list = sources.get("twitter", [])
+    website_list = sources.get("websites", [])
+
+    def _stats_suffix(category: str, names: list) -> str:
+        off = sum(1 for n in names if f"{category}:{n}" in disabled)
+        on_count = len(names) - off
+        return " " + ui["sources_stats_suffix"].format(enabled=on_count, disabled=off)
+
+    twitter_line = f"  • {ui['sources_twitter_count'].format(count=len(twitter_list))}{_stats_suffix('twitter', twitter_list)}"
+    website_line = f"  • {ui['sources_website_count'].format(count=len(website_list))}{_stats_suffix('websites', website_list)}"
 
     await update.message.reply_text(
         f"{ui['sources_title']}\n"
         f"{ui['divider']}\n\n"
         f"{ui['sources_current']}\n"
-        f"  • {ui['sources_twitter_count'].format(count=twitter_count)}\n"
-        f"  • {ui['sources_website_count'].format(count=website_count)}\n\n"
+        f"{twitter_line}\n"
+        f"{website_line}\n\n"
         f"{ui['sources_choose_category']}",
         reply_markup=reply_markup
     )
 
 
 async def view_twitter_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show list of monitored Twitter accounts."""
+    """Show list of monitored Twitter accounts with enable/disable toggle per source."""
     query = update.callback_query
     await safe_answer_callback_query(query)
 
@@ -80,6 +97,7 @@ async def view_twitter_sources(update: Update, context: ContextTypes.DEFAULT_TYP
     
     sources = get_user_source_list(telegram_id)
     twitter_sources = sources.get("twitter", [])
+    disabled = get_disabled_sources_set(telegram_id)
 
     if twitter_sources:
         lines = [
@@ -87,7 +105,11 @@ async def view_twitter_sources(update: Update, context: ContextTypes.DEFAULT_TYP
             f"{ui['divider']}\n"
         ]
         for i, source in enumerate(twitter_sources, 1):
-            lines.append(f"  {i}. {source}")
+            key = f"twitter:{source}"
+            if key in disabled:
+                lines.append(f"  🔴 {i}. {source} [{ui['source_disabled']}]")
+            else:
+                lines.append(f"  🟢 {i}. {source} [{ui['source_enabled']}]")
         lines.append(f"\n{ui['twitter_total'].format(count=len(twitter_sources))}")
         text = "\n".join(lines)
     else:
@@ -97,9 +119,25 @@ async def view_twitter_sources(update: Update, context: ContextTypes.DEFAULT_TYP
             f"{ui['twitter_empty']}"
         )
 
-    keyboard = [
-        [InlineKeyboardButton(ui["twitter_add"], callback_data="sources_add_twitter")],
-    ]
+    keyboard = []
+    if twitter_sources:
+        for idx, source in enumerate(twitter_sources):
+            key = f"twitter:{source}"
+            if key in disabled:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"✅ {source} → {ui['btn_enable_source']}",
+                        callback_data=f"src_tg_tw_{idx}",
+                    )
+                ])
+            else:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"⏸ {source} → {ui['btn_disable_source']}",
+                        callback_data=f"src_tg_tw_{idx}",
+                    )
+                ])
+    keyboard.append([InlineKeyboardButton(ui["twitter_add"], callback_data="sources_add_twitter")])
     if twitter_sources:
         keyboard.append([InlineKeyboardButton(ui["twitter_delete"], callback_data="sources_del_twitter")])
     keyboard.append([InlineKeyboardButton(ui["back"], callback_data="sources_back")])
@@ -109,7 +147,7 @@ async def view_twitter_sources(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show list of monitored website RSS feeds."""
+    """Show list of monitored website RSS feeds with enable/disable toggle per source."""
     query = update.callback_query
     await safe_answer_callback_query(query)
 
@@ -118,6 +156,7 @@ async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYP
     ui = get_ui_locale(lang)
     sources = get_user_source_list(telegram_id)
     website_sources = sources.get("websites", [])
+    disabled = get_disabled_sources_set(telegram_id)
 
     if website_sources:
         lines = [
@@ -125,7 +164,11 @@ async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYP
             f"{ui['divider']}\n"
         ]
         for i, source in enumerate(website_sources, 1):
-            lines.append(f"  {i}. {source}")
+            key = f"websites:{source}"
+            if key in disabled:
+                lines.append(f"  🔴 {i}. {source} [{ui['source_disabled']}]")
+            else:
+                lines.append(f"  🟢 {i}. {source} [{ui['source_enabled']}]")
         lines.append(f"\n{ui.get('website_total', '{count} websites').format(count=len(website_sources))}")
         text = "\n".join(lines)
     else:
@@ -135,9 +178,25 @@ async def view_website_sources(update: Update, context: ContextTypes.DEFAULT_TYP
             f"{ui.get('website_empty', 'No website sources configured.')}"
         )
 
-    keyboard = [
-        [InlineKeyboardButton(ui.get("website_add", "Add Website"), callback_data="sources_add_website")],
-    ]
+    keyboard = []
+    if website_sources:
+        for idx, source in enumerate(website_sources):
+            key = f"websites:{source}"
+            if key in disabled:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"✅ {source} → {ui['btn_enable_source']}",
+                        callback_data=f"src_tg_web_{idx}",
+                    )
+                ])
+            else:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"⏸ {source} → {ui['btn_disable_source']}",
+                        callback_data=f"src_tg_web_{idx}",
+                    )
+                ])
+    keyboard.append([InlineKeyboardButton(ui.get("website_add", "Add Website"), callback_data="sources_add_website")])
     if website_sources:
         keyboard.append([InlineKeyboardButton(ui.get("website_delete", "Delete Website"), callback_data="sources_del_website")])
     keyboard.append([InlineKeyboardButton(ui.get("back", "Back"), callback_data="sources_back")])
@@ -776,18 +835,62 @@ async def handle_delete_website(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
 
+async def handle_source_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Toggle enable/disable for one source. Refreshes the list view after."""
+    query = update.callback_query
+    await safe_answer_callback_query(query)
+
+    telegram_id = str(query.from_user.id)
+    # callback_data: src_tg_tw_0 or src_tg_web_1
+    parts = query.data.split("_")
+    if len(parts) != 4 or parts[0] != "src" or parts[1] != "tg":
+        return
+    cat_short = parts[2]  # tw or web
+    try:
+        idx = int(parts[3])
+    except ValueError:
+        return
+    category = "twitter" if cat_short == "tw" else "websites"
+
+    sources = get_user_source_list(telegram_id)
+    names = sources.get(category, [])
+    if idx < 0 or idx >= len(names):
+        return
+    name = names[idx]
+
+    disabled = get_disabled_sources_set(telegram_id)
+    key = f"{category}:{name}"
+    currently_disabled = key in disabled
+    set_source_enabled(telegram_id, category, name, enabled=currently_disabled)
+
+    if category == "twitter":
+        await view_twitter_sources(update, context)
+    else:
+        await view_website_sources(update, context)
+
+
 async def sources_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Return to sources menu."""
     query = update.callback_query
     await safe_answer_callback_query(query)
 
-    # Get source counts for this user
     telegram_id = str(query.from_user.id)
     lang = get_user_language(telegram_id)
     ui = get_ui_locale(lang)
     sources = get_user_source_list(telegram_id)
-    twitter_count = len(sources.get("twitter", []))
-    website_count = len(sources.get("websites", []))
+    disabled = get_disabled_sources_set(telegram_id)
+    twitter_list = sources.get("twitter", [])
+    website_list = sources.get("websites", [])
+
+    def _stats_suffix(category: str, names: list) -> str:
+        off = sum(1 for n in names if f"{category}:{n}" in disabled)
+        on_count = len(names) - off
+        return " " + ui.get("sources_stats_suffix", "({enabled} on, {disabled} off)").format(
+            enabled=on_count, disabled=off
+        )
+
+    twitter_line = f"  • {ui.get('sources_twitter', 'Twitter')}: {len(twitter_list)}{_stats_suffix('twitter', twitter_list)}"
+    website_line = f"  • {ui.get('sources_websites', 'Websites')}: {len(website_list)}{_stats_suffix('websites', website_list)}"
 
     keyboard = [
         [
@@ -804,8 +907,8 @@ async def sources_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"{ui.get('sources_title', 'Sources')}\n"
         f"{ui['divider']}\n\n"
         f"{ui.get('sources_monitoring', 'Currently monitoring:')}\n"
-        f"  • Twitter: {twitter_count}\n"
-        f"  • {ui.get('sources_websites', 'Websites')}: {website_count}\n\n"
+        f"{twitter_line}\n"
+        f"{website_line}\n\n"
         f"{ui.get('sources_choose_category', 'Select a category.')}",
         reply_markup=reply_markup
     )
@@ -872,6 +975,7 @@ def get_sources_callbacks():
     return [
         CallbackQueryHandler(view_twitter_sources, pattern="^sources_twitter$"),
         CallbackQueryHandler(view_website_sources, pattern="^sources_websites$"),
+        CallbackQueryHandler(handle_source_toggle, pattern=r"^src_tg_(tw|web)_\d+$"),
         CallbackQueryHandler(show_delete_twitter, pattern="^sources_del_twitter$"),
         CallbackQueryHandler(show_delete_website, pattern="^sources_del_website$"),
         CallbackQueryHandler(handle_delete_twitter, pattern="^del_tw_"),

@@ -67,6 +67,8 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "sources_current": "当前监控：",
         "sources_twitter_count": "Twitter 账号: {count}",
         "sources_website_count": "网站 RSS: {count}",
+        "sources_stats_enabled_disabled": "{total}（{enabled} 启用，{disabled} 禁用）",
+        "sources_stats_suffix": "（{enabled} 启用，{disabled} 禁用）",
         "sources_choose_category": "选择分类查看详情。",
         "sources_twitter": "Twitter",
         "sources_websites": "网站",
@@ -79,6 +81,10 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "twitter_empty": "还没有配置 Twitter 信息源。\n\n点击「添加 Twitter」添加账号。",
         "twitter_add": "添加 Twitter",
         "twitter_delete": "删除 Twitter",
+        "source_enabled": "已启用",
+        "source_disabled": "已禁用",
+        "btn_disable_source": "禁用",
+        "btn_enable_source": "启用",
         
         # 添加 Twitter 信息源
         "twitter_add_title": "添加 Twitter 信息源",
@@ -761,6 +767,8 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "sources_current": "Currently monitoring:",
         "sources_twitter_count": "Twitter accounts: {count}",
         "sources_website_count": "Website RSS: {count}",
+        "sources_stats_enabled_disabled": "{total} ({enabled} on, {disabled} off)",
+        "sources_stats_suffix": "({enabled} on, {disabled} off)",
         "sources_choose_category": "Select a category for details.",
         "sources_twitter": "Twitter",
         "sources_websites": "Websites",
@@ -773,6 +781,10 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "twitter_empty": "No Twitter sources configured.\n\nClick 'Add Twitter' to add accounts.",
         "twitter_add": "Add Twitter",
         "twitter_delete": "Delete Twitter",
+        "source_enabled": "Enabled",
+        "source_disabled": "Disabled",
+        "btn_disable_source": "Disable",
+        "btn_enable_source": "Enable",
         
         # Add Twitter Source
         "twitter_add_title": "Add Twitter Source",
@@ -1455,6 +1467,8 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "sources_current": "現在監視中：",
         "sources_twitter_count": "Twitterアカウント: {count}",
         "sources_website_count": "ウェブサイトRSS: {count}",
+        "sources_stats_enabled_disabled": "{total}（{enabled} 有効、{disabled} 無効）",
+        "sources_stats_suffix": "（{enabled} 有効、{disabled} 無効）",
         "sources_choose_category": "カテゴリを選択して詳細を見る。",
         "sources_twitter": "Twitter",
         "sources_websites": "ウェブサイト",
@@ -1467,6 +1481,10 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "twitter_empty": "Twitter情報源が設定されていません。\n\n「Twitterを追加」をクリック。",
         "twitter_add": "Twitterを追加",
         "twitter_delete": "Twitterを削除",
+        "source_enabled": "有効",
+        "source_disabled": "無効",
+        "btn_disable_source": "無効化",
+        "btn_enable_source": "有効化",
         
         # Twitter情報源追加
         "twitter_add_title": "Twitter情報源を追加",
@@ -1921,6 +1939,8 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "sources_current": "현재 모니터링:",
         "sources_twitter_count": "Twitter 계정: {count}",
         "sources_website_count": "웹사이트 RSS: {count}",
+        "sources_stats_enabled_disabled": "{total}（{enabled} 사용 중, {disabled} 비활성）",
+        "sources_stats_suffix": "（{enabled} 사용 중, {disabled} 비활성）",
         "sources_choose_category": "카테고리를 선택하여 세부 정보를 보세요.",
         "sources_twitter": "Twitter",
         "sources_websites": "웹사이트",
@@ -1933,6 +1953,10 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "twitter_empty": "Twitter 소스가 설정되지 않았습니다.\n\n'Twitter 추가'를 클릭하세요.",
         "twitter_add": "Twitter 추가",
         "twitter_delete": "Twitter 삭제",
+        "source_enabled": "사용 중",
+        "source_disabled": "비활성",
+        "btn_disable_source": "비활성화",
+        "btn_enable_source": "활성화",
         
         # Twitter 소스 추가
         "twitter_add_title": "Twitter 소스 추가",
