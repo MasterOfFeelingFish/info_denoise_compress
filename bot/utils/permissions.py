@@ -9,10 +9,26 @@ import json
 import os
 import logging
 import functools
+import copy
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
+
+# Keys for admin UI iteration (order preserved)
+FEATURE_KEYS: List[str] = [
+    "daily_digest",
+    "custom_sources",
+    "ai_chat",
+    "advanced_filters",
+    "priority_push",
+    "source_health_alerts",
+]
+LIMIT_KEYS: List[str] = [
+    "ai_chat_daily",
+    "custom_sources_max",
+    "digest_items_max",
+]
 
 # Default plan configuration
 DEFAULT_PLAN_CONFIG = {
@@ -60,7 +76,26 @@ def _load_plan_config() -> Dict[str, Any]:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             pass
-    return DEFAULT_PLAN_CONFIG
+    return copy.deepcopy(DEFAULT_PLAN_CONFIG)
+
+
+def get_plan_config() -> Dict[str, Any]:
+    """Return a deep copy of current plan config (for admin edit without mutating live config)."""
+    return copy.deepcopy(_load_plan_config())
+
+
+def save_plan_config(config: Dict[str, Any]) -> bool:
+    """Persist plan config to PLAN_CONFIG_FILE. Returns True on success."""
+    from config import PLAN_CONFIG_FILE, DATA_DIR
+    try:
+        os.makedirs(os.path.dirname(PLAN_CONFIG_FILE) or ".", exist_ok=True)
+        with open(PLAN_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        logger.info("Plan config saved to %s", PLAN_CONFIG_FILE)
+        return True
+    except IOError as e:
+        logger.exception("Failed to save plan config: %s", e)
+        return False
 
 
 def get_user_plan(telegram_id: str) -> str:
