@@ -3,7 +3,10 @@ Language Utilities
 
 Handles language detection, normalization, and user language preferences.
 """
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Supported languages in order of preference for fallback
 SUPPORTED_LANGUAGES = ["zh", "en", "ja", "ko"]
@@ -60,6 +63,38 @@ def normalize_language_code(code: Optional[str]) -> str:
     
     # Default to English for unsupported languages
     return "en"
+
+
+def detect_language_from_text(text: str) -> Optional[str]:
+    """
+    Detect language from user's text content (e.g. onboarding reply).
+    Returns zh, en, ja, ko based on character ranges, or None if no detection.
+    Used to dynamically adjust bot language when user replies in a different language.
+    """
+    preview = (text or "")[:80].replace("\n", " ")
+    if not text or not text.strip():
+        logger.info("[lang_detect] input empty or whitespace -> None")
+        return None
+    # Scan by character ranges (prioritize CJK: ja before zh due to overlap)
+    for i, char in enumerate(text):
+        if "\u3040" <= char <= "\u30ff":  # Hiragana / Katakana
+            logger.info("[lang_detect] text=%r ... -> char[%d]=%r (Hiragana/Katakana) -> ja", preview, i, char)
+            return "ja"
+        if "\uac00" <= char <= "\ud7af" or "\u1100" <= char <= "\u11ff":  # Hangul
+            logger.info("[lang_detect] text=%r ... -> char[%d]=%r (Hangul) -> ko", preview, i, char)
+            return "ko"
+        if "\u4e00" <= char <= "\u9fff":  # CJK Unified Ideographs (Chinese/Japanese/Kanji)
+            logger.info("[lang_detect] text=%r ... -> char[%d]=%r (CJK) -> zh", preview, i, char)
+            return "zh"
+        if "\u0400" <= char <= "\u04ff":  # Cyrillic
+            logger.info("[lang_detect] text=%r ... -> char[%d]=%r (Cyrillic) -> en", preview, i, char)
+            return "en"  # Fallback to en (we don't have ru UI)
+    # No CJK/Cyrillic: if text has letters (e.g. Latin/English), treat as English
+    if any(c.isalpha() for c in text):
+        logger.info("[lang_detect] text=%r ... -> has letters (Latin/English) -> en", preview)
+        return "en"
+    logger.info("[lang_detect] text=%r ... -> no letters (numbers/emoji only) -> None (keep current)", preview)
+    return None  # Numbers only or no letters: keep current language
 
 
 def is_supported_language(code: str) -> bool:

@@ -53,9 +53,12 @@ def _read_json(file_path: str) -> Dict[str, Any]:
             if not os.path.exists(file_path):
                 return {}
 
-            # Simple read without locking (atomic writes guarantee consistency)
             with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                raw = f.read()
+            # Empty or whitespace-only file: treat as empty object (avoid JSONDecodeError)
+            if not raw.strip():
+                return {}
+            return json.loads(raw)
 
         except json.JSONDecodeError as e:
             logger.error(f"JSON decode error in {file_path}: {e}")

@@ -251,18 +251,11 @@ async def start_add_twitter(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.edit_message_text(
         f"{ui['twitter_add_title']}\n"
         f"{ui['divider']}\n\n"
-        f"{ui['twitter_add_intro']}\n\n"
-        f"{ui['twitter_step1_title']}\n\n"
-        f"{ui['twitter_step1_desc']}\n\n"
-        f"{ui['twitter_step1_example']}\n\n"
-        f"{ui['twitter_step1_tip']}\n\n"
-        f"{ui['twitter_step2_title']}\n\n"
-        f"{ui['twitter_step2_desc']}\n\n"
-        f"{ui['twitter_step3_title']}\n\n"
-        f"{ui['twitter_step3_desc']}\n\n"
-        f"{ui['divider']}\n"
-        f"{ui['twitter_future_hint']}\n\n"
-        f"{ui['twitter_input_prompt']}",
+        f"{ui.get('twitter_add_intro_rss_only', ui['twitter_add_intro'])}\n\n"
+        f"{ui.get('twitter_add_method_title', '')}\n"
+        f"{ui.get('twitter_add_method_desc', '')}\n\n"
+        f"{ui['divider']}\n\n"
+        f"{ui.get('twitter_input_prompt_rss_only', ui['twitter_input_prompt'])}",
         reply_markup=reply_markup,
         disable_web_page_preview=True
     )
@@ -304,7 +297,7 @@ async def show_twitter_tutorial(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle Twitter source addition - supports @username and direct RSS URL."""
+    """Handle Twitter source addition - RSS URL only (e.g. from rss.app)."""
     from utils.conv_manager import is_active_conv
     if not is_active_conv(context, "sources"):
         logger.info("Sources text handler yielding - another conversation is active")
@@ -314,7 +307,7 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(ui.get("source_action_interrupted", "⚠️ Source action interrupted. Please click the add button again."))
         return ConversationHandler.END
 
-    from services.rss_fetcher import validate_rss_url, twitter_handle_to_rss
+    from services.rss_fetcher import validate_rss_url
 
     telegram_id = str(update.effective_user.id)
     lang = get_user_language(telegram_id)
@@ -325,40 +318,8 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
     feed_url = None
     entries_count = 0
 
-    # Determine input type: @username or RSS URL
-    is_handle = (
-        user_input.startswith("@") or
-        (not user_input.startswith("http") and "/" not in user_input and len(user_input) <= 16)
-    )
-
-    if is_handle:
-        # --- Mode 1: @username → auto-convert to RSS ---
-        await update.message.reply_text(ui.get("twitter_converting", "🔄 Converting Twitter handle to RSS feed..."))
-
-        result = await twitter_handle_to_rss(user_input)
-
-        if not result["success"]:
-            keyboard = [
-                [InlineKeyboardButton(ui["btn_retry"], callback_data="sources_add_twitter")],
-                [InlineKeyboardButton(ui["btn_view_tutorial"], callback_data="twitter_tutorial")],
-                [InlineKeyboardButton(ui["back"], callback_data="sources_twitter")],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                f"{ui.get('twitter_convert_failed', '❌ Failed to convert Twitter handle to RSS')}\n"
-                f"{ui['divider']}\n\n"
-                f"{html.escape(result.get('error', 'Unknown error'))}\n\n"
-                f"{ui.get('twitter_convert_fallback', 'You can also paste a direct RSS URL (e.g. from rss.app).')}",
-                reply_markup=reply_markup
-            )
-            return ConversationHandler.END
-
-        feed_title = result["title"]
-        feed_url = result["url"]
-        entries_count = result.get("entries_count", 0)
-
-    elif user_input.startswith("http"):
-        # --- Mode 2: Direct RSS URL (original behavior) ---
+    if user_input.startswith("http"):
+        # --- Only support: paste RSS URL (e.g. from rss.app) ---
         validation = await validate_rss_url(user_input)
 
         if not validation["valid"]:
@@ -392,7 +353,7 @@ async def handle_twitter_add(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(
             f"{ui['twitter_format_error']}\n"
             f"{ui['divider']}\n\n"
-            f"{ui.get('twitter_format_hint_v2', 'Send a Twitter username (e.g. @VitalikButerin) or a direct RSS URL.')}",
+            f"{ui.get('twitter_format_hint_rss_only', '请粘贴 RSS 链接（如 rss.app 生成）。')}",
             reply_markup=reply_markup
         )
         return ConversationHandler.END
@@ -581,20 +542,16 @@ async def start_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     await safe_answer_callback_query(query)
 
+    telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+    title = ui.get("bulk_import_title", "Bulk Import Sources")
+    body = ui.get("bulk_import_body", "Enter multiple sources, one per line.")
+    prompt = ui.get("bulk_import_prompt", "Send content or /cancel:")
+    divider = ui.get("divider", "─" * 24)
+
     await query.edit_message_text(
-        f"批量导入信息源\n"
-        f"{'─' * 24}\n\n"
-        "请输入多个信息源，每行一个。\n\n"
-        "Twitter 格式：\n"
-        "  @账号名 | RSS地址\n\n"
-        "网站格式：\n"
-        "  网站名 | RSS地址\n\n"
-        "示例：\n"
-        "  @VitalikButerin | https://rss.app/feeds/xxx\n"
-        "  @lookonchain | https://nitter.net/lookonchain/rss\n"
-        "  The Block | https://theblock.co/rss.xml\n"
-        "  decrypt.co\n\n"
-        "请输入或 /cancel 取消："
+        f"{title}\n{divider}\n\n{body}\n\n{prompt}"
     )
 
     return AWAITING_BULK_IMPORT
@@ -606,9 +563,11 @@ async def handle_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not is_active_conv(context, "sources"):
         return ConversationHandler.END
 
-    from services.rss_fetcher import validate_twitter_handle, validate_url, auto_detect_rss
+    from services.rss_fetcher import validate_rss_url, validate_url, auto_detect_rss
 
     telegram_id = str(update.effective_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
     user_input = update.message.text.strip()
     lines = user_input.split("\n")
 
@@ -638,18 +597,18 @@ async def handle_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         # Process based on category
         if category == "twitter":
-            validation = await validate_twitter_handle(name)
-            if not validation["valid"]:
+            # Twitter: only support RSS URL (no @handle → auto-convert)
+            url = url.strip() if url else ""
+            if not url or not url.startswith("http"):
                 fail_count += 1
-                results.append(f"  - {name}: {validation['error'][:30]}")
+                results.append(f"  - {name}: {ui.get('bulk_import_twitter_rss_required', 'Twitter requires RSS URL (format: name|RSS URL)')}")
                 continue
-            name = validation["handle"]
-            if url:
-                url_validation = await validate_url(url)
-                if not url_validation["valid"]:
-                    fail_count += 1
-                    results.append(f"  - {name}: RSS无效")
-                    continue
+            url_validation = await validate_rss_url(url)
+            if not url_validation["valid"]:
+                fail_count += 1
+                results.append(f"  - {name}: {url_validation.get('error', ui.get('bulk_import_rss_invalid', 'Invalid RSS'))[:40]}")
+                continue
+            name = url_validation.get("title", name or "Twitter List RSS")
         else:
             # Website
             if url.startswith("http"):
@@ -666,7 +625,7 @@ async def handle_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     name = name.replace("www.", "").split(".")[0].title()
                 else:
                     fail_count += 1
-                    results.append(f"  - {name}: 未找到RSS")
+                    results.append(f"  - {name}: {ui.get('bulk_import_rss_not_found', 'RSS not found')}")
                     continue
 
         # Add to user's sources
@@ -678,24 +637,30 @@ async def handle_bulk_import(update: Update, context: ContextTypes.DEFAULT_TYPE)
             results.append(f"  + {name}")
         else:
             fail_count += 1
-            results.append(f"  - {name}: 保存失败")
+            fail_msg = ui.get("bulk_import_line_fail", "Save failed")
+            results.append(f"  - {name}: {fail_msg}")
+
+    result_title = ui.get("bulk_import_result", "Bulk Import Results")
+    success_line = ui.get("bulk_import_success_count", "Success: {count}").format(count=success_count)
+    failed_line = ui.get("bulk_import_failed_count", "Failed: {count}").format(count=fail_count)
+    detail_label = ui.get("bulk_import_detail", "Details:")
+    more_label = ui.get("bulk_import_more", "... and {n} more").format(n=len(results) - 15)
+    btn_continue = ui.get("bulk_import_btn_continue", "Continue Import")
+    btn_back = ui.get("bulk_import_btn_back", "Back")
+    divider = ui.get("divider", "─" * 24)
 
     keyboard = [
-        [InlineKeyboardButton("继续导入", callback_data="sources_bulk_import")],
-        [InlineKeyboardButton("返回", callback_data="sources_back")],
+        [InlineKeyboardButton(btn_continue, callback_data="sources_bulk_import")],
+        [InlineKeyboardButton(btn_back, callback_data="sources_back")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     status_text = "\n".join(results[:15])
     if len(results) > 15:
-        status_text += f"\n  ... 还有 {len(results) - 15} 条"
+        status_text += f"\n  {more_label}"
 
     await update.message.reply_text(
-        f"批量导入结果\n"
-        f"{'─' * 24}\n\n"
-        f"成功: {success_count}\n"
-        f"失败: {fail_count}\n\n"
-        f"详情：\n{status_text}",
+        f"{result_title}\n{divider}\n\n{success_line}\n{failed_line}\n\n{detail_label}\n{status_text}",
         reply_markup=reply_markup
     )
 

@@ -35,6 +35,7 @@ from utils.json_storage import (
 )
 from utils.auth import whitelist_required
 from services.language_service import normalize_language_code, get_language_native_name
+from utils.language import detect_language_from_text, is_supported_language
 from locales.ui_strings import get_ui_locale
 
 logger = logging.getLogger(__name__)
@@ -107,11 +108,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         context.user_data["conversation_history"] = []
         context.user_data["current_round"] = 1
         
-        # Detect and store user's language from Telegram
+        # Detect and store user's language from Telegram (initial; may be overridden by reply language later)
         lang = normalize_language_code(user.language_code)
         context.user_data["language"] = lang
-        # Store native language name for AI prompts
         context.user_data["language_native"] = get_language_native_name(lang)
+        logger.info("[onboarding_lang] /start new user telegram_id=%s language_code=%s -> lang=%s", user.id, getattr(user, "language_code", None), lang)
         ui = get_ui_locale(lang)
 
         # Show welcome message + typing indicator
@@ -220,11 +221,22 @@ async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not is_active_conv(context, "onboarding"):
         return ConversationHandler.END
 
+    user_message = update.message.text
+    # Dynamically adjust language based on user's reply
+    lang_before = context.user_data.get("language", "zh")
+    detected_lang = detect_language_from_text(user_message)
+    supported = bool(detected_lang and is_supported_language(detected_lang))
+    if supported:
+        context.user_data["language"] = detected_lang
+        context.user_data["language_native"] = get_language_native_name(detected_lang)
     lang = context.user_data.get("language", "zh")
+    logger.info(
+        "[onboarding_lang] round=1 user_msg=%r lang_before=%s detected=%s supported=%s lang_after=%s",
+        (user_message or "")[:60], lang_before, detected_lang, supported, lang
+    )
     user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
     
-    user_message = update.message.text
     context.user_data["conversation_history"].append({
         "round": 1,
         "user_input": user_message
@@ -274,11 +286,22 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ONBOARDING_ROUND_2
     context.user_data["processing_round2"] = True
 
+    user_message = update.message.text
+    # Dynamically adjust language based on user's reply
+    lang_before = context.user_data.get("language", "zh")
+    detected_lang = detect_language_from_text(user_message)
+    supported = bool(detected_lang and is_supported_language(detected_lang))
+    if supported:
+        context.user_data["language"] = detected_lang
+        context.user_data["language_native"] = get_language_native_name(detected_lang)
     lang = context.user_data.get("language", "zh")
+    logger.info(
+        "[onboarding_lang] round=2 user_msg=%r lang_before=%s detected=%s supported=%s lang_after=%s",
+        (user_message or "")[:60], lang_before, detected_lang, supported, lang
+    )
     user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
     
-    user_message = update.message.text
     context.user_data["conversation_history"].append({
         "round": 2,
         "user_input": user_message
@@ -1200,8 +1223,8 @@ async def add_custom_sources(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.edit_message_text(
         "🎯 添加你关注的信息源\n\n"
-        "请发送以下任一格式：\n\n"
-        "📱 Twitter: @VitalikButerin\n"
+        "请发送以下格式：\n\n"
+        "📱 Twitter: 粘贴 RSS 链接（如 rss.app 生成）\n"
         "📰 网站: https://example.com/rss\n\n"
         "💡 可以连续发送多个，完成后点击按钮：",
         reply_markup=reply_markup
@@ -1216,7 +1239,7 @@ async def handle_add_source(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not is_active_conv(context, "onboarding"):
         return ConversationHandler.END
 
-    from services.rss_fetcher import twitter_handle_to_rss, validate_url
+    from services.rss_fetcher import validate_url, validate_rss_url
     from utils.json_storage import get_user_sources, save_user_sources
     from urllib.parse import urlparse
 
@@ -1229,35 +1252,27 @@ async def handle_add_source(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     success = False
     added_name = ""
 
-    # Determine input type
-    is_handle = (
-        text.startswith("@") or
-        (not text.startswith("http") and "/" not in text and len(text) <= 16)
-    )
-
-    if is_handle:
-        # Twitter @username → auto-convert to RSS
-        result = await twitter_handle_to_rss(text)
-        if result["success"]:
-            feed_title = result["title"]
-            feed_url = result["url"]
+    if text.startswith("http"):
+        # Try as Twitter RSS first (rss.app etc.)
+        rss_validation = await validate_rss_url(text)
+        if rss_validation["valid"]:
+            feed_title = rss_validation.get("title", "Twitter List RSS")
             if feed_title not in user_sources.get("twitter", {}):
-                user_sources.setdefault("twitter", {})[feed_title] = feed_url
-                added_name = f"{result['handle']} ({feed_title})"
+                user_sources.setdefault("twitter", {})[feed_title] = text
+                added_name = f"Twitter: {feed_title}"
                 success = True
-    elif text.startswith("http"):
-        # Website RSS URL
-        validation = await validate_url(text)
-        if validation["valid"]:
-            url = validation["url"]
-            parsed = urlparse(url)
-            domain = parsed.netloc.replace("www.", "")
-            name = domain.split(".")[0].title()
-
-            if name not in user_sources.get("websites", {}):
-                user_sources.setdefault("websites", {})[name] = url
-                added_name = f"{name} ({domain})"
-                success = True
+        if not success:
+            # Website RSS URL
+            validation = await validate_url(text)
+            if validation["valid"]:
+                url = validation["url"]
+                parsed = urlparse(url)
+                domain = parsed.netloc.replace("www.", "")
+                name = domain.split(".")[0].title()
+                if name not in user_sources.get("websites", {}):
+                    user_sources.setdefault("websites", {})[name] = url
+                    added_name = f"{name} ({domain})"
+                    success = True
 
     if success:
         # Save
@@ -1424,8 +1439,8 @@ async def add_custom_sources_no_push(update: Update, context: ContextTypes.DEFAU
 
     await query.edit_message_text(
         "🎯 添加你关注的信息源\n\n"
-        "请发送以下任一格式：\n\n"
-        "📱 Twitter: @VitalikButerin\n"
+        "请发送以下格式：\n\n"
+        "📱 Twitter: 粘贴 RSS 链接（如 rss.app 生成）\n"
         "📰 网站: https://example.com/rss\n\n"
         "💡 可以连续发送多个，完成后点击按钮：",
         reply_markup=reply_markup

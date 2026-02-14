@@ -483,7 +483,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         ],
         [InlineKeyboardButton(ui["menu_sources"], callback_data="manage_sources")],
         [InlineKeyboardButton(
-            ui.get("help_group_setup", "📢 群组推送指南"),
+            ui.get("help_group_setup", "Group Push Guidelines"),
             callback_data="group_setup_guide"
         )],
     ]
