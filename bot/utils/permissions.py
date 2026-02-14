@@ -154,8 +154,8 @@ def check_feature(telegram_id: str, feature: str) -> bool:
     allowed = plan_config.get("features", {}).get(feature, False)
     if allowed:
         return True
-    # Free user: allow once if onboarding redeem available
-    if plan == "free":
+    # Free user: allow once if onboarding redeem available (only for custom_sources, not priority_push etc.)
+    if plan == "free" and feature == "custom_sources":
         from utils.json_storage import get_user
         user = get_user(telegram_id)
         if user and user.get("onboarding_paid_redeem_available"):

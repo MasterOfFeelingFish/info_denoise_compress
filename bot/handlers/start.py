@@ -1527,12 +1527,18 @@ async def trigger_first_digest_internal(
         f"{ui.get('expected_time', 'This may take 10-20 seconds...')}"
     )
 
+    next_push_key = "next_push_time"
+    wait_next_key = "first_digest_wait_next"
     try:
         from datetime import datetime
         from services.digest_processor import process_single_user
+        from utils.permissions import check_feature
 
         today = datetime.now().strftime("%Y-%m-%d")
         user = get_user(telegram_id)
+        if check_feature(telegram_id, "priority_push"):
+            next_push_key = "next_push_time_pro"
+            wait_next_key = "first_digest_wait_next_pro"
 
         if not user:
             await query.edit_message_text(ui.get("user_not_found", "User not found. Please use /start."))
@@ -1569,7 +1575,7 @@ async def trigger_first_digest_internal(
                     text=f"{ui.get('first_digest_no_content', 'No new content available.')}\n\n"
                          f"{ui.get('first_digest_suggestion', '💡 Suggestion')}\n"
                          f"{ui.get('first_digest_add_sources', '• Add more sources (/sources)')}\n"
-                         f"{ui.get('next_push_time', 'Next push: ~24 hours')}",
+                         f"{ui.get(next_push_key, ui.get('next_push_time', 'Next push: ~24 hours'))}",
                     reply_markup=reply_markup
                 )
             else:
@@ -1586,7 +1592,7 @@ async def trigger_first_digest_internal(
                          f"{ui.get('first_digest_tip_title', '💡 Tips')}\n"
                          f"{ui.get('first_digest_tip_feedback', '• Use feedback buttons to improve')}\n"
                          f"{ui.get('first_digest_tip_settings', '• /settings to adjust preferences')}\n"
-                         f"{ui.get('next_push_time', 'Next push: ~24 hours')}",
+                         f"{ui.get(next_push_key, ui.get('next_push_time', 'Next push: ~24 hours'))}",
                     reply_markup=reply_markup
                 )
         else:
@@ -1602,7 +1608,7 @@ async def trigger_first_digest_internal(
             await query.edit_message_text(
                 f"{ui.get('first_digest_failed', 'Push failed')}\n\n"
                 f"{reason_msg}\n\n"
-                f"{ui.get('first_digest_wait_next', 'Please wait for the next push (~24 hours).')}",
+                f"{ui.get(wait_next_key, ui.get('first_digest_wait_next', 'Please wait for the next push.'))}",
                 reply_markup=reply_markup
             )
 
@@ -1612,7 +1618,7 @@ async def trigger_first_digest_internal(
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            f"{ui.get('first_digest_failed', 'Push failed')}, {ui.get('first_digest_wait_next', 'please wait for the next push.')}",
+            f"{ui.get('first_digest_failed', 'Push failed')}, {ui.get(wait_next_key, ui.get('first_digest_wait_next', 'please wait for the next push.'))}",
             reply_markup=reply_markup
         )
 

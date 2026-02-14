@@ -109,8 +109,11 @@ PUSH_MINUTE = _parse_int_env("PUSH_MINUTE", 0)
 # 推送模式: "fixed_time" (固定时间推送所有用户) / "user_interval" (按用户注册时间循环)
 PUSH_MODE = os.getenv("PUSH_MODE", "user_interval")
 
-# 用户间隔模式的周期（小时），默认24小时
+# 用户间隔模式的周期（小时），默认24小时（Free 用户）
 PUSH_INTERVAL_HOURS = _parse_int_env("PUSH_INTERVAL_HOURS", 24)
+
+# Pro 用户推送间隔（小时），默认1小时（24小时及时实时推送）
+PUSH_INTERVAL_PRO_HOURS = _parse_int_env("PUSH_INTERVAL_PRO_HOURS", 1)
 
 # 静默时段（北京时间），此时段内不推送，延迟到静默结束后
 PUSH_QUIET_START = _parse_int_env("PUSH_QUIET_START", 0)   # 00:00 开始静默
