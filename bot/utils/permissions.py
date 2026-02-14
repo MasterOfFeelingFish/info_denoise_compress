@@ -135,6 +135,7 @@ def get_user_plan(telegram_id: str) -> str:
 def check_feature(telegram_id: str, feature: str) -> bool:
     """
     Check if a user has access to a specific feature.
+    Admin accounts bypass plan restrictions (all features allowed).
     Free users who completed onboarding get one-time redeem for paid features (e.g. custom_sources).
     
     Args:
@@ -147,6 +148,14 @@ def check_feature(telegram_id: str, feature: str) -> bool:
     from config import FEATURE_PAYMENT
     if not FEATURE_PAYMENT:
         return True  # If payment system is disabled, all features are available
+    
+    # Admin bypass: admins have access to all features
+    try:
+        from handlers.admin import is_admin
+        if is_admin(int(telegram_id)):
+            return True
+    except (ValueError, TypeError):
+        pass
     
     plan = get_user_plan(telegram_id)
     config = _load_plan_config()
@@ -166,6 +175,7 @@ def check_feature(telegram_id: str, feature: str) -> bool:
 def get_feature_limit(telegram_id: str, feature: str) -> int:
     """
     Get the limit for a feature based on user's plan.
+    Admin accounts bypass limits (unlimited).
     Free users with onboarding redeem get limit 1 for custom_sources_max (one free slot).
     
     Args:
@@ -178,6 +188,14 @@ def get_feature_limit(telegram_id: str, feature: str) -> int:
     from config import FEATURE_PAYMENT
     if not FEATURE_PAYMENT:
         return 999  # No limits when payment is disabled
+    
+    # Admin bypass: admins have unlimited access
+    try:
+        from handlers.admin import is_admin
+        if is_admin(int(telegram_id)):
+            return 999
+    except (ValueError, TypeError):
+        pass
     
     plan = get_user_plan(telegram_id)
     config = _load_plan_config()

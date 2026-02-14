@@ -90,17 +90,17 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         # 添加 Twitter 信息源
         "twitter_add_title": "添加 Twitter 信息源",
         "twitter_add_intro": "支持两种方式添加 Twitter 信息源：",
-        "twitter_add_intro_rss_only": "请提交 Twitter List 链接。",
+        "twitter_add_intro_rss_only": "只支持两种方式：推特 List 或 网站。此处提交推特 List 链接。",
         "twitter_add_method_title": "提交你的 Twitter List RSS",
         "twitter_add_method_desc": "在 Twitter 创建 List，把要关注的账号加入该 List；用 rss.app 将该 List 转为 RSS，将得到的 RSS 地址粘贴到此处。\n\n每次仅提交一个 RSS 链接。",
         "twitter_input_prompt_rss_only": "👇 粘贴一个 RSS 地址，或 /cancel 取消",
         "twitter_format_hint_rss_only": "请粘贴一个 Twitter List 的 RSS 链接（如 rss.app 生成）。",
         "twitter_step1_title": "━━━ 方式一：输入用户名（推荐）━━━",
-        "twitter_step1_desc": "直接输入 Twitter 用户名，系统自动转换：\n  @VitalikButerin\n  @lookonchain\n  @whale_alert",
+        "twitter_step1_desc": "（已废弃，仅支持 RSS 链接）",
         "twitter_step1_example": "",
         "twitter_step1_tip": "💡 系统会自动将用户名转换为 RSS 订阅",
-        "twitter_step2_title": "━━━ 方式二：粘贴 RSS 地址 ━━━",
-        "twitter_step2_desc": "如果你已有 RSS 地址（如 rss.app 生成的），\n也可以直接粘贴：\nhttps://rss.app/feeds/xxxxxxxx.xml",
+        "twitter_step2_title": "提交你的 Twitter List RSS",
+        "twitter_step2_desc": "在 Twitter 创建 List，把要关注的账号加入该 List；用 rss.app 将该 List 转为 RSS，粘贴得到的 RSS 地址。每次仅提交一个链接。",
         "twitter_step3_title": "",
         "twitter_step3_desc": "",
         "twitter_future_hint": "",
@@ -110,7 +110,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "twitter_converting": "🔄 正在转换 Twitter 用户名为 RSS 订阅...",
         "twitter_convert_failed": "❌ 自动转换失败",
         "twitter_convert_fallback": "你也可以手动粘贴 RSS 地址（如从 rss.app 获取）。",
-        "twitter_format_hint_v2": "请输入 Twitter 用户名（如 @VitalikButerin）\n或粘贴完整的 RSS 地址。",
+        "twitter_format_hint_v2": "请粘贴一个 Twitter List 的 RSS 链接。",
         
         # Twitter RSS 教程（手动方式）
         "twitter_tutorial_title": "如何手动获取 Twitter RSS",
@@ -125,7 +125,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         
         # 添加结果
         "twitter_format_error": "格式不正确",
-        "twitter_format_hint": "请输入 Twitter 用户名（如 @VitalikButerin）\n或粘贴完整的 RSS 地址。",
+        "twitter_format_hint": "请粘贴一个 Twitter List 的 RSS 链接。",
         "twitter_add_failed": "添加失败",
         "twitter_check_retry": "请检查后重试。",
         "twitter_add_success": "添加成功",
@@ -254,7 +254,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         # ============ 信息源添加流程 ============
         "sources_add_title": "🎯 添加你关注的信息源",
         "sources_add_formats": "请发送以下任一格式：",
-        "sources_add_twitter_format": "📱 Twitter: @VitalikButerin",
+        "sources_add_twitter_format": "📱 Twitter: 粘贴 Twitter List RSS 链接",
         "sources_add_website_format": "📰 网站: https://example.com/rss",
         "sources_add_tip": "💡 可以连续发送多个，完成后点击按钮：",
         "sources_finish_add": "✅ 完成添加，开始推送",
@@ -265,7 +265,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "sources_count": "📊 当前已添加 {count} 个信息源：",
         "sources_continue": "继续发送更多，或选择：",
         "sources_format_error": "❌ 格式错误：{text}",
-        "sources_format_hint": "请使用以下格式：\n• Twitter: @用户名\n• 网站: https://...",
+        "sources_format_hint": "请使用以下格式：\n• Twitter: 粘贴 Twitter List RSS 链接\n• 网站: https://...",
         "sources_none_added": "你还没有添加任何信息源。\n\n📡 将使用默认推荐源为你推送。",
         "sources_confirm_default": "确认使用默认源",
         "sources_back_to_add": "返回继续添加",
@@ -535,14 +535,14 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "source_wait_push": "📅 你的简报将在约 24 小时后自动推送。",
         "source_add_title": "🎯 添加你关注的信息源",
         "source_add_formats": "请发送以下任一格式：",
-        "source_add_twitter_format": "📱 Twitter: @VitalikButerin",
+        "source_add_twitter_format": "📱 Twitter: 粘贴 Twitter List RSS 链接",
         "source_add_website_format": "📰 网站: https://example.com/rss",
         "source_add_tip": "💡 可以连续发送多个，完成后点击按钮：",
         "source_added_success": "✅ 已添加：{name}",
         "source_current_count": "📊 当前已添加 {count} 个信息源：",
         "source_continue": "继续发送更多，或选择：",
         "source_format_error": "❌ 格式错误：{text}",
-        "source_format_hint": "请使用以下格式：\n• Twitter: @用户名\n• 网站: https://...",
+        "source_format_hint": "请使用以下格式：\n• Twitter: 粘贴 Twitter List RSS 链接\n• 网站: https://...",
         "source_none_added": "你还没有添加任何信息源。\n\n📡 将使用默认推荐源为你推送。",
         
         # ============ 偏好保存成功 ============
@@ -635,10 +635,10 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         
         # ============ 批量导入 ============
         "bulk_import_title": "批量导入信息源",
-        "bulk_import_body": "请输入多个信息源，每行一个。\n\nTwitter 格式：\n  @账号名 | RSS地址\n\n网站格式：\n  网站名 | RSS地址\n\n示例：\n  @VitalikButerin | https://rss.app/feeds/xxx\n  @lookonchain | https://nitter.net/lookonchain/rss\n  The Block | https://theblock.co/rss.xml\n  decrypt.co",
+        "bulk_import_body": "只支持两种方式：推特 List 或 网站。\n每行一个，格式：\n  名称 | 链接\n\n示例：\n  Web3 List | https://rss.app/feeds/xxx.xml\n  The Block | https://theblock.co/rss.xml\n  decrypt.co",
         "bulk_import_desc": "支持以下格式批量添加：",
-        "bulk_import_format1": "1. Twitter 账号列表（每行一个 @用户名）",
-        "bulk_import_format2": "2. RSS 链接列表（每行一个链接）",
+        "bulk_import_format1": "1. 推特 List（名称|链接）",
+        "bulk_import_format2": "2. 网站（名称|链接）",
         "bulk_import_prompt": "请输入或 /cancel 取消：",
         "bulk_import_result": "批量导入结果",
         "bulk_import_success_count": "成功: {count}",
@@ -652,7 +652,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "bulk_import_failed": "❌ 失败：{count} 个",
         "bulk_import_skipped": "⏭️ 跳过：{count} 个（已存在）",
         "bulk_import_rss_invalid": "RSS无效",
-        "bulk_import_twitter_rss_required": "Twitter 需提供 RSS 链接（格式：名称|RSS地址）",
+        "bulk_import_twitter_rss_required": "推特 List 需提供链接（格式：名称|链接）",
         "bulk_import_rss_not_found": "未找到RSS",
         
         # ============ 设置页面补充 ============
@@ -846,17 +846,17 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         # Add Twitter Source
         "twitter_add_title": "Add Twitter Source",
         "twitter_add_intro": "Two ways to add Twitter sources:",
-        "twitter_add_intro_rss_only": "Please submit your Twitter List link.",
+        "twitter_add_intro_rss_only": "Only two types: Twitter List or Website. Here you submit a Twitter List link.",
         "twitter_add_method_title": "Submit your Twitter List RSS",
         "twitter_add_method_desc": "Create a List on Twitter and add accounts to follow; use rss.app (or similar) to turn that List into an RSS feed, then paste the RSS URL here.\n\nSubmit one RSS link at a time.",
         "twitter_input_prompt_rss_only": "👇 Paste one RSS URL, or /cancel",
         "twitter_format_hint_rss_only": "Please paste one Twitter List RSS link (e.g. from rss.app).",
         "twitter_step1_title": "━━━ Option 1: Enter Username (Recommended) ━━━",
-        "twitter_step1_desc": "Simply enter a Twitter username, auto-converted:\n  @VitalikButerin\n  @lookonchain\n  @whale_alert",
+        "twitter_step1_desc": "(Deprecated, RSS link only)",
         "twitter_step1_example": "",
         "twitter_step1_tip": "💡 The system will auto-convert usernames to RSS feeds",
-        "twitter_step2_title": "━━━ Option 2: Paste RSS URL ━━━",
-        "twitter_step2_desc": "If you already have an RSS URL (e.g. from rss.app),\nyou can paste it directly:\nhttps://rss.app/feeds/xxxxxxxx.xml",
+        "twitter_step2_title": "Submit your Twitter List RSS",
+        "twitter_step2_desc": "Create a List on Twitter and add accounts; use rss.app to turn the List into RSS, then paste the RSS URL. Submit one link at a time.",
         "twitter_step3_title": "",
         "twitter_step3_desc": "",
         "twitter_future_hint": "",
@@ -866,7 +866,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "twitter_converting": "🔄 Converting Twitter handle to RSS feed...",
         "twitter_convert_failed": "❌ Auto-conversion failed",
         "twitter_convert_fallback": "You can also paste a direct RSS URL (e.g. from rss.app).",
-        "twitter_format_hint_v2": "Send a Twitter username (e.g. @VitalikButerin)\nor a direct RSS URL.",
+        "twitter_format_hint_v2": "Please paste one Twitter List RSS link.",
         
         # Twitter RSS Tutorial (manual method)
         "twitter_tutorial_title": "How to Get Twitter RSS Manually",
@@ -881,7 +881,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         
         # Add Results
         "twitter_format_error": "Invalid Format",
-        "twitter_format_hint": "Send a Twitter username (e.g. @VitalikButerin)\nor a direct RSS URL.",
+        "twitter_format_hint": "Please paste one Twitter List RSS link.",
         "twitter_add_failed": "Add Failed",
         "twitter_check_retry": "Please check and retry.",
         "twitter_add_success": "Added Successfully",
@@ -1010,7 +1010,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         # ============ Source Addition Flow ============
         "sources_add_title": "🎯 Add Your Sources",
         "sources_add_formats": "Send in either format:",
-        "sources_add_twitter_format": "📱 Twitter: @VitalikButerin",
+        "sources_add_twitter_format": "📱 Twitter: 粘贴 Twitter List RSS 链接",
         "sources_add_website_format": "📰 Website: https://example.com/rss",
         "sources_add_tip": "💡 Send multiple, then click button when done:",
         "sources_finish_add": "✅ Done, Start Push",
@@ -1021,7 +1021,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "sources_count": "📊 Currently added {count} sources:",
         "sources_continue": "Send more, or choose:",
         "sources_format_error": "❌ Format error: {text}",
-        "sources_format_hint": "Please use format:\n• Twitter: @username\n• Website: https://...",
+        "sources_format_hint": "Please use format:\n• Twitter: paste Twitter List RSS link\n• Website: https://...",
         "sources_none_added": "You haven't added any sources.\n\n📡 Will use default recommended sources.",
         "sources_confirm_default": "Confirm Default Sources",
         "sources_back_to_add": "Back to Add",
@@ -1291,14 +1291,14 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "source_wait_push": "📅 Your digest will arrive in ~24 hours.",
         "source_add_title": "🎯 Add Your Sources",
         "source_add_formats": "Send in any of these formats:",
-        "source_add_twitter_format": "📱 Twitter: @VitalikButerin",
+        "source_add_twitter_format": "📱 Twitter: 粘贴 Twitter List RSS 链接",
         "source_add_website_format": "📰 Website: https://example.com/rss",
         "source_add_tip": "💡 Send multiple, then click a button:",
         "source_added_success": "✅ Added: {name}",
         "source_current_count": "📊 Currently added {count} sources:",
         "source_continue": "Send more, or choose:",
         "source_format_error": "❌ Format error: {text}",
-        "source_format_hint": "Please use format:\n• Twitter: @username\n• Website: https://...",
+        "source_format_hint": "Please use format:\n• Twitter: paste Twitter List RSS link\n• Website: https://...",
         "source_none_added": "You haven't added any sources.\n\n📡 Default sources will be used.",
         
         # ============ Preferences Saved ============
@@ -1391,10 +1391,10 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         
         # ============ Bulk Import ============
         "bulk_import_title": "Bulk Import Sources",
-        "bulk_import_body": "Enter multiple sources, one per line.\n\nTwitter format:\n  @handle | RSS URL\n\nWebsite format:\n  Name | RSS URL\n\nExample:\n  @VitalikButerin | https://rss.app/feeds/xxx\n  @lookonchain | https://nitter.net/lookonchain/rss\n  The Block | https://theblock.co/rss.xml\n  decrypt.co",
+        "bulk_import_body": "Only two types: Twitter List or Website.\nOne per line, format: Name | Link\n\nExample:\n  Web3 List | https://rss.app/feeds/xxx.xml\n  The Block | https://theblock.co/rss.xml\n  decrypt.co",
         "bulk_import_desc": "Supported formats for bulk import:",
-        "bulk_import_format1": "1. Twitter handles (one @username per line)",
-        "bulk_import_format2": "2. RSS URLs (one URL per line)",
+        "bulk_import_format1": "1. Twitter List (name|link)",
+        "bulk_import_format2": "2. Website (name|link)",
         "bulk_import_prompt": "Send content or /cancel:",
         "bulk_import_result": "Bulk Import Results",
         "bulk_import_success_count": "Success: {count}",
@@ -1408,7 +1408,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "bulk_import_failed": "❌ Failed: {count}",
         "bulk_import_skipped": "⏭️ Skipped: {count} (already exist)",
         "bulk_import_rss_invalid": "Invalid RSS",
-        "bulk_import_twitter_rss_required": "Twitter requires RSS URL (format: name|RSS URL)",
+        "bulk_import_twitter_rss_required": "Twitter List requires a link (format: name|link)",
         "bulk_import_rss_not_found": "RSS not found",
         
         # ============ Settings Supplement ============
@@ -1602,17 +1602,17 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         # Twitter情報源追加
         "twitter_add_title": "Twitter情報源を追加",
         "twitter_add_intro": "2つの方法でTwitter情報源を追加できます：",
-        "twitter_add_intro_rss_only": "Twitter List リンクを送信してください。",
+        "twitter_add_intro_rss_only": "対応は2種類のみ：Twitter List または サイト。ここでは Twitter List リンクを送信。",
         "twitter_add_method_title": "Twitter List の RSS を送信",
         "twitter_add_method_desc": "Twitter で List を作成し、フォローするアカウントを追加。rss.app 等でその List を RSS に変換し、ここに RSS アドレスを貼り付けてください。\n\n1回に1つの RSS リンクのみ送信。",
         "twitter_input_prompt_rss_only": "👇 RSS URLを1つ貼り付け、または /cancel",
         "twitter_format_hint_rss_only": "Twitter List の RSS リンクを貼り付けてください（例：rss.appで生成）。",
         "twitter_step1_title": "━━━ 方法1：ユーザー名を入力（推奨）━━━",
-        "twitter_step1_desc": "Twitterユーザー名を入力すると自動変換：\n  @VitalikButerin\n  @lookonchain\n  @whale_alert",
+        "twitter_step1_desc": "（廃止、RSSリンクのみ）",
         "twitter_step1_example": "",
         "twitter_step1_tip": "💡 ユーザー名は自動的にRSSフィードに変換されます",
-        "twitter_step2_title": "━━━ 方法2：RSS URLを貼り付け ━━━",
-        "twitter_step2_desc": "RSS URL（rss.appなどで生成）がある場合、\n直接貼り付けも可能：\nhttps://rss.app/feeds/xxxxxxxx.xml",
+        "twitter_step2_title": "Twitter List の RSS を送信",
+        "twitter_step2_desc": "Twitter で List を作成しアカウントを追加。rss.app で List を RSS に変換し、RSS URL を貼り付け。1回に1リンクのみ。",
         "twitter_step3_title": "",
         "twitter_step3_desc": "",
         "twitter_future_hint": "",
@@ -1622,7 +1622,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "twitter_converting": "🔄 TwitterユーザーをRSSフィードに変換中...",
         "twitter_convert_failed": "❌ 自動変換に失敗しました",
         "twitter_convert_fallback": "RSS URLを直接貼り付けることもできます（rss.appなどから）。",
-        "twitter_format_hint_v2": "Twitterユーザー名（例: @VitalikButerin）\nまたは直接RSS URLを送信してください。",
+        "twitter_format_hint_v2": "Twitter List の RSS リンクを1つ貼り付けてください。",
         
         # Twitter RSSチュートリアル（手動方式）
         "twitter_tutorial_title": "Twitter RSSを手動で取得する方法",
@@ -1637,7 +1637,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         
         # 追加結果
         "twitter_format_error": "形式が正しくありません",
-        "twitter_format_hint": "Twitterユーザー名（例: @VitalikButerin）\nまたはRSS URLを送信してください。",
+        "twitter_format_hint": "Twitter List の RSS リンクを1つ貼り付けてください。",
         "twitter_add_failed": "追加に失敗しました",
         "twitter_check_retry": "確認して再試行してください。",
         "twitter_add_success": "追加しました",
@@ -1793,14 +1793,14 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "source_wait_push": "📅 ダイジェストは約24時間後に届きます。",
         "source_add_title": "🎯 情報源を追加",
         "source_add_formats": "以下の形式で送信してください：",
-        "source_add_twitter_format": "📱 Twitter: @VitalikButerin",
+        "source_add_twitter_format": "📱 Twitter: 粘贴 Twitter List RSS 链接",
         "source_add_website_format": "📰 サイト: https://example.com/rss",
         "source_add_tip": "💡 複数送信可能。完了後ボタンをクリック：",
         "source_added_success": "✅ 追加しました：{name}",
         "source_current_count": "📊 現在{count}個の情報源を追加済み：",
         "source_continue": "さらに送信するか、選択してください：",
         "source_format_error": "❌ 形式エラー：{text}",
-        "source_format_hint": "以下の形式を使用してください：\n• Twitter: @ユーザー名\n• サイト: https://...",
+        "source_format_hint": "以下の形式を使用してください：\n• Twitter: Twitter List RSS リンクを貼り付け\n• サイト: https://...",
         "source_none_added": "まだ情報源を追加していません。\n\n📡 デフォルトの推奨情報源を使用します。",
         
         # ============ 設定保存成功 ============
@@ -1893,10 +1893,10 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         
         # ============ 一括インポート ============
         "bulk_import_title": "情報源を一括インポート",
-        "bulk_import_body": "複数の情報源を入力してください（1行に1つ）。\n\nTwitter形式：\n  @アカウント名 | RSS URL\n\nサイト形式：\n  サイト名 | RSS URL\n\n例：\n  @VitalikButerin | https://rss.app/feeds/xxx\n  The Block | https://theblock.co/rss.xml\n  decrypt.co",
+        "bulk_import_body": "対応は2種類のみ：Twitter List または サイト。\n1行に1つ、形式：名前 | リンク\n\n例：\n  Web3 List | https://rss.app/feeds/xxx.xml\n  The Block | https://theblock.co/rss.xml\n  decrypt.co",
         "bulk_import_desc": "一括追加のサポート形式：",
-        "bulk_import_format1": "1. Twitterアカウントリスト（1行に1つの@ユーザー名）",
-        "bulk_import_format2": "2. RSS URLリスト（1行に1つのURL）",
+        "bulk_import_format1": "1. Twitter List（名前|リンク）",
+        "bulk_import_format2": "2. サイト（名前|リンク）",
         "bulk_import_prompt": "入力するか /cancel：",
         "bulk_import_result": "一括インポート結果",
         "bulk_import_success_count": "成功: {count}",
@@ -1910,7 +1910,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "bulk_import_failed": "❌ 失敗：{count}",
         "bulk_import_skipped": "⏭️ スキップ：{count}（既存）",
         "bulk_import_rss_invalid": "RSS無効",
-        "bulk_import_twitter_rss_required": "TwitterはRSS URLが必要（形式：名前|RSS URL）",
+        "bulk_import_twitter_rss_required": "Twitter Listはリンクが必要（形式：名前|リンク）",
         "bulk_import_rss_not_found": "RSSが見つかりません",
         
         # ============ 設定ページ補足 ============
@@ -2105,17 +2105,17 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         # Twitter 소스 추가
         "twitter_add_title": "Twitter 소스 추가",
         "twitter_add_intro": "두 가지 방법으로 Twitter 소스를 추가할 수 있습니다:",
-        "twitter_add_intro_rss_only": "Twitter List 링크를 제출해 주세요.",
+        "twitter_add_intro_rss_only": "두 가지만 지원: Twitter List 또는 웹사이트. 여기서 Twitter List 링크 제출.",
         "twitter_add_method_title": "Twitter List RSS 제출",
         "twitter_add_method_desc": "Twitter에서 List를 만들고 팔로우할 계정을 추가한 뒤, rss.app 등으로 해당 List를 RSS로 변환하고, 여기에 RSS 주소를 붙여넣으세요.\n\n한 번에 RSS 링크 하나만 제출.",
         "twitter_input_prompt_rss_only": "👇 RSS URL 하나 붙여넣기, 또는 /cancel",
         "twitter_format_hint_rss_only": "Twitter List 의 RSS 링크를 붙여넣어 주세요 (예: rss.app에서 생성).",
         "twitter_step1_title": "━━━ 방법 1: 사용자명 입력 (추천) ━━━",
-        "twitter_step1_desc": "Twitter 사용자명을 입력하면 자동 변환:\n  @VitalikButerin\n  @lookonchain\n  @whale_alert",
+        "twitter_step1_desc": "（폐지됨, RSS 링크만 지원）",
         "twitter_step1_example": "",
         "twitter_step1_tip": "💡 사용자명은 자동으로 RSS 피드로 변환됩니다",
-        "twitter_step2_title": "━━━ 방법 2: RSS URL 붙여넣기 ━━━",
-        "twitter_step2_desc": "RSS URL(예: rss.app에서 생성)이 있으면\n직접 붙여넣기도 가능:\nhttps://rss.app/feeds/xxxxxxxx.xml",
+        "twitter_step2_title": "Twitter List RSS 제출",
+        "twitter_step2_desc": "Twitter에서 List를 만들고 계정을 추가한 뒤, rss.app으로 List를 RSS로 변환하고 RSS 주소를 붙여넣으세요. 한 번에 하나씩 제출.",
         "twitter_step3_title": "",
         "twitter_step3_desc": "",
         "twitter_future_hint": "",
@@ -2125,7 +2125,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "twitter_converting": "🔄 Twitter 사용자를 RSS 피드로 변환 중...",
         "twitter_convert_failed": "❌ 자동 변환에 실패했습니다",
         "twitter_convert_fallback": "RSS URL을 직접 붙여넣을 수도 있습니다 (예: rss.app에서).",
-        "twitter_format_hint_v2": "Twitter 사용자명 (예: @VitalikButerin)\n또는 직접 RSS URL을 보내세요.",
+        "twitter_format_hint_v2": "Twitter List 의 RSS 링크를 하나 붙여넣어 주세요.",
         
         # Twitter RSS 튜토리얼 (수동 방식)
         "twitter_tutorial_title": "Twitter RSS를 수동으로 얻는 방법",
@@ -2140,7 +2140,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         
         # 추가 결과
         "twitter_format_error": "형식이 올바르지 않습니다",
-        "twitter_format_hint": "Twitter 사용자명 (예: @VitalikButerin)\n또는 RSS URL을 보내주세요.",
+        "twitter_format_hint": "Twitter List 의 RSS 링크를 하나 붙여넣어 주세요.",
         "twitter_add_failed": "추가 실패",
         "twitter_check_retry": "확인 후 다시 시도하세요.",
         "twitter_add_success": "추가 성공",
@@ -2296,14 +2296,14 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "source_wait_push": "📅 다이제스트는 약 24시간 후에 도착합니다.",
         "source_add_title": "🎯 소스 추가",
         "source_add_formats": "다음 형식으로 보내주세요:",
-        "source_add_twitter_format": "📱 Twitter: @VitalikButerin",
+        "source_add_twitter_format": "📱 Twitter: 粘贴 Twitter List RSS 链接",
         "source_add_website_format": "📰 웹사이트: https://example.com/rss",
         "source_add_tip": "💡 여러 개 전송 가능. 완료 후 버튼 클릭:",
         "source_added_success": "✅ 추가됨: {name}",
         "source_current_count": "📊 현재 {count}개 소스 추가됨:",
         "source_continue": "더 보내거나 선택하세요:",
         "source_format_error": "❌ 형식 오류: {text}",
-        "source_format_hint": "다음 형식을 사용하세요:\n• Twitter: @사용자명\n• 웹사이트: https://...",
+        "source_format_hint": "다음 형식을 사용하세요:\n• Twitter: Twitter List RSS 링크 붙여넣기\n• 웹사이트: https://...",
         "source_none_added": "아직 소스를 추가하지 않았습니다.\n\n📡 기본 추천 소스를 사용합니다.",
         
         # ============ 설정 저장 성공 ============
@@ -2396,10 +2396,10 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         
         # ============ 일괄 가져오기 ============
         "bulk_import_title": "소스 일괄 가져오기",
-        "bulk_import_body": "여러 소스를 입력하세요 (한 줄에 하나).\n\nTwitter 형식:\n  @계정명 | RSS 주소\n\n웹사이트 형식:\n  사이트명 | RSS 주소\n\n예시:\n  @VitalikButerin | https://rss.app/feeds/xxx\n  The Block | https://theblock.co/rss.xml\n  decrypt.co",
+        "bulk_import_body": "두 가지만 지원: Twitter List 또는 웹사이트.\n한 줄에 하나, 형식: 이름 | 링크\n\n예시:\n  Web3 List | https://rss.app/feeds/xxx.xml\n  The Block | https://theblock.co/rss.xml\n  decrypt.co",
         "bulk_import_desc": "일괄 추가 지원 형식:",
-        "bulk_import_format1": "1. Twitter 계정 목록 (한 줄에 하나의 @사용자명)",
-        "bulk_import_format2": "2. RSS URL 목록 (한 줄에 하나의 URL)",
+        "bulk_import_format1": "1. Twitter List (이름|링크)",
+        "bulk_import_format2": "2. 웹사이트 (이름|링크)",
         "bulk_import_prompt": "내용을 보내거나 /cancel:",
         "bulk_import_result": "일괄 가져오기 결과",
         "bulk_import_success_count": "성공: {count}",
@@ -2413,7 +2413,7 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "bulk_import_failed": "❌ 실패: {count}",
         "bulk_import_skipped": "⏭️ 건너뜀: {count} (이미 존재)",
         "bulk_import_rss_invalid": "RSS 잘못됨",
-        "bulk_import_twitter_rss_required": "Twitter는 RSS URL 필요 (형식: 이름|RSS URL)",
+        "bulk_import_twitter_rss_required": "Twitter List는 링크 필요 (형식: 이름|링크)",
         "bulk_import_rss_not_found": "RSS를 찾을 수 없음",
         
         # ============ 설정 페이지 보충 ============

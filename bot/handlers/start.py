@@ -1223,10 +1223,10 @@ async def add_custom_sources(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.edit_message_text(
         "🎯 添加你关注的信息源\n\n"
-        "请发送以下格式：\n\n"
-        "📱 Twitter: 粘贴 RSS 链接（如 rss.app 生成）\n"
-        "📰 网站: https://example.com/rss\n\n"
-        "💡 可以连续发送多个，完成后点击按钮：",
+        "只支持两种方式：推特 List 或 网站。\n\n"
+        "📱 推特 List：粘贴链接（如 rss.app 生成）\n"
+        "📰 网站：https://example.com/rss 或 域名\n\n"
+        "💡 可连续发送多个，完成后点击按钮：",
         reply_markup=reply_markup
     )
 
@@ -1439,10 +1439,10 @@ async def add_custom_sources_no_push(update: Update, context: ContextTypes.DEFAU
 
     await query.edit_message_text(
         "🎯 添加你关注的信息源\n\n"
-        "请发送以下格式：\n\n"
-        "📱 Twitter: 粘贴 RSS 链接（如 rss.app 生成）\n"
-        "📰 网站: https://example.com/rss\n\n"
-        "💡 可以连续发送多个，完成后点击按钮：",
+        "只支持两种方式：推特 List 或 网站。\n\n"
+        "📱 推特 List：粘贴链接（如 rss.app 生成）\n"
+        "📰 网站：https://example.com/rss 或 域名\n\n"
+        "💡 可连续发送多个，完成后点击按钮：",
         reply_markup=reply_markup
     )
 
