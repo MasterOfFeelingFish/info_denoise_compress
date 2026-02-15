@@ -390,19 +390,49 @@ async def handle_group_update(update: Update, context: ContextTypes.DEFAULT_TYPE
     return GROUP_PROFILE
 
 
+async def handle_bot_added(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send welcome message when bot is added to a group."""
+    from config import FEATURE_GROUP_CHAT
+    if not FEATURE_GROUP_CHAT:
+        return
+
+    my_chat_member = update.my_chat_member
+    if not my_chat_member:
+        return
+
+    chat = my_chat_member.chat
+    if chat.type not in ("group", "supergroup"):
+        return
+
+    # Resolve language from inviter (user who added the bot)
+    from_user = my_chat_member.from_user
+    raw_code = getattr(from_user, "language_code", None) if from_user else None
+    lang = normalize_language_code(raw_code) if raw_code else "en"
+    ui = get_ui_locale(lang)
+
+    try:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=ui["group_welcome_on_join"]
+        )
+        logger.info(f"Welcome message sent to group {chat.id} ({chat.title})")
+    except Exception as e:
+        logger.warning(f"Failed to send welcome to group {chat.id}: {e}")
+
+
 async def handle_bot_removed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle bot being removed from group."""
     from config import FEATURE_GROUP_CHAT
     if not FEATURE_GROUP_CHAT:
         return
-    
+
     my_chat_member = update.my_chat_member
     if not my_chat_member:
         return
-    
+
     new_status = my_chat_member.new_chat_member.status
     chat = my_chat_member.chat
-    
+
     if new_status in ("left", "kicked"):
         group_id = str(chat.id)
         config = load_group_config(group_id)
@@ -410,6 +440,20 @@ async def handle_bot_removed(update: Update, context: ContextTypes.DEFAULT_TYPE)
             config["enabled"] = False
             save_group_config(group_id, config)
             logger.info(f"Bot removed from group {group_id} ({chat.title}), disabled config")
+
+
+async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Route my_chat_member updates to add or remove handler."""
+    my_chat_member = update.my_chat_member
+    if not my_chat_member:
+        return
+
+    new_status = my_chat_member.new_chat_member.status
+
+    if new_status in ("member", "administrator"):
+        await handle_bot_added(update, context)
+    elif new_status in ("left", "kicked"):
+        await handle_bot_removed(update, context)
 
 
 def get_group_handler() -> Optional[ConversationHandler]:
@@ -449,5 +493,5 @@ def get_group_callbacks():
     if not FEATURE_GROUP_CHAT:
         return []
     return [
-        ChatMemberHandler(handle_bot_removed, ChatMemberHandler.MY_CHAT_MEMBER),
+        ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER),
     ]

@@ -44,7 +44,7 @@ from handlers.settings import get_settings_handler, get_settings_callbacks
 from handlers.sources import get_sources_handler, get_sources_callbacks
 from handlers.admin import get_admin_handlers
 from handlers.payment import get_payment_handlers
-from handlers.group import get_group_handler, get_group_callbacks, handle_bot_removed
+from handlers.group import get_group_handler, get_group_callbacks
 from services.rate_limiter import get_rate_limiter
 
 
@@ -1180,9 +1180,6 @@ def main() -> None:
         application.add_handler(group_handler)
     for callback in get_group_callbacks():
         application.add_handler(callback)
-    # Bot removal detection
-    from telegram.ext import ChatMemberHandler
-    application.add_handler(ChatMemberHandler(handle_bot_removed, ChatMemberHandler.MY_CHAT_MEMBER))
     logger.info("Group chat handlers registered")
 
     # Group setup guide callback (private chat)
