@@ -1,257 +1,427 @@
-# VoiVerse - Web3 信息智能聚合与降噪系统
+# Web3 Daily Digest
 
-> 基于 TrendRadar 构建的 Web3 资讯自动化采集、降噪与推送系统
+> AI 驱动的 Web3 个性化信息聚合服务
+
+每天自动抓取并筛选 Web3 信息，通过 AI 生成符合你偏好的个性化简报，节省 2+ 小时阅读时间。
+
+## 核心特性
+
+### AI 个性化筛选
+- 3 轮 AI 对话式注册，深度理解用户偏好
+- **两阶段筛选算法**（v1.5.0）：Stage 1 分批粗筛 → Stage 2 精选去重
+- 两步处理流程：筛选（英文 prompt）→ 翻译（语言适配）
+- 4 层内容分级：必读事件 / 行业大局 / 用户推荐 / 其他更新
+- 跨源内容去重 + 来源多样性保证
+
+### 智能反馈闭环
+- 整体反馈（有帮助/没帮助）
+- 单条反馈（👍/不感兴趣 按钮）
+- 动态更新用户画像（固定篇幅，精细化描述），用户越用越精准
+- 反馈趋势分析（近 30 天）
+
+### 管理员控制台
+- 白名单管理（增删查 + 开关）
+- 多管理员支持（环境变量配置）
+- AI 筛选分批处理（大数据量自动分批，避免超限）
+- **📊 数据分析面板**（v1.4.0 新增）
+  - 用户行为埋点（反馈、设置变更、信息源增删等）
+  - 统计概览（事件数、活跃用户、满意度）
+  - 运营洞察（优化建议 + 流失预警）
+- **Plan 配置面板**（v1.7.0 新增）— Free/Pro 功能和限额管理
+- **信息源健康监控** — RSS 源状态看板 + AI 自动修复
+
+### 多信息源聚合
+- Twitter 账号监控（通过 RSS URL 添加，支持 RSSHub 转换）
+- 网站 RSS 订阅（支持自动检测）
+- 每用户独立信息源配置 + 单条启用/禁用
+- 批量导入默认信息源
+
+### 群聊支持（v1.7.0 新增）
+- Bot 可加入 Telegram 群组，定时推送公共简报
+- 群管理员 `/setup` 配置关注领域和推送时间
+- 群成员可私聊 Bot 配置个人偏好
+
+### Free / Pro 版（v1.7.0 新增）
+- Free：公共信息源 + 每日推送
+- Pro：自定义信息源 + 自定义推送间隔（最短 1 小时）
+- 管理员可灵活配置各功能的免费/付费属性
+
+### AI 智能助手
+- 自然语言对话（支持联网搜索）
+- 读取最近 3 天推送内容作为上下文
+- 可配置对话历史保留天数（0/1/2 天）
+- 基于用户画像的个性化回答
+- 支持多 LLM 提供商（Gemini / OpenAI）
+
+### 多语言支持
+- 自动检测用户 Telegram 语言设置
+- UI 界面支持 4 种语言（中/英/日/韩），其他语言 AI 自动翻译
+- 内容翻译支持 20+ 种语言（中/英/日/韩/俄/西/法/德/越/泰等）
+- 用户可在设置页面手动切换语言偏好
+- 保持原始链接，翻译标题和摘要
+
+### 价值可感知
+- 每日统计（信息源数 / 扫描条数 / 精选条数）
+- 筛选率展示（节省时间可视化）
+- 自然语言画像描述（用户偏好透明化）
 
 ---
 
-## ⚡ 快速启动
+## 功能概览
 
-### 🎨 Web3 赛博朋克版（推荐）
+```
+用户注册 → AI 对话收集偏好 → 每日自动抓取 → AI 智能筛选 → 生成简报 → Telegram 推送
+                                    ↑                                         ↓
+                                    └──────── AI 分析反馈，更新用户画像 ←──────┘
+```
 
-进入 `deploy` 文件夹，双击运行：
-- **Windows**: `启动Web3赛博朋克版.bat`
-- **Linux/Mac**: `启动Web3赛博朋克版.sh`
+### Bot 命令
 
-启动后访问：http://localhost:8080/
+| 命令 | 功能 |
+|------|------|
+| `/start` | 主菜单（新用户进入注册流程，管理员显示控制台入口） |
+| `/help` | 帮助信息 |
+| `/settings` | 偏好设置管理 |
+| `/sources` | 信息源管理（添加/删除/启用/禁用） |
+| `/setup` | 群聊配置（仅群管理员，v1.7.0 新增） |
+| `/stats` | 查看统计（简报数据+反馈趋势） |
+| `/clear` | 清空对话历史 |
+| `/test` | 手动触发抓取（仅管理员） |
+| `/testprofile` | 手动触发画像更新（仅管理员） |
 
-### 📦 传统部署方式
+**管理员功能**（通过主菜单「管理员控制台」按钮访问）：
+- 📊 数据分析（用户行为统计 + 运营建议）
+- 白名单开关（启用/禁用访问控制）
+- 查询白名单（显示用户详细信息）
+- 添加/删除白名单用户
 
-**Windows 用户：** 双击运行 `run.bat`
+---
 
-**Mac/Linux 用户：** 运行 `./run.sh`
+## 技术栈
 
-**或手动执行：**
+| 技术层 | 选型 | 说明 |
+|--------|------|------|
+| **LLM 引擎** | Gemini / OpenAI / Kimi | 支持 Gemini 3 Pro、GPT-4 系列、Kimi K2 Thinking |
+| **Bot 框架** | python-telegram-bot v22.0 | 官方推荐库 + 定时任务 + 对话流 |
+| **RSS 抓取** | feedparser + httpx | 异步抓取 + 自动去重 |
+| **数据存储** | JSON 文件 | MVP 轻量方案 + 多用户隔离 |
+| **部署** | Docker Compose | 一键部署 + 数据卷持久化 |
+
+---
+
+## 项目结构
+
+```
+info_denoise_compress/
+├── bot/                          # Telegram Bot
+│   ├── main.py                   # 入口 + 定时任务 + handler 注册
+│   ├── config.py                 # 环境变量配置 + 默认信息源解析
+│   ├── handlers/                 # 用户交互层
+│   │   ├── start.py              # 注册流程（3轮AI对话）+ 主菜单 + 统计
+│   │   ├── chat.py               # AI 对话（联网+上下文+每日清理）
+│   │   ├── feedback.py           # 反馈收集（整体+单条）
+│   │   ├── sources.py            # 信息源管理（增删查）
+│   │   ├── settings.py           # 偏好设置管理
+│   │   └── admin.py              # 管理员控制台（白名单+数据分析）
+│   ├── services/                 # 业务逻辑层
+│   │   ├── llm_provider.py       # LLM 抽象接口
+│   │   ├── llm_factory.py        # LLM 工厂 + 统一重试机制
+│   │   ├── gemini_provider.py    # Gemini API 实现
+│   │   ├── openai_provider.py    # OpenAI API 实现
+│   │   ├── digest_processor.py   # 简报处理（单用户）
+│   │   ├── rss_fetcher.py        # RSS 抓取（ID 去重）
+│   │   ├── content_filter.py     # AI 筛选逻辑
+│   │   ├── report_generator.py   # 简报生成（多语言）
+│   │   └── profile_updater.py    # 反馈学习闭环（每日更新）
+│   ├── utils/                    # 工具层
+│   │   ├── json_storage.py       # 数据存储 + 白名单管理 + 埋点追踪
+│   │   ├── telegram_utils.py     # Telegram 工具（限流器等）
+│   │   ├── prompt_loader.py      # Prompt 模板加载
+│   │   └── auth.py               # 白名单权限装饰器
+│   ├── prompts/                  # Prompt 模板
+│   │   ├── onboarding_*.txt      # 注册流程（3轮）
+│   │   ├── filtering.txt         # 内容筛选（4层分级）
+│   │   ├── translate.txt         # 语言适配（独立翻译）
+│   │   ├── report.txt            # 简报生成
+│   │   └── *_update.txt          # 画像/设置更新
+│   ├── tests/
+│   │   └── test_all_modules.py   # 自动化测试
+│   ├── scripts/
+│   │   └── generate_analytics_report.py  # 运营报表生成脚本
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   ├── .env.example
+│   └── .gitignore
+│
+├── data/                         # 数据存储 (JSON)
+│   ├── users.json                # 用户基本信息
+│   ├── user_sources/             # 每用户信息源配置
+│   ├── profiles/                 # 用户画像
+│   ├── feedback/                 # 反馈记录（按日期）
+│   ├── daily_stats/              # 每日统计（每用户子目录）
+│   ├── raw_content/              # 原始抓取内容（每用户子目录）
+│   ├── prefetch_cache/           # 预抓取缓存（解决 RSS 时效问题）
+│   ├── events/                   # 用户行为事件（按月 JSONL 文件）
+│   ├── analytics/                # 运营报表输出
+│   └── logs/                     # 日志文件
+│
+├── docker-compose.yml            # Docker 一键部署配置
+└── README.md                     # 本文件
+```
+
+---
+
+## 快速开始
+
+### 1. 克隆仓库
 
 ```bash
-cd src/backend/TrendRadar
-pip install -r requirements.txt       # 首次运行需安装依赖
-python run_web3_push.py --dry-run     # 预览推送内容
+git clone https://github.com/WFHTask/info_denoise_compress.git
+cd info_denoise_compress
+git checkout beta1.0
 ```
 
-📖 详细说明请查看 [START.md](START.md) 或 [部署中心](deploy/README.md)
-
----
-
-## 📌 项目概述
-
-本项目是 VoiVerse 平台的 Web3 信息聚合模块，旨在解决 Web3 领域信息**碎片化严重、24/7 全天候产出、信噪比极低**的问题。
-
-系统能够从多个 Web3 媒体源自动采集资讯，通过关键词规则过滤垃圾信息（空投广告、带货推广等），保留核心信号（融资、安全事件、协议更新等），最终生成每日简报并推送至微信/Telegram。
-
----
-
-## 🎯 任务目标
-
-调研并选型最适合的开源 AI 框架，针对指定的 Web3 媒体源，实现一套能够**"压缩信息、提取信号、降低噪音"**的自动化推送流。
-
-### 候选方案
-
-| 方案 | 仓库 | 特点 |
-|------|------|------|
-| WiseFlow | [GitHub](https://github.com/TeamWiseFlow/wiseflow) | 智能监控与网页抓取，支持关注点配置 |
-| **TrendRadar** ✅ | [GitHub](https://github.com/sansan0/TrendRadar) | 多平台热点聚合（35+平台），MCP 架构，支持微信/TG 推送 |
-| nbot.ai | [官网](https://nbot.ai/) | AI 策展工具，自然语言描述需求 |
-
-**最终选择：TrendRadar** - 详见 [选型报告](docs/selection-report.md)
-
----
-
-## 📊 当前进展
-
-### 交付物完成状态
-
-| 序号 | 交付物 | 状态 | 完成度 | 文档位置 |
-|------|-------|------|-------|---------|
-| 1 | 选型报告 | ✅ 已完成 | 100% | [docs/selection-report.md](docs/selection-report.md) |
-| 2 | 部署视频 | ⏳ 待录制 | 0% | - |
-| 3 | 运行演示 | ⏳ 待验证 | 60% | 需配置 Webhook 后测试 |
-| 4 | 源代码/配置文件 | ✅ 已完成 | 90% | `src/backend/TrendRadar/` |
-
-### 信息源接入状态
-
-#### 目标信息源 (4个)
-
-| 信息源 | 要求 | 接入方式 | 状态 |
-|-------|------|---------|------|
-| [Cointelegraph](https://cointelegraph.com) | 全球头部新闻 | RSS | ✅ 已接入 |
-| [ME News](https://www.me.news) | 实时资讯 | 自定义爬虫 | ❌ 需 JS 渲染，暂不可用 |
-| [ChainCatcher](https://www.chaincatcher.com) | 中文核心媒体 | 自定义爬虫 | ✅ 已接入 |
-| [TechFlow 深潮](https://www.techflowpost.com) | 深度分析 | RSS (Substack) | ✅ 已接入 |
-
-#### 补充信息源 (5个)
-
-为弥补 ME News 暂不可用，已接入以下国际 Web3 媒体：
-
-| 信息源 | 类型 | 状态 |
-|-------|------|------|
-| CoinDesk | RSS | ✅ 已接入 |
-| The Block | RSS | ✅ 已接入 |
-| Decrypt | RSS | ✅ 已接入 |
-| Bitcoin Magazine | RSS | ✅ 已接入 |
-| Blockworks | RSS | ✅ 已接入 |
-
----
-
-## 📁 项目结构
-
-```
-VoiVerseProject/
-├── README.md                          # 本文件 - 项目说明
-├── .py                                # 环境验证脚本
-├── .gitignore
-│
-├── docs/                              # 📄 文档目录
-│   ├── rules.md                       # Claude Code 使用规则
-│   ├── selection-report.md            # 选型报告 ✅
-│   └── develop/
-│       ├── design.md                  # 系统设计文档
-│       ├── requirements.md            # 需求文档
-│       ├── tasks.md                   # 开发任务清单
-│       └── TODO.md                    # 待办计划
-│
-├── deploy/                            # 🚀 部署配置
-│   └── README.md                      # 部署指南 ✅
-│
-└── src/
-    └── backend/
-        └── TrendRadar/                # 🔧 核心代码（基于 TrendRadar）
-            ├── config/
-            │   ├── config.yaml        # 主配置文件
-            │   ├── web3_sources.yaml  # Web3 源 + 降噪规则
-            │   └── frequency_words.txt
-            ├── trendradar/
-            │   └── crawler/
-            │       └── web3/          # Web3 爬虫
-            │           ├── chaincatcher.py  # ChainCatcher 爬虫 ✅
-            │           ├── menews.py        # ME News 爬虫 (待完善)
-            │           └── fetcher.py
-            ├── run_web3_push.py       # 主程序：抓取 + 推送
-            ├── test_web3_crawler.py   # 测试脚本
-            └── requirements.txt
-```
-
----
-
-## 🚀 快速开始
-
-### 1. 环境要求
-
-- Python 3.10+
-- pip
-
-### 2. 安装依赖
+### 2. 配置环境变量
 
 ```bash
-cd src/backend/TrendRadar
+cp bot/.env.example bot/.env
+```
+
+编辑 `bot/.env`，填写以下**必填项**：
+
+```bash
+# Telegram Bot Token（必填）
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+
+# 管理员 Telegram ID（必填，多个用逗号分隔）
+ADMIN_TELEGRAM_IDS=123456789
+
+# LLM 配置（二选一）
+# --- 方案 A: 使用 Kimi（推荐，国内可用）---
+LLM=openai
+OPENAI_API_KEY=your_kimi_api_key
+OPENAI_MODEL=kimi-k2-thinking
+OPENAI_API_URL=https://api.moonshot.cn/v1/chat/completions
+
+# --- 方案 B: 使用 Gemini ---
+# LLM=gemini
+# GEMINI_API_KEY=your_gemini_api_key
+```
+
+> 完整配置项参考 `bot/.env.example`
+
+### 3. Docker 部署
+
+```bash
+# 启动服务
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+```
+
+### 4. 本地开发
+
+```bash
+cd bot
 pip install -r requirements.txt
+python main.py
 ```
-
-### 3. 测试爬虫
-
-```bash
-python test_web3_crawler.py
-```
-
-### 4. 预览推送内容
-
-```bash
-python run_web3_push.py --dry-run
-```
-
-### 5. 配置推送渠道
-
-编辑 `config/config.yaml`，配置企业微信或 Telegram：
-
-```yaml
-notification:
-  enabled: true
-  channels:
-    wework:
-      webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key"
-```
-
-### 6. 正式运行
-
-```bash
-python run_web3_push.py
-```
-
-详细部署说明请参考 [部署指南](deploy/README.md)
 
 ---
 
-## 🔧 核心功能
+## 配置信息源
 
-### 降噪规则
+### Twitter 源
 
-系统通过关键词黑白名单实现内容降噪：
+Twitter 不提供公开 RSS，需要通过 RSS 服务转换：
 
-**过滤（黑名单）：**
-- 空投类：空投、airdrop、免费领取、白嫖、撸毛
-- 广告类：限时优惠、注册送、邀请码、推广链接
-- 低质量：暴富、财富密码、百倍币、稳赚
+1. 使用 [RSS.app](https://rss.app) 或自建 RSSHub 获取 Twitter RSS URL
+2. 通过 Bot `/sources` 命令添加 RSS URL
 
-**保留（白名单）：**
-- 协议更新：升级、更新、发布、上线、主网
-- 投融资：融资、投资、收购、IPO、估值
-- 安全事件：漏洞、攻击、被盗、安全、黑客
-- 监管政策：监管、政策、合规、牌照、法规
-- 重要动态：ETF、SEC、财报、比特币、以太坊
+### 网站 RSS 源
 
-配置位置：`src/backend/TrendRadar/config/web3_sources.yaml`
+预置 8 个 Web3 媒体:
 
-### 推送渠道
+- Cointelegraph: `https://cointelegraph.com/rss`
+- CoinDesk: `https://www.coindesk.com/arc/outboundfeeds/rss/`
+- The Block Beats: `https://api.theblockbeats.news/v1/open-api/home-xml`
+- TechFlow Post: `https://techflowpost.substack.com/feed`
+- DeFi Rate: `https://defirate.com/feed`
+- Prediction News: `https://predictionnews.com/rss/`
+- Event Horizon: `https://nexteventhorizon.substack.com/feed`
+- un.Block (吴说): `https://unblock256.substack.com/feed`
 
-| 渠道 | 状态 | 配置位置 |
-|------|------|---------|
-| 企业微信 | ✅ 支持 | `config.yaml` → `notification.channels.wework` |
-| Telegram | ✅ 支持 | `config.yaml` → `notification.channels.telegram` |
-| 飞书 | ✅ 支持 | `config.yaml` → `notification.channels.feishu` |
-| 钉钉 | ✅ 支持 | `config.yaml` → `notification.channels.dingtalk` |
-| 邮件 | ✅ 支持 | `config.yaml` → `notification.channels.email` |
+可通过 `/sources` 命令添加更多。
 
 ---
 
-## 📋 待完成事项
+## 定时任务
 
-| 优先级 | 任务 | 预估时间 |
-|-------|------|---------|
-| 🔴 高 | 配置实际 Webhook URL | 15-30 分钟 |
-| 🔴 高 | 验证完整推送流程 | 15 分钟 |
-| 🔴 高 | 录制部署视频 | 15 分钟 |
-| 🔴 高 | 录制运行演示视频 | 15 分钟 |
-| 🟡 中 | 整理配置文件交付物 | 15 分钟 |
-| 🟢 低 | Docker 容器化部署 | 30 分钟 |
-| 🟢 低 | ME News 爬虫完善 (Playwright) | 1-2 小时 |
+| 时间（北京） | 任务 | 说明 |
+|-------------|------|------|
+| **每小时** | 预抓取 RSS | 解决 RSS.app 只返回最近 25 条的问题 |
+| **每 30 分钟** | 检查到期用户 | Free 用户 24h 周期，Pro 用户可自定义（v1.7.0） |
+| **02:30/08:30/14:30/20:30** | 用户画像更新 | 基于反馈批量更新 |
+| **00:30** | 数据清理 | 删除过期文件 + 清理缓存 |
 
-详见 [待办计划](docs/develop/TODO.md)
+> **注**：v1.6.0 起采用按用户间隔推送策略。Free 用户 24 小时周期，Pro 用户可自定义（最短 1 小时）。静默时段（00:00-07:00）不推送。
 
 ---
 
-## 📚 相关文档
+## 使用指南
+
+### 新用户注册流程
+
+1. 发送 `/start` 进入主菜单
+2. 点击「开始设置」进入 3 轮 AI 对话：
+   - **Round 1**：询问区块链生态系统偏好（Ethereum/Solana/Layer2）
+   - **Round 2**：询问内容类型偏好（DeFi/NFT/交易/开发）
+   - **Round 3**：生成画像摘要，用户确认
+3. 配置信息源（自定义/使用默认）
+4. 等待首份简报（约 24 小时后自动推送）
+
+### 信息源管理
+
+#### 添加 Twitter 源
+1. 进入「信息源管理」→「Twitter」
+2. 输入 Twitter List RSS URL（从 RSS.app 或 RSSHub 获取）
+3. 系统验证后自动添加
+
+#### 添加网站 RSS
+1. 进入「信息源管理」→「网站」
+2. 输入网站域名或完整 RSS URL
+3. 系统自动检测 RSS 地址（支持多种路径）
+
+### AI 对话
+
+直接向 Bot 发送消息即可开始对话，AI 会：
+- 读取你的用户画像
+- 调用 Google Search 获取实时信息（Gemini）
+- 参考最近 3 天推送内容回答问题
+
+**示例**：
+- "最近 Ethereum Layer2 有什么重大更新？"
+- "帮我总结昨天简报中的 DeFi 协议动态"
+- "解释一下 EIP-4844 的技术细节"
+
+---
+
+## 测试
+
+```bash
+cd bot
+python -m pytest tests/ -v
+```
+
+---
+
+## 文档索引
 
 | 文档 | 说明 |
 |------|------|
-| [选型报告](docs/selection-report.md) | WiseFlow vs TrendRadar vs nbot.ai 对比分析 |
-| [部署指南](deploy/README.md) | 完整的安装、配置、运行说明 |
-| [设计文档](docs/develop/design.md) | 系统架构与接口设计 |
-| [需求文档](docs/develop/requirements.md) | 功能需求与验收标准 |
-| [待办计划](docs/develop/TODO.md) | 剩余任务与时间估算 |
-| [Claude 规则](docs/rules.md) | AI 助手行为约束规则 |
+| [产品需求文档](./产品需求文档_PRD_Final.md) | 产品定位、功能设计 |
+| [测试用例](./测试用例与验收标准_Test_Cases.md) | 测试用例、验收标准 |
 
 ---
 
-## 🏷️ 技术栈
+## 多语言支持
 
-- **基础框架**: [TrendRadar](https://github.com/sansan0/TrendRadar)
-- **语言**: Python 3.10+
-- **数据采集**: requests, BeautifulSoup, feedparser
-- **推送**: 企业微信 Webhook, Telegram Bot API
-- **配置**: YAML
-- **部署**: Docker (可选)
+Bot 自动检测用户语言并翻译简报内容，支持：
+- 中文（zh）
+- 英语（en）
+- 日语（ja）
+- 韩语（ko）
+- 俄语（ru）
+- 西班牙语（es）
+- 法语（fr）
+- 德语（de）
 
 ---
 
-## 📄 许可证
+## 核心数据流
 
-本项目基于 [TrendRadar](https
+```
+用户注册 → AI 对话收集偏好 → 配置信息源
+                                    ↓
+                            【每小时】预抓取 + 去重缓存
+                                    ↓
+                            【每30分钟】检查到期用户，从缓存读取（500-1000条）
+                                    ↓
+                    Step 1: 两阶段 AI 筛选
+                            ├─ Stage 1: 分批粗筛（每批100条 → 10-15条）
+                            └─ Stage 2: 精选去重（候选池 → 25条）
+                                    ↓
+                    Step 2: 语言适配（独立翻译步骤）
+                                    ↓
+                    Telegram 推送（分条发送）
+                                    ↓
+    用户反馈（👍/不感兴趣）→ 定期更新画像 ──┘
+```
+
+---
+
+## MVP 目标
+
+| 指标 | 目标 |
+|------|------|
+| 支持用户数 | 100 人 |
+| 信息源 | Twitter + 网站 RSS |
+| 推送渠道 | Telegram |
+| 推送频率 | 每日 1 次 |
+| 筛选率 | 85-95%（200+ 条 → 15-30 条）|
+
+---
+
+## 扩展性
+
+### 数据库升级
+JSON 文件适合 MVP（100 用户），规模扩展可迁移至：
+- PostgreSQL（结构化数据）
+- MongoDB（用户画像）
+- Redis（缓存 + 实时数据）
+
+### 功能扩展
+- 多平台推送（Discord/Slack/Email）
+- 实时推送（突发事件）
+- 社区功能（用户间分享）
+- 数据分析（行业趋势报告）
+
+---
+
+## 开发指南
+
+### 查看日志
+```bash
+# 本地运行
+tail -f data/logs/bot.log
+
+# Docker 运行
+docker-compose logs -f
+```
+
+### 手动触发推送（仅管理员）
+```bash
+# 在 Telegram 中向 Bot 发送（需管理员权限）
+/test
+```
+
+### 调试模式
+修改 `main.py` 中的日志级别：
+```python
+logger.setLevel(logging.DEBUG)
+```
+
+---
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+## License
+
+MIT
+
+---
+
+**问题反馈**: 请提交 [Issue](https://github.com/your-repo/info_denoise_compress/issues)

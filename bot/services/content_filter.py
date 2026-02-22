@@ -1,0 +1,904 @@
+"""
+AI Content Filter Service
+
+Uses Gemini 3 to intelligently filter content based on user profiles.
+Selects relevant items from raw content and ranks by importance.
+
+Features:
+- Automatic retry with model switching for improved reliability
+- Primary model failure -> retry with lower temperature
+- Primary model multiple failures -> switch to fallback model
+- All AI outputs in English, translation at final stage
+
+Reference: Plan specification for content filtering with Gemini 3
+"""
+import json
+import logging
+import math
+from typing import List, Dict, Any, Optional
+
+from services.gemini import call_gemini_json, call_gemini
+from services.llm_factory import call_llm_json, call_llm_text
+from utils.json_storage import get_user_profile, get_user_feedbacks
+from utils.prompt_loader import get_prompt
+from config import MAX_DIGEST_ITEMS, BATCH_SIZE, STAGE1_RATIO, TRANSLATION_TEMPERATURE
+
+logger = logging.getLogger(__name__)
+
+
+def smart_truncate(text: str, max_len: int = 200) -> str:
+    """
+    按完整句子截断文本，避免句子在中间断开。
+    
+    Args:
+        text: 原始文本
+        max_len: 最大长度
+    
+    Returns:
+        截断后的文本（保证句子完整）
+    """
+    if not text or len(text) <= max_len:
+        return text
+    
+    # 优先在句号处截断（中英文标点）
+    for sep in ['。', '！', '？', '. ', '! ', '? ']:
+        pos = text.rfind(sep, 0, max_len)
+        if pos > max_len // 2:  # 至少保留一半内容
+            return text[:pos + len(sep)].rstrip()
+    
+    # 没有句号，尝试在逗号处截断
+    for sep in ['，', ', ', '；', '; ']:
+        pos = text.rfind(sep, 0, max_len)
+        if pos > max_len * 0.6:  # 至少保留 60% 内容
+            return text[:pos] + '...'
+    
+    # 都没有，直接截断并加省略号
+    return text[:max_len].rstrip() + '...'
+
+
+DEFAULT_PROFILE = """This is a new user who hasn't set specific preferences yet.
+
+[Focus Areas]
+- General Web3 news and updates
+- Major protocol and ecosystem developments
+- Market-moving news and announcements
+
+[Content Preferences]
+- Balanced mix of news and analysis
+- Moderate volume (10-15 items per day)
+
+[Sources]
+- No specific preferences yet"""
+
+
+def summarize_feedbacks(feedbacks: List[Dict[str, Any]]) -> str:
+    """Summarize recent user feedbacks for AI context."""
+    if not feedbacks:
+        return "No feedback history available."
+
+    positive_count = 0
+    negative_count = 0
+    reasons = []
+
+    for fb in feedbacks:
+        if fb.get("overall") == "positive":
+            positive_count += 1
+        elif fb.get("overall") == "negative":
+            negative_count += 1
+            if fb.get("reason_selected"):
+                reasons.extend(fb["reason_selected"])
+            if fb.get("reason_text"):
+                reasons.append(fb["reason_text"])
+
+    summary_parts = [
+        f"Recent 7 days: {positive_count} positive, {negative_count} negative ratings."
+    ]
+
+    if reasons:
+        unique_reasons = list(set(reasons))[:5]
+        summary_parts.append(f"Main concerns: {', '.join(unique_reasons)}")
+
+    return " ".join(summary_parts)
+
+
+def _count_sources(items: List[Dict[str, Any]]) -> Dict[str, int]:
+    """
+    统计内容列表中各来源的条数分布。
+    
+    用于监控 AI 筛选是否存在来源偏向性。
+    
+    Args:
+        items: 内容列表
+        
+    Returns:
+        来源名称 -> 条数 的映射
+    """
+    counts: Dict[str, int] = {}
+    for item in items:
+        src = item.get("source", "Unknown")
+        counts[src] = counts.get(src, 0) + 1
+    return counts
+
+
+async def filter_content_for_user(
+    telegram_id: str,
+    raw_content: List[Dict[str, Any]],
+    max_items: int = 20
+) -> List[Dict[str, Any]]:
+    """
+    Filter raw content based on user profile using AI.
+    
+    Optimized I/O: Uses compact input format (n/src/t) and output format (n/r)
+    to reduce token usage by ~40%.
+    
+    Supports batch processing when content exceeds BATCH_SIZE.
+
+    Args:
+        telegram_id: User's Telegram ID
+        raw_content: List of raw content items to filter
+        max_items: Maximum number of items to return
+
+    Returns:
+        List of filtered and ranked content items
+    """
+    if not raw_content:
+        logger.warning(f"No content to filter for user {telegram_id}")
+        return []
+
+    # Check if batch processing is needed
+    if BATCH_SIZE > 0 and len(raw_content) > BATCH_SIZE:
+        logger.info(f"Content count {len(raw_content)} exceeds batch size {BATCH_SIZE}, using batch processing")
+        return await _filter_content_batched(telegram_id, raw_content, max_items)
+
+    # Get user profile
+    profile = get_user_profile(telegram_id)
+    if not profile:
+        logger.info(f"No profile found for {telegram_id}, using default")
+        profile = DEFAULT_PROFILE
+
+    # Get feedback history
+    feedbacks = get_user_feedbacks(telegram_id, days=7)
+    feedback_summary = summarize_feedbacks(feedbacks)
+
+    # Build index map for later mapping (n -> original item)
+    index_map: Dict[int, Dict[str, Any]] = {}
+    
+    # Prepare OPTIMIZED content list for AI (compact format)
+    # No artificial limit - let AI see all available content for best filtering
+    content_for_ai = []
+    for i, item in enumerate(raw_content, 1):
+        index_map[i] = item
+        
+        # Merge title and summary intelligently
+        title = item.get("title", "")
+        summary = item.get("summary", "")
+        
+        # If summary adds more info beyond title, include it
+        if len(summary) > len(title) and summary not in title:
+            content = f"{title} | {summary}"
+        else:
+            content = title if len(title) >= len(summary) else summary
+        
+        # Determine source label for AI
+        # For Twitter content: use "@author twitter" format so AI can recognize KOLs
+        # For websites: use original source name
+        author = item.get("author", "")
+        original_source = item.get("source", "")
+        
+        if author and author.startswith("@"):
+            # Twitter content with specific author: "@VitalikButerin twitter"
+            source_label = f"{author} twitter"
+        elif "Twitter" in original_source or original_source.startswith("@"):
+            # Twitter bundle without specific author: keep as is
+            source_label = original_source
+        else:
+            # Website or other source
+            source_label = original_source
+        
+        # Compact format: n (index), src (source), t (content)
+        # Removed: id, link, category (not needed for AI analysis)
+        content_for_ai.append({
+            "n": i,
+            "src": source_label,
+            "t": content
+        })
+
+    # 统计过滤前的来源分布（用于监控 AI 偏向性）
+    input_source_counts = _count_sources(raw_content)
+    logger.info(f"Filter input for {telegram_id}: {len(raw_content)} items, sources: {input_source_counts}")
+
+    # Build prompt with optimized system instruction
+    system_instruction = get_prompt(
+        "filtering.txt",
+        user_profile=profile,
+        feedback_summary=feedback_summary,
+        min_items=max(10, MAX_DIGEST_ITEMS // 2),
+        max_items=MAX_DIGEST_ITEMS
+    )
+
+    # Compact prompt format (no indent, saves tokens)
+    prompt = f"""## Content to filter today ({len(content_for_ai)} items)
+
+{json.dumps(content_for_ai, ensure_ascii=False)}
+
+Please select {MAX_DIGEST_ITEMS} most valuable items."""
+
+    # Call AI with automatic retry and model switching
+    filtered_result, model_used = await call_llm_json(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        context=f"filtering-{telegram_id}"
+    )
+    
+    # Check if all attempts failed
+    if filtered_result is None:
+        logger.error(f"All AI attempts failed for user {telegram_id}, using fallback")
+        return _build_fallback_result(raw_content, max_items, "Fallback: AI unavailable")
+
+    # Handle optimized format: {must_read: [{n, r}], ...}
+    if isinstance(filtered_result, dict):
+        all_items = []
+        
+        for section in ["must_read", "macro_insights", "recommended", "other"]:
+            items = filtered_result.get(section, [])
+            for ai_item in items:
+                n = ai_item.get("n")
+                if n and n in index_map:
+                    # Map back to original item with full data
+                    original = index_map[n]
+                    mapped_item = {
+                        "id": original.get("id"),
+                        "title": original.get("title"),
+                        "summary": smart_truncate(original.get("summary", ""), 200),
+                        "source": original.get("source"),
+                        "link": original.get("link"),
+                        "section": section,
+                        "reason": ai_item.get("r", ""),
+                        "author": original.get("author", "")  # Keep author for Twitter
+                    }
+                    all_items.append(mapped_item)
+                else:
+                    logger.warning(f"Invalid index {n} in AI response")
+
+        total_count = len(all_items)
+        section_counts = {}
+        for item in all_items:
+            s = item.get("section", "other")
+            section_counts[s] = section_counts.get(s, 0) + 1
+
+        logger.info(f"AI selected {total_count} items for user {telegram_id} using {model_used} "
+                   f"(must_read: {section_counts.get('must_read', 0)}, "
+                   f"macro: {section_counts.get('macro_insights', 0)}, "
+                   f"recommended: {section_counts.get('recommended', 0)}, "
+                   f"other: {section_counts.get('other', 0)})")
+        
+        # 统计过滤后的来源分布（用于监控 AI 偏向性）
+        output_source_counts = _count_sources(all_items)
+        logger.info(f"Filter output for {telegram_id}: {total_count} items, sources: {output_source_counts}")
+        
+        return all_items[:max_items]
+
+    logger.error(f"Unexpected response format: {type(filtered_result)}")
+    return _build_fallback_result(raw_content, max_items, "Fallback: invalid AI response")
+
+
+def _build_fallback_result(raw_content: List[Dict[str, Any]], max_items: int, reason: str) -> List[Dict[str, Any]]:
+    """Build fallback result when AI filtering fails."""
+    return [
+        {
+            "id": item.get("id"),
+            "title": item.get("title"),
+            "summary": smart_truncate(item.get("summary", ""), 200),
+            "source": item.get("source"),
+            "link": item.get("link"),
+            "section": "other",
+            "reason": reason
+        }
+        for item in raw_content[:max_items]
+    ]
+
+
+async def _filter_content_batched(
+    telegram_id: str,
+    raw_content: List[Dict[str, Any]],
+    max_items: int = 20
+) -> List[Dict[str, Any]]:
+    """
+    Process content in batches when total count exceeds BATCH_SIZE.
+    
+    Strategy:
+    1. Split content into batches of BATCH_SIZE
+    2. Filter each batch with AI
+    3. Merge results by section priority
+    4. Return top max_items
+    """
+    batch_size = BATCH_SIZE
+    total_items = len(raw_content)
+    num_batches = (total_items + batch_size - 1) // batch_size
+    
+    logger.info(f"Batch processing: {total_items} items in {num_batches} batches of {batch_size}")
+    
+    # Process each batch
+    all_results = []
+    for batch_idx in range(num_batches):
+        start = batch_idx * batch_size
+        end = min(start + batch_size, total_items)
+        batch = raw_content[start:end]
+        
+        logger.info(f"Processing batch {batch_idx + 1}/{num_batches}: items {start + 1}-{end}")
+        
+        # Call the main filter function for this batch (avoids recursion since batch < BATCH_SIZE)
+        # Call the main filter function for this batch
+        batch_results = await _filter_single_batch(telegram_id, batch, max_items)
+        all_results.extend(batch_results)
+    
+    # Merge and sort by section priority
+    section_priority = {"must_read": 0, "macro_insights": 1, "recommended": 2, "other": 3}
+    all_results.sort(key=lambda x: section_priority.get(x.get("section", "other"), 3))
+    
+    # Deduplicate across batches (fuzzy title matching)
+    # Phase 1: Exact match on normalized title
+    from difflib import SequenceMatcher
+    
+    def _norm_title(t: str) -> str:
+        """Normalize title for dedup comparison."""
+        import re as _re
+        t = t.strip().lower()
+        t = _re.sub(r'[^\w\s]', '', t)
+        t = _re.sub(r'\s+', ' ', t).strip()
+        return t
+    
+    unique_results = []
+    seen_normalized = []  # list of (normalized_title, index_in_unique)
+    
+    for item in all_results:
+        title = item.get("title", "")
+        norm = _norm_title(title)
+        if not norm:
+            unique_results.append(item)
+            continue
+        
+        is_dup = False
+        for seen_norm, seen_idx in seen_normalized:
+            # Fast exact check
+            if norm == seen_norm:
+                is_dup = True
+                break
+            # Fuzzy check for very similar titles (threshold 0.85)
+            if abs(len(norm) - len(seen_norm)) < max(len(norm), len(seen_norm)) * 0.4:
+                sim = SequenceMatcher(None, norm, seen_norm).ratio()
+                if sim >= 0.85:
+                    is_dup = True
+                    # Keep the one with more info (longer summary)
+                    existing_summary = unique_results[seen_idx].get("summary", "") or ""
+                    new_summary = item.get("summary", "") or ""
+                    if len(new_summary) > len(existing_summary):
+                        unique_results[seen_idx] = item
+                    break
+        
+        if not is_dup:
+            seen_normalized.append((norm, len(unique_results)))
+            unique_results.append(item)
+    
+    logger.info(f"Batch processing complete: {len(unique_results)} unique items from {len(all_results)} total")
+    
+    # Stage 2: 如果候选池足够大，进行精选去重
+    if len(unique_results) > max_items * 1.5:
+        logger.info(f"Running Stage 2 selection: {len(unique_results)} -> {max_items}")
+        profile = get_user_profile(telegram_id)
+        if not profile:
+            profile = DEFAULT_PROFILE
+        
+        final_results = await _stage2_select(
+            candidate_pool=unique_results,
+            final_count=max_items,
+            user_profile=profile
+        )
+        
+        if final_results:
+            logger.info(f"Stage 2 complete: selected {len(final_results)} items")
+            return final_results
+    
+    return unique_results[:max_items]
+
+
+async def _filter_single_batch(
+    telegram_id: str,
+    batch_content: List[Dict[str, Any]],
+    max_items: int
+) -> List[Dict[str, Any]]:
+    """Filter a single batch of content (internal helper for batch processing)."""
+    # Get user profile
+    profile = get_user_profile(telegram_id)
+    if not profile:
+        profile = DEFAULT_PROFILE
+    
+    feedbacks = get_user_feedbacks(telegram_id, days=7)
+    feedback_summary = summarize_feedbacks(feedbacks)
+    
+    # Build index map
+    index_map: Dict[int, Dict[str, Any]] = {}
+    content_for_ai = []
+    
+    for i, item in enumerate(batch_content, 1):
+        index_map[i] = item
+        title = item.get("title", "")
+        summary = item.get("summary", "")
+        
+        if len(summary) > len(title) and summary not in title:
+            content = f"{title} | {summary}"
+        else:
+            content = title if len(title) >= len(summary) else summary
+        
+        # Determine source label for AI (same logic as main filter)
+        author = item.get("author", "")
+        original_source = item.get("source", "")
+        
+        if author and author.startswith("@"):
+            source_label = f"{author} twitter"
+        elif "Twitter" in original_source or original_source.startswith("@"):
+            source_label = original_source
+        else:
+            source_label = original_source
+        
+        content_for_ai.append({
+            "n": i,
+            "src": source_label,
+            "t": content
+        })
+    
+    # Build prompt
+    system_instruction = get_prompt(
+        "filtering.txt",
+        user_profile=profile,
+        feedback_summary=feedback_summary,
+        min_items=max(10, MAX_DIGEST_ITEMS // 2),
+        max_items=MAX_DIGEST_ITEMS
+    )
+    
+    prompt = f"""## Content to filter (batch, {len(content_for_ai)} items)
+
+{json.dumps(content_for_ai, ensure_ascii=False)}
+
+Please select {MAX_DIGEST_ITEMS} most valuable items."""
+
+    # Use retry logic for batch processing too
+    filtered_result, model_used = await call_llm_json(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        context=f"batch-filtering-{telegram_id}"
+    )
+    
+    if filtered_result is None:
+        return _build_fallback_result(batch_content, max_items, "Batch AI failed")
+    
+    if isinstance(filtered_result, dict):
+        all_items = []
+        for section in ["must_read", "macro_insights", "recommended", "other"]:
+            items = filtered_result.get(section, [])
+            for ai_item in items:
+                n = ai_item.get("n")
+                if n and n in index_map:
+                    original = index_map[n]
+                    all_items.append({
+                        "id": original.get("id"),
+                        "title": original.get("title"),
+                        "summary": smart_truncate(original.get("summary", ""), 200),
+                        "source": original.get("source"),
+                        "author": original.get("author", ""),
+                        "link": original.get("link"),
+                        "section": section,
+                        "reason": ai_item.get("r", "")
+                    })
+        return all_items
+    
+    return _build_fallback_result(batch_content, max_items, "Batch AI error")
+
+
+async def _stage2_select(
+    candidate_pool: List[Dict[str, Any]],
+    final_count: int,
+    user_profile: str
+) -> List[Dict[str, Any]]:
+    """
+    Stage 2: 从候选池中精选最终结果。
+    
+    功能：
+    - 去重：相似信息只保留一条
+    - 价值平衡：覆盖显性/隐性/盲区三类价值
+    - 输出带有 Ve/Vi/Vb 评分
+    
+    Args:
+        candidate_pool: Stage 1 输出的候选池
+        final_count: 最终需要的条数
+        user_profile: 用户画像
+    
+    Returns:
+        精选后的信息列表
+    """
+    # 将候选池转换为 Stage 2 需要的格式
+    pool_for_ai = []
+    pool_map = {}  # n -> original item
+    
+    for i, item in enumerate(candidate_pool, 1):
+        pool_map[i] = item
+        pool_for_ai.append({
+            "n": i,
+            "src": item.get("source", ""),
+            "t": f"{item.get('title', '')} | {item.get('summary', '')}",
+            "value_judgment": item.get("reason", "")
+        })
+    
+    # 构建 Stage 2 Prompt
+    system_instruction = get_prompt(
+        "filtering_stage2.txt",
+        user_profile=user_profile,
+        pool_size=len(pool_for_ai),
+        candidate_pool_json=json.dumps(pool_for_ai, ensure_ascii=False, indent=2),
+        final_count=final_count
+    )
+    
+    prompt = f"请从候选池中选出最优的 {final_count} 条信息组合。"
+    
+    # 调用 AI
+    result, model_used = await call_llm_json(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        context="stage2-select"
+    )
+    
+    if result is None:
+        logger.warning("Stage 2 AI call failed, falling back to simple truncation")
+        return candidate_pool[:final_count]
+    
+    # 解析结果
+    if isinstance(result, dict) and "selected_news" in result:
+        selected = result["selected_news"]
+        final_items = []
+        
+        for s in selected:
+            n = s.get("n")
+            if n and n in pool_map:
+                original = pool_map[n]
+                # 合并 Stage 2 的评分和原始数据
+                final_items.append({
+                    "id": original.get("id"),
+                    "title": original.get("title"),
+                    "summary": smart_truncate(original.get("summary", ""), 200),
+                    "source": original.get("source"),
+                    "author": original.get("author", ""),
+                    "link": original.get("link"),
+                    "section": original.get("section", "recommended"),
+                    "reason": s.get("reason", original.get("reason", "")),
+                    # 新增：价值评分
+                    "Ve": s.get("Ve", 0),
+                    "Vi": s.get("Vi", 0),
+                    "Vb": s.get("Vb", 0)
+                })
+        
+        logger.info(f"Stage 2 selected {len(final_items)} items using {model_used}")
+        return final_items
+    
+    logger.warning(f"Stage 2 unexpected format: {type(result)}, falling back")
+    return candidate_pool[:final_count]
+
+
+async def categorize_filtered_content(
+    filtered_items: List[Dict[str, Any]]
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Categorize filtered content into sections for the report.
+
+    Args:
+        filtered_items: List of filtered content items
+
+    Returns:
+        Dict with categories as keys and item lists as values
+    """
+    categories = {
+        "top_stories": [],
+        "defi": [],
+        "nft": [],
+        "layer2": [],
+        "trading": [],
+        "development": [],
+        "other": []
+    }
+
+    # Separate high importance items as top stories
+    for item in filtered_items:
+        if item.get("importance") == "high" and len(categories["top_stories"]) < 3:
+            categories["top_stories"].append(item)
+        else:
+            # Simple keyword-based categorization
+            title_lower = (item.get("title", "") + " " + item.get("summary", "")).lower()
+
+            if any(kw in title_lower for kw in ["defi", "lending", "yield", "liquidity", "swap"]):
+                categories["defi"].append(item)
+            elif any(kw in title_lower for kw in ["nft", "opensea", "blur", "collection"]):
+                categories["nft"].append(item)
+            elif any(kw in title_lower for kw in ["layer2", "l2", "arbitrum", "optimism", "zksync", "rollup"]):
+                categories["layer2"].append(item)
+            elif any(kw in title_lower for kw in ["trade", "trading", "long", "short", "whale"]):
+                categories["trading"].append(item)
+            elif any(kw in title_lower for kw in ["developer", "github", "upgrade", "fork", "code"]):
+                categories["development"].append(item)
+            else:
+                categories["other"].append(item)
+
+    # Remove empty categories
+    return {k: v for k, v in categories.items() if v}
+
+
+async def get_ai_summary(
+    items: List[Dict[str, Any]],
+    user_profile: str
+) -> str:
+    """
+    Generate a brief AI summary of today's key themes.
+    
+    Uses unified retry mechanism with model switching.
+
+    Args:
+        items: List of filtered items
+        user_profile: User's profile for context
+
+    Returns:
+        Brief summary text (2-3 sentences)
+    """
+    if not items:
+        return "No significant updates today."
+
+    # Use all filtered items for summary (typically 15-30 items)
+    titles = [item.get("title", "") for item in items]
+
+    # Load prompt from file
+    prompt = get_prompt(
+        "report.txt",
+        user_profile=user_profile[:200],
+        headlines=json.dumps(titles, ensure_ascii=False)
+    )
+
+    # Use unified retry mechanism
+    summary, model_used = await call_llm_text(
+        prompt=prompt,
+        temperature=0.7,
+        context="ai-summary"
+    )
+    
+    if summary:
+        return summary.strip()
+    
+    logger.error("Failed to generate AI summary, using fallback")
+    return "Today's digest covers the latest Web3 developments across your areas of interest."
+
+
+def get_user_target_language(profile: str) -> str:
+    """
+    Get user's target language from profile for final translation.
+    
+    This function determines what language the final output should be in.
+    Default is Chinese as most users are Chinese-speaking.
+    
+    Args:
+        profile: User's profile text
+        
+    Returns:
+        Target language name (e.g., "Chinese", "English", "Japanese")
+    """
+    if not profile:
+        return "Chinese"  # Default to Chinese
+    
+    profile_lower = profile.lower()
+    
+    # Check for explicit language markers
+    # Chinese
+    if any(marker in profile for marker in ["用户语言", "中文", "简体", "繁體"]):
+        return "Chinese"
+    if "chinese" in profile_lower:
+        return "Chinese"
+    
+    # English
+    if any(marker in profile_lower for marker in ["english", "英文", "英语"]):
+        return "English"
+    
+    # Japanese
+    if any(marker in profile for marker in ["日本語", "日语"]):
+        return "Japanese"
+    if "japanese" in profile_lower:
+        return "Japanese"
+    
+    # Korean
+    if any(marker in profile for marker in ["한국어", "韩语", "韓語"]):
+        return "Korean"
+    if "korean" in profile_lower:
+        return "Korean"
+    
+    # Spanish
+    if any(marker in profile_lower for marker in ["español", "spanish", "西班牙语"]):
+        return "Spanish"
+    
+    # Detect by character ranges in profile
+    for char in profile[:200]:  # Check first 200 chars
+        # Chinese characters
+        if '\u4e00' <= char <= '\u9fff':
+            return "Chinese"
+        # Japanese Hiragana/Katakana
+        if '\u3040' <= char <= '\u30ff':
+            return "Japanese"
+        # Korean Hangul
+        if '\uac00' <= char <= '\ud7af' or '\u1100' <= char <= '\u11ff':
+            return "Korean"
+    
+    return "Chinese"  # Default to Chinese
+
+
+# Backward compatibility alias
+def _extract_user_language(profile: str) -> str:
+    """Deprecated: Use get_user_target_language() instead."""
+    lang = get_user_target_language(profile)
+    # Map to old format for compatibility
+    lang_map = {
+        "Chinese": "中文",
+        "Japanese": "日本語",
+        "Korean": "한국어",
+        "Spanish": "Español",
+        "English": "English"
+    }
+    return lang_map.get(lang, lang)
+
+
+async def translate_text(text: str, target_language: str) -> str:
+    """
+    Translate a plain text string to target language.
+    
+    Uses unified retry mechanism with model switching for reliability.
+    Used for translating AI summary and other text content.
+    
+    Args:
+        text: Text to translate
+        target_language: Target language (e.g., "Chinese", "Japanese")
+    
+    Returns:
+        Translated text
+    """
+    if not text or target_language.lower() == "english":
+        return text
+    
+    prompt = f"Translate the following to {target_language}. Output only the translation, no extra text:\n\n{text}"
+    
+    # Use unified retry mechanism with configured temperature for stable output
+    result, model_used = await call_llm_text(
+        prompt=prompt,
+        temperature=TRANSLATION_TEMPERATURE,
+        context="text-translation"
+    )
+    
+    if result:
+        logger.debug(f"Text translation completed using {model_used} (temp={TRANSLATION_TEMPERATURE})")
+        return result.strip()
+    
+    logger.error("Text translation failed, returning original")
+    return text
+
+
+def _has_non_english_content(items: List[Dict[str, Any]]) -> bool:
+    """Check if items contain non-English content (e.g., Chinese)."""
+    for item in items:
+        text = (item.get("title", "") + item.get("summary", ""))[:500]
+        for char in text:
+            # Chinese characters
+            if '\u4e00' <= char <= '\u9fff':
+                return True
+            # Japanese Hiragana/Katakana
+            if '\u3040' <= char <= '\u30ff':
+                return True
+            # Korean Hangul
+            if '\uac00' <= char <= '\ud7af':
+                return True
+    return False
+
+
+async def translate_content(
+    items: List[Dict[str, Any]],
+    target_language: str
+) -> List[Dict[str, Any]]:
+    """
+    Translate filtered content to user's preferred language.
+    
+    This is the final translation step before sending to user.
+    Translates: title, summary, reason fields.
+    Keeps unchanged: id, source, link, section, author.
+    
+    Args:
+        items: List of filtered content items
+        target_language: Target language (e.g., "Chinese", "English", "Japanese")
+    
+    Returns:
+        List of translated content items
+    """
+    if not items:
+        return items
+    
+    # Normalize target language
+    target_lower = target_language.lower()
+    
+    # If target is English, only translate if there's non-English content
+    if target_lower == "english":
+        if not _has_non_english_content(items):
+            logger.info("Target is English and content is already English, skipping translation")
+            return items
+        logger.info(f"Target is English but content has non-English, translating {len(items)} items")
+    else:
+        logger.info(f"Translating {len(items)} items to {target_language}")
+    
+    # Prepare content for translation
+    content_to_translate = []
+    for item in items:
+        content_to_translate.append({
+            "id": item.get("id"),
+            "title": item.get("title", ""),
+            "summary": item.get("summary", ""),
+            "reason": item.get("reason", ""),
+            "source": item.get("source", ""),
+            "link": item.get("link", ""),
+            "section": item.get("section", "other"),
+            "author": item.get("author", "")  # Keep author field
+        })
+    
+    # Build translation prompt
+    prompt = get_prompt(
+        "translate.txt",
+        target_language=target_language,
+        content=json.dumps(content_to_translate, ensure_ascii=False, indent=2)
+    )
+    
+    # Use unified retry mechanism with model switching for translation
+    # Use configured temperature for stable, accurate output
+    translated_result, model_used = await call_llm_json(
+        prompt=prompt,
+        system_instruction="You are a professional translator. Output valid JSON only.",
+        temperature=TRANSLATION_TEMPERATURE,
+        context="translation"
+    )
+    
+    if translated_result is None:
+        logger.error(f"All translation attempts failed, returning original")
+        return items
+    
+    # Process result
+    if isinstance(translated_result, list):
+        logger.info(f"Translation successful using {model_used}: {len(translated_result)} items")
+        return translated_result
+    elif isinstance(translated_result, dict) and "error" not in translated_result:
+        # May return wrapped result
+        if "items" in translated_result:
+            return translated_result["items"]
+        logger.warning("Unexpected translation format, using original")
+        return items
+    else:
+        logger.error(f"Translation failed: {translated_result}")
+        return items
+
+
+async def filter_and_translate_for_user(
+    telegram_id: str,
+    raw_content: List[Dict[str, Any]],
+    max_items: int = 20
+) -> List[Dict[str, Any]]:
+    """
+    Filter content for user (filtering only, no translation).
+    
+    Translation is handled at the final output stage, not here.
+    This keeps the middle processing language-agnostic.
+    
+    Args:
+        telegram_id: User's Telegram ID
+        raw_content: List of raw content items
+        max_items: Maximum number of items
+    
+    Returns:
+        List of filtered content items (original language)
+    """
+    # Only filter, no translation (translation happens at final output)
+    return await filter_content_for_user(telegram_id, raw_content, max_items)

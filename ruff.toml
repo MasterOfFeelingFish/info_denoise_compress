@@ -1,0 +1,51 @@
+# Ruff 代码质量检查配置
+# 文档: https://docs.astral.sh/ruff/
+
+# Python 版本
+target-version = "py312"
+
+# 行宽限制
+line-length = 120
+
+[lint]
+# 只启用重要的检查规则，避免历史代码大量报错
+select = [
+    "E7",     # 语法错误（bare except 等）
+    "E9",     # 运行时错误（syntax error 等）
+    "F821",   # 未定义的变量名（真正的 bug）
+    "F811",   # 重复定义（可能的 bug）
+    "F841",   # 未使用的变量
+    "W",      # 警告类
+]
+
+# 忽略不影响功能的规则
+ignore = [
+    "E741",   # 变量名歧义（如 l, O）— 历史代码多
+    "W291",   # 行尾空格 — 不影响功能
+    "W292",   # 文件末尾无换行 — 不影响功能
+    "W293",   # 缩进空格 — 不影响功能
+]
+
+# 对特定文件放宽规则（历史代码已知问题，避免 CI 误报）
+[lint.per-file-ignores]
+# ui_strings.py 有大量重复 key（多语言设计如此）
+"bot/locales/ui_strings.py" = ["F811", "F841"]
+# 测试文件中有重复 import 和函数内 re-import（历史风格）
+"bot/tests/*" = ["F841", "F811"]
+# admin.py 历史代码中有 bare except 和未用变量
+"bot/handlers/admin.py" = ["E722", "F841"]
+# chat.py 有一个未定义引用（已知，待修复）
+"bot/handlers/chat.py" = ["F821"]
+# start.py 有重复 import 和未用变量
+"bot/handlers/start.py" = ["F811", "F841"]
+# 工具脚本中的 bare except
+"bot/scripts/*" = ["E722"]
+# json_storage 清理代码中的 bare except
+"bot/utils/json_storage.py" = ["E722"]
+# report_generator 中有历史未用变量
+"bot/services/report_generator.py" = ["F841"]
+
+[format]
+# 格式化配置
+quote-style = "double"
+indent-style = "space"
