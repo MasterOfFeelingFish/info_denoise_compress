@@ -1467,3 +1467,44 @@ def cleanup_old_events() -> int:
             logger.error(f"Error deleting events file {filename}: {e}")
     
     return deleted
+
+
+# ─── Item URL Persistent Storage ───────────────────────────────────────
+
+ITEM_URLS_FILE = os.path.join(DATA_DIR, "item_urls.json")
+
+
+def save_item_urls(url_map: Dict[str, str]) -> bool:
+    """
+    Merge new item_id->url mappings into the persistent file.
+    Keeps only the last 3 days of entries to avoid unbounded growth.
+    """
+    try:
+        existing = _read_json(ITEM_URLS_FILE)
+        now = datetime.now().isoformat()
+        
+        for item_id, url in url_map.items():
+            existing[item_id] = {"url": url, "ts": now}
+        
+        cutoff = (datetime.now() - timedelta(days=3)).isoformat()
+        pruned = {k: v for k, v in existing.items() if v.get("ts", "") >= cutoff}
+        
+        return _write_json(ITEM_URLS_FILE, pruned)
+    except Exception as e:
+        logger.error(f"Error saving item URLs: {e}")
+        return False
+
+
+def get_item_url(item_id: str) -> str:
+    """Look up a persisted item URL by item_id."""
+    try:
+        data = _read_json(ITEM_URLS_FILE)
+        entry = data.get(item_id, {})
+        if isinstance(entry, dict):
+            return entry.get("url", "")
+        elif isinstance(entry, str):
+            return entry
+        return ""
+    except Exception as e:
+        logger.error(f"Error reading item URL for {item_id}: {e}")
+        return ""

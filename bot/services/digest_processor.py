@@ -218,6 +218,8 @@ async def process_single_user(
             if "item_urls" not in context.bot_data:
                 context.bot_data["item_urls"] = {}
             
+            _batch_urls = {}
+            
             for item_msg, item_id, item_url in item_messages:
                 # Section headers don't get feedback buttons
                 if item_id.startswith("section_"):
@@ -231,6 +233,7 @@ async def process_single_user(
                     # Store URL mapping for later retrieval in click handler
                     if item_url:
                         context.bot_data["item_urls"][item_id] = item_url
+                        _batch_urls[item_id] = item_url
                     
                     # Pass item_url for "查看原文" button
                     item_keyboard = create_item_feedback_keyboard(item_id, item_url=item_url, lang=user_lang)
@@ -241,6 +244,11 @@ async def process_single_user(
                         parse_mode="HTML",
                         disable_web_page_preview=True
                     )
+
+            # Persist item URLs to file (survives bot restart)
+            if _batch_urls:
+                from utils.json_storage import save_item_urls
+                save_item_urls(_batch_urls)
 
             # Send final feedback message
             final_keyboard = create_feedback_keyboard(report_id)

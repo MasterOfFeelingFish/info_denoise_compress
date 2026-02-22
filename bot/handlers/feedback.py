@@ -361,6 +361,11 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
     item_url = ""
     if "item_urls" in context.bot_data:
         item_url = context.bot_data["item_urls"].get(item_id, "")
+    
+    # Fallback: if not in memory (e.g. after bot restart), try persistent file
+    if not item_url:
+        from utils.json_storage import get_item_url
+        item_url = get_item_url(item_id)
 
     # Store item feedback in memory (for later aggregation)
     item_feedbacks = context.user_data.get("item_feedbacks", [])
