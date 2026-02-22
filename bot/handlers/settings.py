@@ -27,7 +27,10 @@ from utils.json_storage import (
     save_user_profile,
     track_event,
     get_user_language,
+    get_user_setting,
+    set_user_setting,
 )
+from utils.permissions import check_feature
 from services.language_service import (
     get_language_native_name,
     update_user_language,
@@ -64,6 +67,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             InlineKeyboardButton(ui["settings_update"], callback_data="settings_update"),
             InlineKeyboardButton(ui["settings_reset"], callback_data="settings_reset"),
         ],
+        [InlineKeyboardButton(ui.get("settings_push_interval", "📅 推送间隔"), callback_data="settings_push_interval")],
         [InlineKeyboardButton(f"🌐 {current_lang_name}", callback_data="settings_language")],
         [InlineKeyboardButton(ui["back"], callback_data="back_to_start")],
     ]
@@ -291,6 +295,7 @@ async def settings_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     telegram_id = str(user.id) if user else "0"
     lang = get_user_language(telegram_id)
     ui = get_ui_locale(lang)
+    current_lang_name = get_language_native_name(lang)
 
     keyboard = [
         [InlineKeyboardButton(ui.get("settings_view", "View Preferences"), callback_data="settings_view")],
@@ -298,6 +303,8 @@ async def settings_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             InlineKeyboardButton(ui.get("settings_update", "Update"), callback_data="settings_update"),
             InlineKeyboardButton(ui.get("settings_reset", "Reset"), callback_data="settings_reset"),
         ],
+        [InlineKeyboardButton(ui.get("settings_push_interval", "📅 推送间隔"), callback_data="settings_push_interval")],
+        [InlineKeyboardButton(f"🌐 {current_lang_name}", callback_data="settings_language")],
         [InlineKeyboardButton(ui.get("back", "Back"), callback_data="back_to_start")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -452,6 +459,74 @@ async def change_language(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 
+async def show_push_interval_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show push interval options. Pro: 1/2/6/12/24h; Free: 24h only."""
+    query = update.callback_query
+    await safe_answer_callback_query(query)
+
+    telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
+    current = get_user_setting(telegram_id, "push_interval_hours")
+    from config import PUSH_INTERVAL_HOURS, PUSH_INTERVAL_PRO_HOURS
+    if current is None:
+        current = PUSH_INTERVAL_PRO_HOURS if check_feature(telegram_id, "priority_push") else PUSH_INTERVAL_HOURS
+    else:
+        current = max(1, min(24, int(current)))
+
+    title = ui.get("settings_push_interval_title", "推送间隔")
+    desc = ui.get("settings_push_interval_desc", "选择简报推送频率（Pro 可自定义，免费版固定一天一次）")
+    current_label = ui.get("settings_push_interval_current", "当前：每 {hours} 小时推送一次").format(hours=current)
+
+    keyboard = []
+    if check_feature(telegram_id, "priority_push"):
+        for h in [1, 2, 6, 12, 24]:
+            label = ui.get(f"settings_interval_{h}h", f"{h} 小时")
+            if h == current:
+                label = f"✓ {label}"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"settings_set_interval_{h}")])
+    else:
+        label = ui.get("settings_interval_24h", "24 小时（一天一次）")
+        if current >= 24:
+            label = f"✓ {label}"
+        keyboard.append([InlineKeyboardButton(label, callback_data="settings_set_interval_24")])
+    keyboard.append([InlineKeyboardButton(ui["back"], callback_data="settings_back")])
+
+    await query.edit_message_text(
+        f"{title}\n{ui['divider']}\n\n{desc}\n\n{current_label}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def set_push_interval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Save user's chosen push interval and confirm."""
+    query = update.callback_query
+    await safe_answer_callback_query(query)
+
+    telegram_id = str(query.from_user.id)
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
+    # callback_data: settings_set_interval_1 | _2 | _6 | _12 | _24
+    try:
+        hours = int(query.data.replace("settings_set_interval_", ""))
+        hours = max(1, min(24, hours))
+    except (ValueError, TypeError):
+        hours = 24
+
+    if not check_feature(telegram_id, "priority_push"):
+        hours = 24
+
+    ok = set_user_setting(telegram_id, "push_interval_hours", hours)
+    if ok:
+        track_event(telegram_id, "settings_changed", {"action": "push_interval", "hours": hours})
+    msg = ui.get("settings_push_interval_saved", "已设置为每 {hours} 小时推送一次").format(hours=hours) if ok else ui.get("settings_save_failed", "保存失败，请重试")
+
+    keyboard = [[InlineKeyboardButton(ui["back"], callback_data="settings_back")]]
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
 def get_settings_callbacks():
     """Get standalone callback handlers for settings menu."""
     return [
@@ -459,6 +534,8 @@ def get_settings_callbacks():
         CallbackQueryHandler(confirm_reset, pattern="^settings_reset$"),
         CallbackQueryHandler(execute_reset, pattern="^settings_reset_confirm$"),
         CallbackQueryHandler(settings_back, pattern="^settings_back$"),
+        CallbackQueryHandler(show_push_interval_settings, pattern="^settings_push_interval$"),
+        CallbackQueryHandler(set_push_interval, pattern="^settings_set_interval_"),
         CallbackQueryHandler(show_language_settings, pattern="^settings_language$"),
         CallbackQueryHandler(change_language, pattern="^set_lang_"),
     ]

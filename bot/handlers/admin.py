@@ -2,6 +2,7 @@
 Admin Handlers for Whitelist Management.
 Provides both command handlers and callback button handlers.
 """
+import copy
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, ConversationHandler, MessageHandler, filters
@@ -67,6 +68,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📡 信息源健康", callback_data="admin_source_health")],
         [InlineKeyboardButton("📢 群组管理", callback_data="admin_group_manage")],
         [InlineKeyboardButton("🎫 生成兑换码", callback_data="admin_gen_code")],
+        [InlineKeyboardButton(ui.get("admin_plan_config", "📋 方案与权限"), callback_data="admin_plan_config")],
         [InlineKeyboardButton(f"{toggle_emoji} {toggle_text}", callback_data="admin_wl_toggle")],
         [InlineKeyboardButton(ui["admin_view_whitelist"], callback_data="admin_wl_list")],
         [
@@ -842,6 +844,206 @@ async def admin_group_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await admin_group_manage(update, context)
 
 
+# ============ Plan & Permissions Config (Admin) ============
+
+def _ensure_plan_structure(config: dict) -> None:
+    """Ensure config has free/pro with features and limits dicts."""
+    for plan in ("free", "pro"):
+        if plan not in config:
+            config[plan] = {"name": plan.capitalize(), "features": {}, "limits": {}}
+        if "features" not in config[plan]:
+            config[plan]["features"] = {}
+        if "limits" not in config[plan]:
+            config[plan]["limits"] = {}
+
+
+def _build_plan_config_screen(context: ContextTypes.DEFAULT_TYPE, ui: dict) -> tuple:
+    """Build message text and keyboard for plan config. Uses context.user_data['plan_config']."""
+    from utils.permissions import FEATURE_KEYS, LIMIT_KEYS
+    
+    cfg = context.user_data.get("plan_config") or {}
+    _ensure_plan_structure(cfg)
+    
+    free_f = cfg.get("free", {}).get("features", {})
+    free_l = cfg.get("free", {}).get("limits", {})
+    pro_f = cfg.get("pro", {}).get("features", {})
+    pro_l = cfg.get("pro", {}).get("limits", {})
+    
+    lines = [
+        f"<b>{ui.get('admin_plan_title', '📋 方案与权限配置')}</b>",
+        f"{'─' * 24}",
+        "",
+        ui.get("admin_plan_intro", "配置 Free / Pro 方案的功能与限额。修改后点击「保存」生效。"),
+        "",
+        f"<b>{ui.get('admin_plan_features', '功能')}</b>",
+    ]
+    for key in FEATURE_KEYS:
+        label = ui.get(f"admin_feat_{key}", key)
+        f_f = "✓" if free_f.get(key, False) else "✗"
+        f_p = "✓" if pro_f.get(key, False) else "✗"
+        lines.append(f"  {label}: Free {f_f} | Pro {f_p}")
+    lines.append("")
+    lines.append(f"<b>{ui.get('admin_plan_limits', '限额')}</b>")
+    for key in LIMIT_KEYS:
+        label = ui.get(f"admin_lim_{key}", key)
+        v_f = free_l.get(key, 0)
+        v_p = pro_l.get(key, 0)
+        lines.append(f"  {label}: Free {v_f} | Pro {v_p}")
+    
+    keyboard = []
+    for key in FEATURE_KEYS:
+        label = ui.get(f"admin_feat_{key}", key)
+        f_f = free_f.get(key, False)
+        f_p = pro_f.get(key, False)
+        keyboard.append([
+            InlineKeyboardButton(f"F:{'✓' if f_f else '✗'} {label[:8]}", callback_data=f"cfg_feat_f_{key}"),
+            InlineKeyboardButton(f"P:{'✓' if f_p else '✗'} {label[:8]}", callback_data=f"cfg_feat_p_{key}"),
+        ])
+    for key in LIMIT_KEYS:
+        v_f = free_l.get(key, 0)
+        v_p = pro_l.get(key, 0)
+        keyboard.append([
+            InlineKeyboardButton(f"F− {str(v_f)[:6]}", callback_data=f"cfg_lim_f_{key}_dec"),
+            InlineKeyboardButton(f"F+", callback_data=f"cfg_lim_f_{key}_inc"),
+            InlineKeyboardButton(f"P− {str(v_p)[:6]}", callback_data=f"cfg_lim_p_{key}_dec"),
+            InlineKeyboardButton(f"P+", callback_data=f"cfg_lim_p_{key}_inc"),
+        ])
+    keyboard.append([
+        InlineKeyboardButton(ui.get("admin_plan_save", "💾 保存"), callback_data="cfg_plan_save"),
+        InlineKeyboardButton(ui.get("admin_plan_reset", "🔄 恢复默认"), callback_data="cfg_plan_reset"),
+    ])
+    keyboard.append([InlineKeyboardButton(ui.get("admin_plan_back", "« 返回管理面板"), callback_data="admin_plan_back")])
+    
+    return "\n".join(lines), InlineKeyboardMarkup(keyboard)
+
+
+async def admin_plan_config_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show plan & permissions config screen (admin only)."""
+    query = update.callback_query
+    lang = get_user_language(str(query.from_user.id))
+    ui = get_ui_locale(lang)
+    if not is_admin(query.from_user.id):
+        await query.answer(ui["admin_no_permission"], show_alert=True)
+        return
+    await query.answer()
+    if "plan_config" not in context.user_data:
+        from utils.permissions import get_plan_config
+        context.user_data["plan_config"] = get_plan_config()
+    
+    text, reply_markup = _build_plan_config_screen(context, ui)
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+
+async def plan_config_toggle_feature(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle a feature for free or pro (callback_data: cfg_feat_f_<key> or cfg_feat_p_<key>)."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(query.from_user.id):
+        return
+    
+    parts = query.data.split("_", 3)
+    if len(parts) != 4 or parts[0] != "cfg" or parts[1] != "feat":
+        return
+    plan = "free" if parts[2] == "f" else "pro"
+    feature_key = parts[3]
+    
+    cfg = context.user_data.get("plan_config")
+    if not cfg:
+        from utils.permissions import get_plan_config
+        context.user_data["plan_config"] = get_plan_config()
+        cfg = context.user_data["plan_config"]
+    _ensure_plan_structure(cfg)
+    features = cfg[plan]["features"]
+    features[feature_key] = not features.get(feature_key, False)
+    
+    lang = get_user_language(str(query.from_user.id))
+    ui = get_ui_locale(lang)
+    text, reply_markup = _build_plan_config_screen(context, ui)
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+
+async def plan_config_limit_change(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inc/dec a limit (callback_data: cfg_lim_f_<key>_inc or _dec)."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(query.from_user.id):
+        return
+    
+    # cfg_lim_f_ai_chat_daily_inc -> plan=f, key=ai_chat_daily, delta=+1
+    parts = query.data.split("_")
+    if len(parts) < 5 or parts[0] != "cfg" or parts[1] != "lim":
+        return
+    plan = "free" if parts[2] == "f" else "pro"
+    direction = parts[-1]
+    limit_key = "_".join(parts[3:-1])
+    delta = 1 if direction == "inc" else -1
+    
+    cfg = context.user_data.get("plan_config")
+    if not cfg:
+        from utils.permissions import get_plan_config
+        context.user_data["plan_config"] = get_plan_config()
+        cfg = context.user_data["plan_config"]
+    _ensure_plan_structure(cfg)
+    limits = cfg[plan]["limits"]
+    current = limits.get(limit_key, 0)
+    new_val = max(0, current + delta)
+    limits[limit_key] = new_val
+    
+    lang = get_user_language(str(query.from_user.id))
+    ui = get_ui_locale(lang)
+    text, reply_markup = _build_plan_config_screen(context, ui)
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+
+async def plan_config_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save plan config to file."""
+    query = update.callback_query
+    if not is_admin(query.from_user.id):
+        await query.answer()
+        return
+    
+    from utils.permissions import save_plan_config
+    cfg = context.user_data.get("plan_config")
+    if not cfg:
+        await query.answer("未加载配置", show_alert=True)
+        return
+    
+    if save_plan_config(cfg):
+        lang = get_user_language(str(query.from_user.id))
+        ui = get_ui_locale(lang)
+        await query.answer(ui.get("admin_plan_saved", "✅ 已保存"), show_alert=True)
+        text, reply_markup = _build_plan_config_screen(context, ui)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await query.answer("保存失败", show_alert=True)
+
+
+async def plan_config_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reset plan config to default in memory; user must click Save to write file."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(query.from_user.id):
+        return
+    
+    from utils.permissions import DEFAULT_PLAN_CONFIG
+    context.user_data["plan_config"] = copy.deepcopy(DEFAULT_PLAN_CONFIG)
+    
+    lang = get_user_language(str(query.from_user.id))
+    ui = get_ui_locale(lang)
+    await query.answer(ui.get("admin_plan_reset_ok", "✅ 已恢复默认"), show_alert=True)
+    text, reply_markup = _build_plan_config_screen(context, ui)
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+
+async def plan_config_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Return to admin panel."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(query.from_user.id):
+        return
+    await admin_panel(update, context)
+
+
 # ============ Admin Redeem Code Generation (C1) ============
 
 async def admin_gen_code_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -913,6 +1115,13 @@ def get_admin_handlers():
         CallbackQueryHandler(admin_group_toggle, pattern="^admin_group_toggle_"),
         # Redeem code generation handler
         CallbackQueryHandler(admin_gen_code_callback, pattern="^admin_gen_code$"),
+        # Plan & permissions config
+        CallbackQueryHandler(admin_plan_config_callback, pattern="^admin_plan_config$"),
+        CallbackQueryHandler(plan_config_toggle_feature, pattern="^cfg_feat_[fp]_"),
+        CallbackQueryHandler(plan_config_limit_change, pattern="^cfg_lim_[fp]_"),
+        CallbackQueryHandler(plan_config_save, pattern="^cfg_plan_save$"),
+        CallbackQueryHandler(plan_config_reset, pattern="^cfg_plan_reset$"),
+        CallbackQueryHandler(plan_config_back, pattern="^admin_plan_back$"),
         # Admin ConversationHandler (whitelist add/del + bulk source add)
         admin_conv,
         # Command handlers (legacy, still work)

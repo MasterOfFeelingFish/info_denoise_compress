@@ -31,6 +31,9 @@ from telegram.ext import (
     filters,
 )
 
+from locales.ui_strings import get_ui_locale
+from services.language_service import normalize_language_code
+
 logger = logging.getLogger(__name__)
 
 # Conversation states
@@ -87,6 +90,52 @@ def get_all_group_configs() -> list:
     return configs
 
 
+def _get_ui_for_group(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    group_id: str = None,
+    prefer_user_language: bool = False,
+):
+    """
+    Get UI strings for group context.
+
+    When prefer_user_language is False (default):
+      1. Existing group config language (if group already configured)
+      2. Admin user's Telegram language_code
+      3. Fallback to English
+
+    When prefer_user_language is True (e.g. first-time setup / welcome):
+      1. Admin user's Telegram language_code (so current admin sees their own language)
+      2. Existing group config language
+      3. Fallback to English
+    """
+    user = update.effective_user
+    raw_code = getattr(user, "language_code", None) if user else None
+    user_lang = normalize_language_code(raw_code) if raw_code else None
+
+    if prefer_user_language:
+        # First-time setup / welcome: use admin's language so they see their client language
+        resolved = user_lang or "en"
+        logger.info(
+            "Group setup UI: user_id=%s, language_code=%s, resolved=%s",
+            user.id if user else None,
+            raw_code,
+            resolved,
+        )
+        return get_ui_locale(resolved)
+
+    # Try existing group config language
+    if group_id:
+        config = load_group_config(group_id)
+        if config and config.get("language"):
+            return get_ui_locale(config["language"])
+
+    if user_lang:
+        return get_ui_locale(user_lang)
+
+    return get_ui_locale("en")
+
+
 async def _is_group_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Check if the user is a group admin."""
     user = update.effective_user
@@ -113,73 +162,70 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     
     chat = update.effective_chat
     if not chat or chat.type not in ("group", "supergroup"):
+        # Not in a group - show setup guide (use current user's language)
+        ui = _get_ui_for_group(update, context, prefer_user_language=True)
         await update.message.reply_text(
-            "📋 群组推送配置指南\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "📌 如何将 Bot 添加到群组：\n\n"
-            "1️⃣ 打开你的 Telegram 群组\n"
-            "2️⃣ 点击群组名称 → 「添加成员」\n"
-            "3️⃣ 搜索 @learnfi_bot 并添加\n"
-            "4️⃣ 将 Bot 设为「管理员」（需要发消息权限）\n"
-            "5️⃣ 在群组中发送 /setup 开始配置\n\n"
-            "⚙️ 配置流程：\n"
-            "• 描述群组关注的 Web3 方向（如 DeFi、Layer2）\n"
-            "• 选择每日推送时间\n"
-            "• 选择推送语言\n\n"
-            "配置完成后，Bot 每天定时在群里推送 Web3 简报 📰\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "Setup Guide for Groups\n\n"
-            "1. Open your Telegram group\n"
-            "2. Tap group name → Add Members\n"
-            "3. Search @learnfi_bot and add\n"
-            "4. Make Bot an Admin (needs send messages)\n"
-            "5. Send /setup in the group to configure"
+            f"{ui['group_guide_title']}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{ui['group_guide_add_bot']}\n\n"
+            f"{ui['group_guide_step1']}\n"
+            f"{ui['group_guide_step2']}\n"
+            f"{ui['group_guide_step3']}\n"
+            f"{ui['group_guide_step4']}\n"
+            f"{ui['group_guide_step5']}\n\n"
+            f"{ui['group_guide_config_flow']}\n"
+            f"{ui['group_guide_config_desc']}\n\n"
+            f"{ui['group_guide_footer']}"
         )
         return ConversationHandler.END
     
     # Check admin permission
     if not await _is_group_admin(update, context):
-        await update.message.reply_text(
-            "🔒 仅群管理员可以配置 Bot。\n"
-            "Only group admins can configure the bot."
-        )
+        ui = _get_ui_for_group(update, context, prefer_user_language=True)
+        await update.message.reply_text(ui['group_admin_only'])
         return ConversationHandler.END
     
     group_id = str(chat.id)
     existing = load_group_config(group_id)
+    # For "already configured" screen use group's saved language; for new-group welcome use admin's language
+    ui = _get_ui_for_group(
+        update, context, group_id, prefer_user_language=(not existing)
+    )
     
     if existing:
         keyboard = [
-            [InlineKeyboardButton("更新配置 / Update", callback_data="group_update")],
-            [InlineKeyboardButton("查看当前配置 / View", callback_data="group_view")],
-            [InlineKeyboardButton("禁用推送 / Disable", callback_data="group_disable")],
+            [InlineKeyboardButton(ui['group_btn_update'], callback_data="group_update")],
+            [InlineKeyboardButton(ui['group_btn_view'], callback_data="group_view")],
+            [InlineKeyboardButton(ui['group_btn_disable'], callback_data="group_disable")],
         ]
         await update.message.reply_text(
-            f"📋 群组已配置\n\n"
-            f"群名: {existing.get('group_title', chat.title)}\n"
-            f"偏好: {existing.get('profile', 'N/A')}\n"
-            f"推送时间: {existing.get('push_hour', 9)}:00\n"
-            f"语言: {existing.get('language', 'zh')}\n\n"
-            f"选择操作:",
+            f"{ui['group_already_configured']}\n\n"
+            f"{ui['group_label_name']}: {existing.get('group_title', chat.title)}\n"
+            f"{ui['group_label_interests']}: {existing.get('profile', 'N/A')}\n"
+            f"{ui['group_label_push_time']}: {existing.get('push_hour', 9)}:00\n"
+            f"{ui['group_label_language']}: {existing.get('language', 'en')}\n\n"
+            f"{ui['group_choose_action']}",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
         await update.message.reply_text(
-            "🤖 欢迎配置 Web3 Daily Digest!\n\n"
-            "请描述这个群组关注的 Web3 领域:\n"
-            "例如: DeFi、Layer2、NFT、链上数据分析\n\n"
-            "Please describe this group's Web3 interests:"
+            f"{ui['group_welcome_new']}\n\n"
+            f"{ui['group_enter_interests']}\n"
+            f"{ui['group_enter_interests_example']}"
         )
     
     return GROUP_PROFILE
 
 
 async def handle_group_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle group profile input."""
+    """Handle group profile input (first-time setup flow: use client language)."""
     profile = update.message.text.strip()
+    chat = update.effective_chat
+    group_id = str(chat.id) if chat else None
+    ui = _get_ui_for_group(update, context, group_id, prefer_user_language=True)
     
     if len(profile) < 3:
-        await update.message.reply_text("请输入更详细的描述。/ Please provide more detail.")
+        await update.message.reply_text(ui['group_input_too_short'])
         return GROUP_PROFILE
     
     context.chat_data["group_profile"] = profile
@@ -198,9 +244,8 @@ async def handle_group_profile(update: Update, context: ContextTypes.DEFAULT_TYP
     ]
     
     await update.message.reply_text(
-        f"✅ 偏好已记录: {profile}\n\n"
-        f"请选择每日推送时间 (北京时间):\n"
-        f"Select daily push time (Beijing time):",
+        f"{ui['group_interests_saved'].format(profile=profile)}\n\n"
+        f"{ui['group_select_push_time']}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     
@@ -208,12 +253,16 @@ async def handle_group_profile(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def handle_push_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle push time selection."""
+    """Handle push time selection (first-time setup flow: use client language)."""
     query = update.callback_query
     await query.answer()
     
     hour = int(query.data.replace("group_time_", ""))
     context.chat_data["push_hour"] = hour
+    
+    chat = update.effective_chat
+    group_id = str(chat.id) if chat else None
+    ui = _get_ui_for_group(update, context, group_id, prefer_user_language=True)
     
     keyboard = [
         [
@@ -227,9 +276,8 @@ async def handle_push_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ]
     
     await query.edit_message_text(
-        f"⏰ 推送时间: {hour}:00\n\n"
-        f"请选择简报语言:\n"
-        f"Select digest language:",
+        f"{ui['group_time_saved'].format(hour=hour)}\n\n"
+        f"{ui['group_select_language']}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     
@@ -260,49 +308,15 @@ async def handle_language_choice(update: Update, context: ContextTypes.DEFAULT_T
     
     lang_names = {"zh": "中文", "en": "English", "ja": "日本語", "ko": "한국어"}
     
-    # Localized setup completion messages
-    _setup_complete_msgs = {
-        "zh": (
-            "✅ 群组配置完成!\n\n"
-            "📋 偏好: {profile}\n"
-            "⏰ 推送: 每天 {hour}:00 (北京时间)\n"
-            "🌐 语言: {lang_name}\n\n"
-            "🤖 Bot 将每天在指定时间推送 Web3 简报。\n"
-            "使用 /setup 随时更新配置。"
-        ),
-        "en": (
-            "✅ Group setup complete!\n\n"
-            "📋 Interests: {profile}\n"
-            "⏰ Push: daily at {hour}:00 (Beijing time)\n"
-            "🌐 Language: {lang_name}\n\n"
-            "🤖 Bot will push Web3 digest at the scheduled time.\n"
-            "Use /setup to update anytime."
-        ),
-        "ja": (
-            "✅ グループ設定完了!\n\n"
-            "📋 関心: {profile}\n"
-            "⏰ 配信: 毎日 {hour}:00 (北京時間)\n"
-            "🌐 言語: {lang_name}\n\n"
-            "🤖 Bot が指定時間に Web3 ダイジェストを配信します。\n"
-            "/setup でいつでも設定変更できます。"
-        ),
-        "ko": (
-            "✅ 그룹 설정 완료!\n\n"
-            "📋 관심사: {profile}\n"
-            "⏰ 발송: 매일 {hour}:00 (베이징 시간)\n"
-            "🌐 언어: {lang_name}\n\n"
-            "🤖 Bot이 지정된 시간에 Web3 다이제스트를 발송합니다.\n"
-            "/setup 으로 언제든 설정을 변경하세요."
-        ),
-    }
-    msg_template = _setup_complete_msgs.get(lang, _setup_complete_msgs["en"])
+    # Use the selected language for the completion message
+    ui = get_ui_locale(lang)
     
     await query.edit_message_text(
-        msg_template.format(
-            profile=config['profile'],
-            hour=config['push_hour'],
-            lang_name=lang_names.get(lang, lang),
-        )
+        f"{ui['group_setup_complete']}\n\n"
+        f"{ui['group_setup_interests'].format(profile=config['profile'])}\n"
+        f"{ui['group_setup_push'].format(hour=config['push_hour'])}\n"
+        f"{ui['group_setup_lang'].format(lang_name=lang_names.get(lang, lang))}\n\n"
+        f"{ui['group_setup_footer']}"
     )
     
     # Clear chat data
@@ -320,17 +334,21 @@ async def handle_group_view(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     config = load_group_config(group_id)
     
     if config:
+        lang = config.get("language", "en")
+        ui = get_ui_locale(lang)
+        status = ui['group_status_enabled'] if config.get('enabled', True) else ui['group_status_disabled']
         await query.edit_message_text(
-            f"📋 当前群组配置\n\n"
-            f"偏好: {config.get('profile', 'N/A')}\n"
-            f"推送时间: {config.get('push_hour', 9)}:00\n"
-            f"语言: {config.get('language', 'zh')}\n"
-            f"状态: {'✅ 启用' if config.get('enabled', True) else '❌ 禁用'}\n"
-            f"创建: {config.get('created', 'N/A')[:10]}\n\n"
-            f"使用 /setup 更新配置。"
+            f"{ui['group_view_title']}\n\n"
+            f"{ui['group_label_interests']}: {config.get('profile', 'N/A')}\n"
+            f"{ui['group_label_push_time']}: {config.get('push_hour', 9)}:00\n"
+            f"{ui['group_label_language']}: {config.get('language', 'en')}\n"
+            f"{ui['group_label_status']}: {status}\n"
+            f"{ui['group_label_created']}: {config.get('created', 'N/A')[:10]}\n\n"
+            f"{ui['group_view_footer']}"
         )
     else:
-        await query.edit_message_text("未找到配置。请使用 /setup 开始配置。")
+        ui = _get_ui_for_group(update, context)
+        await query.edit_message_text(ui['group_no_config'])
     
     return ConversationHandler.END
 
@@ -346,10 +364,11 @@ async def handle_group_disable(update: Update, context: ContextTypes.DEFAULT_TYP
     if config:
         config["enabled"] = False
         save_group_config(group_id, config)
+        lang = config.get("language", "en")
+        ui = get_ui_locale(lang)
         await query.edit_message_text(
-            "❌ 群组推送已禁用。\n\n"
-            "使用 /setup 重新启用。\n"
-            "Group push disabled. Use /setup to re-enable."
+            f"{ui['group_disabled']}\n\n"
+            f"{ui['group_disabled_footer']}"
         )
     
     return ConversationHandler.END
@@ -360,12 +379,45 @@ async def handle_group_update(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
     
+    group_id = str(update.effective_chat.id)
+    ui = _get_ui_for_group(update, context, group_id)
+    
     await query.edit_message_text(
-        "请描述群组关注的 Web3 领域:\n"
-        "Please describe the group's Web3 interests:"
+        f"{ui['group_enter_interests']}\n"
+        f"{ui['group_enter_interests_example']}"
     )
     
     return GROUP_PROFILE
+
+
+async def handle_bot_added(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send welcome message when bot is added to a group."""
+    from config import FEATURE_GROUP_CHAT
+    if not FEATURE_GROUP_CHAT:
+        return
+
+    my_chat_member = update.my_chat_member
+    if not my_chat_member:
+        return
+
+    chat = my_chat_member.chat
+    if chat.type not in ("group", "supergroup"):
+        return
+
+    # Resolve language from inviter (user who added the bot)
+    from_user = my_chat_member.from_user
+    raw_code = getattr(from_user, "language_code", None) if from_user else None
+    lang = normalize_language_code(raw_code) if raw_code else "en"
+    ui = get_ui_locale(lang)
+
+    try:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=ui["group_welcome_on_join"]
+        )
+        logger.info(f"Welcome message sent to group {chat.id} ({chat.title})")
+    except Exception as e:
+        logger.warning(f"Failed to send welcome to group {chat.id}: {e}")
 
 
 async def handle_bot_removed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -373,14 +425,14 @@ async def handle_bot_removed(update: Update, context: ContextTypes.DEFAULT_TYPE)
     from config import FEATURE_GROUP_CHAT
     if not FEATURE_GROUP_CHAT:
         return
-    
+
     my_chat_member = update.my_chat_member
     if not my_chat_member:
         return
-    
+
     new_status = my_chat_member.new_chat_member.status
     chat = my_chat_member.chat
-    
+
     if new_status in ("left", "kicked"):
         group_id = str(chat.id)
         config = load_group_config(group_id)
@@ -388,6 +440,20 @@ async def handle_bot_removed(update: Update, context: ContextTypes.DEFAULT_TYPE)
             config["enabled"] = False
             save_group_config(group_id, config)
             logger.info(f"Bot removed from group {group_id} ({chat.title}), disabled config")
+
+
+async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Route my_chat_member updates to add or remove handler."""
+    my_chat_member = update.my_chat_member
+    if not my_chat_member:
+        return
+
+    new_status = my_chat_member.new_chat_member.status
+
+    if new_status in ("member", "administrator"):
+        await handle_bot_added(update, context)
+    elif new_status in ("left", "kicked"):
+        await handle_bot_removed(update, context)
 
 
 def get_group_handler() -> Optional[ConversationHandler]:
@@ -427,5 +493,5 @@ def get_group_callbacks():
     if not FEATURE_GROUP_CHAT:
         return []
     return [
-        ChatMemberHandler(handle_bot_removed, ChatMemberHandler.MY_CHAT_MEMBER),
+        ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER),
     ]

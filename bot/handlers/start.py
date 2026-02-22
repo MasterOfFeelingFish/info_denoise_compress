@@ -35,6 +35,7 @@ from utils.json_storage import (
 )
 from utils.auth import whitelist_required
 from services.language_service import normalize_language_code, get_language_native_name
+from utils.language import detect_language_from_text, is_supported_language
 from locales.ui_strings import get_ui_locale
 
 logger = logging.getLogger(__name__)
@@ -79,15 +80,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                 InlineKeyboardButton(ui["menu_preferences"], callback_data="update_preferences"),
                 InlineKeyboardButton(ui["menu_sources"], callback_data="manage_sources"),
             ],
-            [
-                InlineKeyboardButton(ui["menu_stats"], callback_data="view_stats"),
-            ],
+            [InlineKeyboardButton(ui["menu_stats"], callback_data="view_stats")],
         ]
-        
-        # Add admin panel button for admins only
+        try:
+            from config import FEATURE_PAYMENT
+            if FEATURE_PAYMENT:
+                keyboard.append([InlineKeyboardButton(ui["menu_subscribe"], callback_data="payment_plans")])
+        except Exception:
+            pass
         if is_admin(user.id):
             keyboard.append([InlineKeyboardButton(ui["menu_admin"], callback_data="admin_panel")])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.message.reply_text(
@@ -106,11 +108,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         context.user_data["conversation_history"] = []
         context.user_data["current_round"] = 1
         
-        # Detect and store user's language from Telegram
+        # Detect and store user's language from Telegram (initial; may be overridden by reply language later)
         lang = normalize_language_code(user.language_code)
         context.user_data["language"] = lang
-        # Store native language name for AI prompts
         context.user_data["language_native"] = get_language_native_name(lang)
+        logger.info("[onboarding_lang] /start new user telegram_id=%s language_code=%s -> lang=%s", user.id, getattr(user, "language_code", None), lang)
         ui = get_ui_locale(lang)
 
         # Show welcome message + typing indicator
@@ -219,11 +221,22 @@ async def handle_round_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not is_active_conv(context, "onboarding"):
         return ConversationHandler.END
 
+    user_message = update.message.text
+    # Dynamically adjust language based on user's reply
+    lang_before = context.user_data.get("language", "zh")
+    detected_lang = detect_language_from_text(user_message)
+    supported = bool(detected_lang and is_supported_language(detected_lang))
+    if supported:
+        context.user_data["language"] = detected_lang
+        context.user_data["language_native"] = get_language_native_name(detected_lang)
     lang = context.user_data.get("language", "zh")
+    logger.info(
+        "[onboarding_lang] round=1 user_msg=%r lang_before=%s detected=%s supported=%s lang_after=%s",
+        (user_message or "")[:60], lang_before, detected_lang, supported, lang
+    )
     user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
     
-    user_message = update.message.text
     context.user_data["conversation_history"].append({
         "round": 1,
         "user_input": user_message
@@ -268,11 +281,27 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not is_active_conv(context, "onboarding"):
         return ConversationHandler.END
 
+    # Fix4: Anti-debounce — prevent duplicate submissions
+    if context.user_data.get("processing_round2"):
+        return ONBOARDING_ROUND_2
+    context.user_data["processing_round2"] = True
+
+    user_message = update.message.text
+    # Dynamically adjust language based on user's reply
+    lang_before = context.user_data.get("language", "zh")
+    detected_lang = detect_language_from_text(user_message)
+    supported = bool(detected_lang and is_supported_language(detected_lang))
+    if supported:
+        context.user_data["language"] = detected_lang
+        context.user_data["language_native"] = get_language_native_name(detected_lang)
     lang = context.user_data.get("language", "zh")
+    logger.info(
+        "[onboarding_lang] round=2 user_msg=%r lang_before=%s detected=%s supported=%s lang_after=%s",
+        (user_message or "")[:60], lang_before, detected_lang, supported, lang
+    )
     user_language = context.user_data.get("language_native", get_language_native_name(lang))
     ui = get_ui_locale(lang)
     
-    user_message = update.message.text
     context.user_data["conversation_history"].append({
         "round": 2,
         "user_input": user_message
@@ -304,6 +333,12 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     except Exception as e:
         logger.error(f"Onboarding round 3 failed: {e}")
+        context.user_data.pop("processing_round2", None)
+        # Fix1: Clean up progress message on error
+        try:
+            await progress_msg.delete()
+        except Exception:
+            pass
         keyboard = [
             [InlineKeyboardButton(ui["retry"], callback_data="retry_round_2")],
             [InlineKeyboardButton(ui["back_to_main"], callback_data="back_to_start")],
@@ -318,6 +353,12 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data["profile_summary"] = ai_response
     context.user_data["_profile_adjusted"] = False  # Track if user has used their one adjustment
 
+    # Fix1: Delete progress message now that profile is ready
+    try:
+        await progress_msg.delete()
+    except Exception:
+        pass  # Ignore if already deleted or permission issue
+
     # Add confirmation buttons with one-time adjust option
     keyboard = [
         [InlineKeyboardButton(ui["btn_confirm"], callback_data="confirm_profile")],
@@ -330,11 +371,43 @@ async def handle_round_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     step_text = ui["onboarding_step"].format(current=3, total=3)
-    await update.message.reply_text(
-        f"{step_text} {ui['onboarding_confirm_prefs']}\n\n{ai_response}",
-        reply_markup=reply_markup
-    )
 
+    # Fix2: Truncate AI response if too long for Telegram (4096 char limit)
+    confirm_prefix = f"{step_text} {ui['onboarding_confirm_prefs']}\n\n"
+    max_response_len = 4000 - len(confirm_prefix)
+    if len(ai_response) > max_response_len:
+        ai_response = ai_response[:max_response_len] + "..."
+        context.user_data["profile_summary"] = ai_response  # Update stored version too
+
+    # Fix2: Wrap in try-except to prevent silent failure
+    try:
+        await update.message.reply_text(
+            f"{confirm_prefix}{ai_response}",
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        logger.error(f"Failed to send profile confirmation: {e}")
+        # Fallback: try sending a shorter version
+        try:
+            short_response = ai_response[:1000] + "..." if len(ai_response) > 1000 else ai_response
+            await update.message.reply_text(
+                f"{confirm_prefix}{short_response}",
+                reply_markup=reply_markup
+            )
+        except Exception as e2:
+            logger.error(f"Fallback profile confirmation also failed: {e2}")
+            context.user_data.pop("processing_round2", None)
+            keyboard_err = [
+                [InlineKeyboardButton(ui["retry"], callback_data="retry_round_2")],
+                [InlineKeyboardButton(ui["back_to_main"], callback_data="back_to_start")],
+            ]
+            await update.message.reply_text(
+                ui.get("error_occurred", "An error occurred. Please try again."),
+                reply_markup=InlineKeyboardMarkup(keyboard_err)
+            )
+            return ConversationHandler.END
+
+    context.user_data.pop("processing_round2", None)
     return CONFIRM_PROFILE
 
 
@@ -410,10 +483,11 @@ async def adjust_profile_prompt(update: Update, context: ContextTypes.DEFAULT_TY
 
     profile_summary = context.user_data.get("profile_summary", "")
 
+    adjust_hint_default = '例如：「去掉 NFT 相关的，多加一些 DeFi 协议的内容」\n直接在聊天窗口输入你的修改意见：'
     await query.edit_message_text(
         f"{ui.get('adjust_profile_prompt', '✏️ 请告诉我你想怎么调整画像：')}\n\n"
         f"{ui.get('adjust_profile_current', '当前画像：')}\n{profile_summary}\n\n"
-        f"{ui.get('adjust_profile_hint', '例如：「去掉 NFT 相关的，多加一些 DeFi 协议的内容」\n直接在聊天窗口输入你的修改意见：')}"
+        f"{ui.get('adjust_profile_hint', adjust_hint_default)}"
     )
 
     return ONBOARDING_ROUND_3  # Reuse round 3 state for adjustment text input
@@ -556,11 +630,14 @@ async def confirm_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             [InlineKeyboardButton(ui.get("retry", "Retry"), callback_data="confirm_profile")],
             [InlineKeyboardButton(ui.get("back_to_main", "Back to Main"), callback_data="back_to_start")],
         ]
-        await query.edit_message_text(
-            ui.get("error_occurred", "An error occurred. Please try again later."),
+        # Fix3: Use send_message instead of edit_message_text to preserve
+        # the profile summary message (don't overwrite user's profile preview)
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=ui.get("error_occurred", "An error occurred. Please try again later."),
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        return ConversationHandler.END
+        return CONFIRM_PROFILE
 
     # Pass user_id to avoid re-querying users.json (Windows file lock race condition)
     save_user_profile(telegram_id, full_profile, user_id=user_id)
@@ -683,11 +760,14 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             ],
             [InlineKeyboardButton(ui["menu_stats"], callback_data="view_stats")],
         ]
-        
-        # Add admin panel button for admins only
+        try:
+            from config import FEATURE_PAYMENT
+            if FEATURE_PAYMENT:
+                keyboard.append([InlineKeyboardButton(ui["menu_subscribe"], callback_data="payment_plans")])
+        except Exception:
+            pass
         if is_admin(user.id):
             keyboard.append([InlineKeyboardButton(ui["menu_admin"], callback_data="admin_panel")])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
@@ -699,20 +779,20 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
     else:
         keyboard = [
-            [InlineKeyboardButton(ui.get("btn_start", "开始使用"), callback_data="start_onboarding")],
-            [InlineKeyboardButton(ui.get("btn_learn_more", "了解更多"), callback_data="learn_more")],
+            [InlineKeyboardButton(ui["start_setup"], callback_data="start_onboarding")],
+            [InlineKeyboardButton(ui["learn_more"], callback_data="learn_more")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            f"{ui.get('onboarding_title', 'Web3 每日简报')}\n"
+            f"{ui['onboarding_title']}\n"
             f"{ui['divider']}\n\n"
-            f"{ui.get('onboarding_welcome', '你的个性化情报助手。')}\n\n"
-            f"{ui.get('onboarding_what_we_do', '我们做什么')}:\n"
-            f"  • {ui.get('feature_scan', '每日扫描 50+ 信息源')}\n"
-            f"  • {ui.get('feature_filter', '过滤噪音，精选内容')}\n"
-            f"  • {ui.get('feature_push', '推送真正重要的信息')}\n\n"
-            f"{ui.get('time_save', '每天节省约 2 小时阅读时间')}",
+            f"{ui['onboarding_welcome']}\n\n"
+            f"{ui['learn_more_what']}\n"
+            f"  {ui['learn_more_scan']}\n"
+            f"  {ui['learn_more_filter']}\n"
+            f"  {ui['learn_more_push']}\n\n"
+            f"{ui['learn_more_time_save']}",
             reply_markup=reply_markup
         )
 
@@ -986,7 +1066,7 @@ async def view_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 {ui['divider']}
 
-{ui.get('stats_settings_hint', '使用 /settings 调整偏好设置。')}"""
+{ui['stats_settings_hint']}"""
 
     keyboard = [
         [
@@ -1099,6 +1179,9 @@ async def skip_first_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await safe_answer_callback_query(query)
 
     user = update.effective_user
+    telegram_id = str(user.id)
+    from utils.json_storage import set_onboarding_paid_redeem_available
+    set_onboarding_paid_redeem_available(telegram_id)
 
     keyboard = [
         [
@@ -1140,10 +1223,10 @@ async def add_custom_sources(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.edit_message_text(
         "🎯 添加你关注的信息源\n\n"
-        "请发送以下任一格式：\n\n"
-        "📱 Twitter: @VitalikButerin\n"
-        "📰 网站: https://example.com/rss\n\n"
-        "💡 可以连续发送多个，完成后点击按钮：",
+        "只支持两种方式：推特 List 或 网站。\n\n"
+        "📱 推特 List：粘贴链接（如 rss.app 生成）\n"
+        "📰 网站：https://example.com/rss 或 域名\n\n"
+        "💡 可连续发送多个，完成后点击按钮：",
         reply_markup=reply_markup
     )
 
@@ -1156,7 +1239,7 @@ async def handle_add_source(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not is_active_conv(context, "onboarding"):
         return ConversationHandler.END
 
-    from services.rss_fetcher import validate_twitter_handle, validate_url
+    from services.rss_fetcher import validate_url, validate_rss_url
     from utils.json_storage import get_user_sources, save_user_sources
     from urllib.parse import urlparse
 
@@ -1169,30 +1252,27 @@ async def handle_add_source(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     success = False
     added_name = ""
 
-    # Try Twitter
-    if text.startswith("@") or not text.startswith("http"):
-        validation = await validate_twitter_handle(text)
-        if validation["valid"]:
-            handle = validation["handle"]
-            if handle not in user_sources.get("twitter", {}):
-                user_sources.setdefault("twitter", {})[handle] = ""
-                added_name = handle
+    if text.startswith("http"):
+        # Try as Twitter RSS first (rss.app etc.)
+        rss_validation = await validate_rss_url(text)
+        if rss_validation["valid"]:
+            feed_title = rss_validation.get("title", "Twitter List RSS")
+            if feed_title not in user_sources.get("twitter", {}):
+                user_sources.setdefault("twitter", {})[feed_title] = text
+                added_name = f"Twitter: {feed_title}"
                 success = True
-
-    # Try website RSS
-    else:
-        validation = await validate_url(text)
-        if validation["valid"]:
-            url = validation["url"]
-            # Extract domain name as source name
-            parsed = urlparse(url)
-            domain = parsed.netloc.replace("www.", "")
-            name = domain.split(".")[0].title()  # e.g., "theblock.co" -> "Theblock"
-
-            if name not in user_sources.get("websites", {}):
-                user_sources.setdefault("websites", {})[name] = url
-                added_name = f"{name} ({domain})"
-                success = True
+        if not success:
+            # Website RSS URL
+            validation = await validate_url(text)
+            if validation["valid"]:
+                url = validation["url"]
+                parsed = urlparse(url)
+                domain = parsed.netloc.replace("www.", "")
+                name = domain.split(".")[0].title()
+                if name not in user_sources.get("websites", {}):
+                    user_sources.setdefault("websites", {})[name] = url
+                    added_name = f"{name} ({domain})"
+                    success = True
 
     if success:
         # Save
@@ -1237,6 +1317,10 @@ async def finish_adding_sources(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await safe_answer_callback_query(query)
 
+    telegram_id = str(query.from_user.id)
+    from utils.json_storage import set_onboarding_paid_redeem_available
+    set_onboarding_paid_redeem_available(telegram_id)
+
     count = context.user_data.get("added_sources_count", 0)
 
     # Boundary: 0 sources
@@ -1270,7 +1354,8 @@ async def finish_with_default(update: Update, context: ContextTypes.DEFAULT_TYPE
     await safe_answer_callback_query(query)
 
     telegram_id = str(query.from_user.id)
-    from utils.json_storage import get_user_sources, save_user_sources
+    from utils.json_storage import get_user_sources, save_user_sources, set_onboarding_paid_redeem_available
+    set_onboarding_paid_redeem_available(telegram_id)
     from config import DEFAULT_USER_SOURCES
     import asyncio
 
@@ -1311,6 +1396,9 @@ async def use_default_sources_no_push(update: Update, context: ContextTypes.DEFA
     await safe_answer_callback_query(query)
 
     user = update.effective_user
+    telegram_id = str(user.id)
+    from utils.json_storage import set_onboarding_paid_redeem_available
+    set_onboarding_paid_redeem_available(telegram_id)
 
     keyboard = [
         [
@@ -1351,10 +1439,10 @@ async def add_custom_sources_no_push(update: Update, context: ContextTypes.DEFAU
 
     await query.edit_message_text(
         "🎯 添加你关注的信息源\n\n"
-        "请发送以下任一格式：\n\n"
-        "📱 Twitter: @VitalikButerin\n"
-        "📰 网站: https://example.com/rss\n\n"
-        "💡 可以连续发送多个，完成后点击按钮：",
+        "只支持两种方式：推特 List 或 网站。\n\n"
+        "📱 推特 List：粘贴链接（如 rss.app 生成）\n"
+        "📰 网站：https://example.com/rss 或 域名\n\n"
+        "💡 可连续发送多个，完成后点击按钮：",
         reply_markup=reply_markup
     )
 
@@ -1367,6 +1455,10 @@ async def finish_sources_no_push(update: Update, context: ContextTypes.DEFAULT_T
     await safe_answer_callback_query(query)
 
     user = update.effective_user
+    telegram_id = str(user.id)
+    from utils.json_storage import set_onboarding_paid_redeem_available
+    set_onboarding_paid_redeem_available(telegram_id)
+
     added_count = context.user_data.get("added_sources_count", 0)
 
     keyboard = [
@@ -1435,12 +1527,18 @@ async def trigger_first_digest_internal(
         f"{ui.get('expected_time', 'This may take 10-20 seconds...')}"
     )
 
+    next_push_key = "next_push_time"
+    wait_next_key = "first_digest_wait_next"
     try:
         from datetime import datetime
         from services.digest_processor import process_single_user
+        from utils.permissions import check_feature
 
         today = datetime.now().strftime("%Y-%m-%d")
         user = get_user(telegram_id)
+        if check_feature(telegram_id, "priority_push"):
+            next_push_key = "next_push_time_pro"
+            wait_next_key = "first_digest_wait_next_pro"
 
         if not user:
             await query.edit_message_text(ui.get("user_not_found", "User not found. Please use /start."))
@@ -1477,7 +1575,7 @@ async def trigger_first_digest_internal(
                     text=f"{ui.get('first_digest_no_content', 'No new content available.')}\n\n"
                          f"{ui.get('first_digest_suggestion', '💡 Suggestion')}\n"
                          f"{ui.get('first_digest_add_sources', '• Add more sources (/sources)')}\n"
-                         f"{ui.get('next_push_time', 'Next push: ~24 hours')}",
+                         f"{ui.get(next_push_key, ui.get('next_push_time', 'Next push: ~24 hours'))}",
                     reply_markup=reply_markup
                 )
             else:
@@ -1494,7 +1592,7 @@ async def trigger_first_digest_internal(
                          f"{ui.get('first_digest_tip_title', '💡 Tips')}\n"
                          f"{ui.get('first_digest_tip_feedback', '• Use feedback buttons to improve')}\n"
                          f"{ui.get('first_digest_tip_settings', '• /settings to adjust preferences')}\n"
-                         f"{ui.get('next_push_time', 'Next push: ~24 hours')}",
+                         f"{ui.get(next_push_key, ui.get('next_push_time', 'Next push: ~24 hours'))}",
                     reply_markup=reply_markup
                 )
         else:
@@ -1510,7 +1608,7 @@ async def trigger_first_digest_internal(
             await query.edit_message_text(
                 f"{ui.get('first_digest_failed', 'Push failed')}\n\n"
                 f"{reason_msg}\n\n"
-                f"{ui.get('first_digest_wait_next', 'Please wait for the next push (~24 hours).')}",
+                f"{ui.get(wait_next_key, ui.get('first_digest_wait_next', 'Please wait for the next push.'))}",
                 reply_markup=reply_markup
             )
 
@@ -1520,7 +1618,7 @@ async def trigger_first_digest_internal(
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            f"{ui.get('first_digest_failed', 'Push failed')}, {ui.get('first_digest_wait_next', 'please wait for the next push.')}",
+            f"{ui.get('first_digest_failed', 'Push failed')}, {ui.get(wait_next_key, ui.get('first_digest_wait_next', 'please wait for the next push.'))}",
             reply_markup=reply_markup
         )
 

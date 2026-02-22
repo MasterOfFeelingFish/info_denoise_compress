@@ -31,7 +31,8 @@ from config import (
     TELEGRAM_BOT_TOKEN, PUSH_HOUR, PUSH_MINUTE, DATA_DIR,
     LOG_ROTATE_DAYS, LOG_BACKUP_COUNT, MAX_DIGEST_ITEMS, CONCURRENT_USERS,
     PREFETCH_INTERVAL_HOURS, PREFETCH_START_HOUR, ADMIN_TELEGRAM_IDS,
-    PUSH_MODE, PUSH_INTERVAL_HOURS, PUSH_QUIET_START, PUSH_QUIET_END, PUSH_CHECK_INTERVAL
+    PUSH_MODE, PUSH_INTERVAL_HOURS, PUSH_INTERVAL_PRO_HOURS,
+    PUSH_QUIET_START, PUSH_QUIET_END, PUSH_CHECK_INTERVAL
 )
 from services.digest_processor import process_single_user
 from utils.telegram_utils import safe_answer_callback_query
@@ -43,7 +44,7 @@ from handlers.settings import get_settings_handler, get_settings_callbacks
 from handlers.sources import get_sources_handler, get_sources_callbacks
 from handlers.admin import get_admin_handlers
 from handlers.payment import get_payment_handlers
-from handlers.group import get_group_handler, get_group_callbacks, handle_bot_removed
+from handlers.group import get_group_handler, get_group_callbacks
 from services.rate_limiter import get_rate_limiter
 
 
@@ -128,11 +129,12 @@ logger.info(f"Admin IDs configured: {len(config.ADMIN_TELEGRAM_IDS)} admin(s)")
 
 async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Scheduled job to generate and send daily digest to all users.
-    Runs at configured time (default: 9:00 AM Beijing Time).
+    Scheduled job to generate and send daily digest.
+    In fixed_time mode: pushes Free users only (Pro users get hourly push via pro_realtime_job).
     Uses concurrent processing for better performance with pre-fetching optimization.
     """
     from utils.json_storage import get_users, get_user_sources
+    from utils.permissions import check_feature
     from services.rss_fetcher import fetch_all_sources
 
     logger.info("Starting daily digest generation...")
@@ -141,10 +143,19 @@ async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         # Get all users
-        users = get_users()
-        if not users:
+        all_users = get_users()
+        if not all_users:
             logger.warning("No users registered, skipping digest")
             return
+
+        # In fixed_time: Free only (Pro gets hourly push via pro_realtime_job)
+        if PUSH_MODE == "fixed_time":
+            users = [u for u in all_users if u.get("telegram_id") and not check_feature(u["telegram_id"], "priority_push")]
+            if not users:
+                logger.info("No Free users due for daily digest")
+                return
+        else:
+            users = all_users
 
         # ===== Pre-fetch optimization: Collect all unique sources =====
         logger.info("Collecting all user sources...")
@@ -216,11 +227,13 @@ async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def interval_digest_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Scheduled job for user_interval mode: check which users are due for push.
-    Runs every PUSH_CHECK_INTERVAL minutes and pushes users whose last push was >= PUSH_INTERVAL_HOURS ago.
+    Pro users: push every PUSH_INTERVAL_PRO_HOURS (default 1h, 24h timely real-time).
+    Free users: push every PUSH_INTERVAL_HOURS (default 24h, once per day).
     Respects quiet hours (PUSH_QUIET_START to PUSH_QUIET_END).
     """
     from config import PAUSE_PUSH
-    from utils.json_storage import get_users, get_user_sources, get_user_last_push_time
+    from utils.json_storage import get_users, get_user_sources
+    from utils.permissions import check_feature
 
     # Check if push is paused (for debugging)
     if PAUSE_PUSH:
@@ -259,35 +272,44 @@ async def interval_digest_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.debug("No users registered, skipping interval check")
             return
 
-        # Find users who are due for push
+        # Find users who are due for push (Pro: shorter interval, Free: 24h)
         due_users = []
-        interval_seconds = PUSH_INTERVAL_HOURS * 3600
 
         for user in users:
             telegram_id = user.get("telegram_id")
             if not telegram_id:
                 continue
 
+            # User custom push_interval_hours (settings) or plan default
+            custom = user.get("settings", {}).get("push_interval_hours")
+            if custom is not None and isinstance(custom, (int, float)):
+                custom = max(1, min(24, int(custom)))
+                if check_feature(telegram_id, "priority_push"):
+                    interval_hours = custom
+                else:
+                    interval_hours = 24  # Free only 24h
+            elif check_feature(telegram_id, "priority_push"):
+                interval_hours = PUSH_INTERVAL_PRO_HOURS
+            else:
+                interval_hours = PUSH_INTERVAL_HOURS
+            interval_seconds = interval_hours * 3600
+
             # Get last push time
             last_push_str = user.get("last_push_time")
             created_str = user.get("created")
 
             if last_push_str:
-                # Parse last push time
                 try:
                     last_push = parse_datetime(last_push_str)
                     time_since_push = (now - last_push).total_seconds()
-
                     if time_since_push >= interval_seconds:
                         due_users.append(user)
                 except Exception as e:
                     logger.warning(f"Failed to parse last_push_time for {telegram_id}: {e}")
             elif created_str:
-                # New user: check if created >= interval ago
                 try:
                     created = parse_datetime(created_str)
                     time_since_created = (now - created).total_seconds()
-
                     if time_since_created >= interval_seconds:
                         due_users.append(user)
                 except Exception as e:
@@ -343,6 +365,86 @@ async def interval_digest_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     except Exception as e:
         logger.error(f"Interval digest check failed: {e}", exc_info=True)
+
+
+async def pro_realtime_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Scheduled job for fixed_time mode: push Pro users every PUSH_INTERVAL_PRO_HOURS.
+    Pro users get 24-hour timely real-time push; runs every hour.
+    Respects quiet hours.
+    """
+    from config import PAUSE_PUSH, PUSH_QUIET_START, PUSH_QUIET_END
+    from utils.json_storage import get_users, get_user_sources
+    from utils.permissions import check_feature
+    from services.rss_fetcher import fetch_all_sources
+
+    if PUSH_MODE != "fixed_time":
+        return
+    if PAUSE_PUSH:
+        return
+
+    beijing_tz = ZoneInfo("Asia/Shanghai")
+    now = datetime.now(beijing_tz)
+    if PUSH_QUIET_START <= now.hour < PUSH_QUIET_END:
+        return
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    def parse_datetime(dt_str: str) -> datetime:
+        dt_str = dt_str.replace("Z", "+00:00")
+        if "+" not in dt_str and "T" in dt_str:
+            dt = datetime.fromisoformat(dt_str)
+            return dt.replace(tzinfo=beijing_tz)
+        return datetime.fromisoformat(dt_str)
+
+    try:
+        users = get_users()
+        if not users:
+            return
+        due_users = []
+        for user in users:
+            telegram_id = user.get("telegram_id")
+            if not telegram_id or not check_feature(telegram_id, "priority_push"):
+                continue
+            custom = user.get("settings", {}).get("push_interval_hours")
+            if custom is not None and isinstance(custom, (int, float)):
+                interval_hours = max(1, min(24, int(custom)))
+            else:
+                interval_hours = PUSH_INTERVAL_PRO_HOURS
+            interval_seconds = interval_hours * 3600
+            last_push_str = user.get("last_push_time")
+            created_str = user.get("created")
+            ref_str = last_push_str or created_str
+            if not ref_str:
+                due_users.append(user)
+                continue
+            try:
+                ref_dt = parse_datetime(ref_str)
+                if (now - ref_dt).total_seconds() >= interval_seconds:
+                    due_users.append(user)
+            except Exception:
+                pass
+        if not due_users:
+            return
+        logger.info(f"Pro realtime: pushing {len(due_users)} Pro users")
+        all_sources = {}
+        for u in due_users:
+            for cat, srcs in get_user_sources(u.get("telegram_id") or "").items():
+                if cat not in all_sources:
+                    all_sources[cat] = {}
+                for name, url in (srcs or {}).items():
+                    if url and name not in all_sources[cat]:
+                        all_sources[cat][name] = url
+        global_raw_content = await fetch_all_sources(hours_back=24, sources=all_sources)
+        semaphore = asyncio.Semaphore(CONCURRENT_USERS)
+
+        async def process_with_limit(user):
+            async with semaphore:
+                return await process_single_user(context, user, today, global_raw_content)
+
+        await asyncio.gather(*[process_with_limit(u) for u in due_users], return_exceptions=True)
+    except Exception as e:
+        logger.error(f"Pro realtime job failed: {e}", exc_info=True)
 
 
 async def test_fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -483,7 +585,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         ],
         [InlineKeyboardButton(ui["menu_sources"], callback_data="manage_sources")],
         [InlineKeyboardButton(
-            ui.get("help_group_setup", "📢 群组推送指南"),
+            ui.get("help_group_setup", "Group Push Guidelines"),
             callback_data="group_setup_guide"
         )],
     ]
@@ -652,7 +754,16 @@ async def post_init(application: Application) -> None:
             name="daily_digest"
         )
 
-        logger.info(f"Scheduled daily digest at {PUSH_HOUR:02d}:{PUSH_MINUTE:02d} Beijing Time (fixed_time mode)")
+        logger.info(f"Scheduled daily digest at {PUSH_HOUR:02d}:{PUSH_MINUTE:02d} Beijing Time (fixed_time, Free only)")
+
+        # Pro users: hourly real-time push
+        application.job_queue.run_repeating(
+            callback=pro_realtime_job,
+            interval=3600,
+            first=120,
+            name="pro_realtime"
+        )
+        logger.info(f"Pro realtime: every {PUSH_INTERVAL_PRO_HOURS}h for Pro users")
 
         # Run profile updates 30 minutes before daily digest push
         profile_update_hour = PUSH_HOUR if PUSH_MINUTE >= 30 else (PUSH_HOUR - 1) % 24
@@ -1069,9 +1180,6 @@ def main() -> None:
         application.add_handler(group_handler)
     for callback in get_group_callbacks():
         application.add_handler(callback)
-    # Bot removal detection
-    from telegram.ext import ChatMemberHandler
-    application.add_handler(ChatMemberHandler(handle_bot_removed, ChatMemberHandler.MY_CHAT_MEMBER))
     logger.info("Group chat handlers registered")
 
     # Group setup guide callback (private chat)

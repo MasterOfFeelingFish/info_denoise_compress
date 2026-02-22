@@ -53,9 +53,12 @@ def _read_json(file_path: str) -> Dict[str, Any]:
             if not os.path.exists(file_path):
                 return {}
 
-            # Simple read without locking (atomic writes guarantee consistency)
             with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                raw = f.read()
+            # Empty or whitespace-only file: treat as empty object (avoid JSONDecodeError)
+            if not raw.strip():
+                return {}
+            return json.loads(raw)
 
         except json.JSONDecodeError as e:
             logger.error(f"JSON decode error in {file_path}: {e}")
@@ -263,6 +266,34 @@ def set_user_subscribe_updates(telegram_id: str, subscribed: bool) -> bool:
             result = _write_json(USERS_FILE, data)
             if result:
                 logger.info(f"Updated subscribe_updates for {telegram_id}: {subscribed}")
+            return result
+    return False
+
+
+def set_onboarding_paid_redeem_available(telegram_id: str) -> bool:
+    """Set onboarding-paid-redeem available for user (after completing onboarding)."""
+    data = _read_json(USERS_FILE)
+    for user in data.get("users", []):
+        if user.get("telegram_id") == telegram_id:
+            user["onboarding_paid_redeem_available"] = True
+            result = _write_json(USERS_FILE, data)
+            if result:
+                logger.info(f"Set onboarding_paid_redeem_available for {telegram_id}")
+            return result
+    return False
+
+
+def consume_onboarding_redeem(telegram_id: str) -> bool:
+    """Consume the one-time paid feature redeem (e.g. after adding first custom source)."""
+    data = _read_json(USERS_FILE)
+    for user in data.get("users", []):
+        if user.get("telegram_id") == telegram_id:
+            if not user.get("onboarding_paid_redeem_available"):
+                return False
+            user["onboarding_paid_redeem_available"] = False
+            result = _write_json(USERS_FILE, data)
+            if result:
+                logger.info(f"Consumed onboarding_paid_redeem for {telegram_id}")
             return result
     return False
 
@@ -559,11 +590,59 @@ def get_raw_content(date: Optional[str] = None) -> Dict[str, Any]:
 #
 
 
-def get_user_sources(telegram_id: str) -> Dict[str, Dict[str, str]]:
+def _source_key(category: str, name: str) -> str:
+    """Unique key for a source (used in disabled list)."""
+    return f"{category}:{name}"
+
+
+def get_disabled_sources_set(telegram_id: str) -> set:
+    """Get set of disabled source keys for the user. Keys are 'category:name'."""
+    user = get_user(telegram_id)
+    if not user:
+        return set()
+    _ensure_dir(USER_SOURCES_DIR)
+    sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
+    if not os.path.exists(sources_path):
+        return set()
+    data = _read_json(sources_path)
+    return set(data.get("disabled", []))
+
+
+def set_source_enabled(telegram_id: str, category: str, name: str, enabled: bool) -> bool:
+    """Enable or disable a source. Disabled sources are not fetched for digest."""
+    user = get_user(telegram_id)
+    if not user:
+        return False
+    _ensure_dir(USER_SOURCES_DIR)
+    sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
+    data = _read_json(sources_path) if os.path.exists(sources_path) else {}
+    disabled = list(data.get("disabled", []))
+    key = _source_key(category, name)
+    if enabled:
+        if key in disabled:
+            disabled.remove(key)
+    else:
+        if key not in disabled:
+            disabled.append(key)
+    data["disabled"] = disabled
+    data.setdefault("user_id", user["id"])
+    data.setdefault("telegram_id", telegram_id)
+    data["updated"] = datetime.now().isoformat()
+    if "custom_sources" not in data:
+        data["custom_sources"] = data.get("custom_sources", {})
+    result = _write_json(sources_path, data)
+    if result:
+        logger.info(f"Source {category}/{name} enabled={enabled} for user {user['id']}")
+    return result
+
+
+def get_user_sources(telegram_id: str, include_disabled: bool = True) -> Dict[str, Dict[str, str]]:
     """Get user's RSS source configuration.
     
     Returns merged sources: DEFAULT_USER_SOURCES + user's custom sources.
     Default sources always apply globally; user custom sources are additive.
+    
+    When include_disabled=False, disabled sources are excluded (for fetching digest).
     """
     import copy
     
@@ -578,7 +657,6 @@ def get_user_sources(telegram_id: str) -> Dict[str, Dict[str, str]]:
     sources_path = os.path.join(USER_SOURCES_DIR, f"{user['id']}.json")
 
     if not os.path.exists(sources_path):
-        # No custom sources yet, just return defaults
         return merged
 
     data = _read_json(sources_path)
@@ -589,6 +667,15 @@ def get_user_sources(telegram_id: str) -> Dict[str, Dict[str, str]]:
         if category not in merged:
             merged[category] = {}
         merged[category].update(sources)
+    
+    if not include_disabled:
+        disabled = set(data.get("disabled", []))
+        for category in list(merged.keys()):
+            for name in list(merged.get(category, {}).keys()):
+                if _source_key(category, name) in disabled:
+                    del merged[category][name]
+            if not merged.get(category):
+                del merged[category]
     
     return merged
 
@@ -636,11 +723,14 @@ def save_user_sources(telegram_id: str, sources: Dict[str, Dict[str, str]]) -> b
         if custom_cat:
             custom_sources[category] = custom_cat
 
+    # Preserve disabled list when saving
+    existing = _read_json(sources_path) if os.path.exists(sources_path) else {}
     data = {
         "user_id": user["id"],
         "telegram_id": telegram_id,
         "updated": datetime.now().isoformat(),
         "custom_sources": custom_sources,
+        "disabled": existing.get("disabled", []),
     }
 
     result = _write_json(sources_path, data)
@@ -650,18 +740,48 @@ def save_user_sources(telegram_id: str, sources: Dict[str, Dict[str, str]]) -> b
 
 
 def add_user_source(telegram_id: str, category: str, name: str, url: str) -> bool:
-    """Add a custom source to user's configuration."""
+    """Add a custom source to user's configuration.
+    Enforces custom_sources_max limit; consumes onboarding redeem when free user adds first source.
+    """
     custom = get_user_custom_sources(telegram_id)
+    count_before = sum(len(v) for v in custom.values())
+    is_new = name not in custom.get(category, {})
+
+    try:
+        from utils.permissions import get_user_plan, get_feature_limit
+        limit = get_feature_limit(telegram_id, "custom_sources_max")
+        if limit is not None and count_before >= limit:
+            logger.info(f"User {telegram_id} custom source limit reached ({count_before} >= {limit})")
+            return False
+    except Exception:
+        pass
 
     if category not in custom:
         custom[category] = {}
 
     custom[category][name] = url
-    
+
     # Rebuild full sources for save (which will extract custom again)
     full_sources = get_user_sources(telegram_id)
     full_sources.setdefault(category, {})[name] = url
-    return save_user_sources(telegram_id, full_sources)
+    ok = save_user_sources(telegram_id, full_sources)
+    if not ok:
+        return False
+
+    # Consume onboarding one-time redeem when free user adds their first custom source
+    if is_new and count_before == 0:
+        try:
+            from utils.permissions import get_user_plan
+            user = get_user(telegram_id)
+            if (
+                user
+                and get_user_plan(telegram_id) == "free"
+                and user.get("onboarding_paid_redeem_available")
+            ):
+                consume_onboarding_redeem(telegram_id)
+        except Exception:
+            pass
+    return True
 
 
 def remove_user_source(telegram_id: str, category: str, name: str) -> bool:

@@ -336,13 +336,48 @@ async def _filter_content_batched(
     section_priority = {"must_read": 0, "macro_insights": 1, "recommended": 2, "other": 3}
     all_results.sort(key=lambda x: section_priority.get(x.get("section", "other"), 3))
     
-    # Deduplicate by title (in case same news appears in multiple batches)
-    seen_titles = set()
+    # Deduplicate across batches (fuzzy title matching)
+    # Phase 1: Exact match on normalized title
+    from difflib import SequenceMatcher
+    
+    def _norm_title(t: str) -> str:
+        """Normalize title for dedup comparison."""
+        import re as _re
+        t = t.strip().lower()
+        t = _re.sub(r'[^\w\s]', '', t)
+        t = _re.sub(r'\s+', ' ', t).strip()
+        return t
+    
     unique_results = []
+    seen_normalized = []  # list of (normalized_title, index_in_unique)
+    
     for item in all_results:
         title = item.get("title", "")
-        if title not in seen_titles:
-            seen_titles.add(title)
+        norm = _norm_title(title)
+        if not norm:
+            unique_results.append(item)
+            continue
+        
+        is_dup = False
+        for seen_norm, seen_idx in seen_normalized:
+            # Fast exact check
+            if norm == seen_norm:
+                is_dup = True
+                break
+            # Fuzzy check for very similar titles (threshold 0.85)
+            if abs(len(norm) - len(seen_norm)) < max(len(norm), len(seen_norm)) * 0.4:
+                sim = SequenceMatcher(None, norm, seen_norm).ratio()
+                if sim >= 0.85:
+                    is_dup = True
+                    # Keep the one with more info (longer summary)
+                    existing_summary = unique_results[seen_idx].get("summary", "") or ""
+                    new_summary = item.get("summary", "") or ""
+                    if len(new_summary) > len(existing_summary):
+                        unique_results[seen_idx] = item
+                    break
+        
+        if not is_dup:
+            seen_normalized.append((norm, len(unique_results)))
             unique_results.append(item)
     
     logger.info(f"Batch processing complete: {len(unique_results)} unique items from {len(all_results)} total")

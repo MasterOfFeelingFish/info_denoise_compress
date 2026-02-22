@@ -323,20 +323,24 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
     telegram_id = str(user.id)
     callback_data = query.data
 
+    # Get user language for localized responses
+    lang = get_user_language(telegram_id)
+    ui = get_ui_locale(lang)
+
     # Parse item feedback (click or dislike)
     if callback_data.startswith("item_click_"):
         item_id = callback_data.replace("item_click_", "")
         feedback_type = "click"
-        response = "📖 正在打开原文..."
+        response = ui['item_opening']
     elif callback_data.startswith("item_dislike_"):
         item_id = callback_data.replace("item_dislike_", "")
         feedback_type = "dislike"
-        response = "👎 已记录"
+        response = ui['item_marked']
     # Legacy support for item_like (backward compatibility)
     elif callback_data.startswith("item_like_"):
         item_id = callback_data.replace("item_like_", "")
         feedback_type = "click"  # Treat like as click for backward compatibility
-        response = "👍 已记录"
+        response = ui['item_liked']
     else:
         await safe_answer_callback_query(query)
         return
@@ -398,9 +402,7 @@ async def handle_item_feedback(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             if item_url:
                 # Create a URL button for user to open the article
-                from services.report_generator import get_locale
-                locale = get_locale("zh")
-                open_text = locale.get("btn_open_link", "打开链接")
+                open_text = ui['btn_open_link']
                 
                 open_button = InlineKeyboardButton(f"📖 {open_text}", url=item_url)
                 new_keyboard = InlineKeyboardMarkup([[open_button]])
