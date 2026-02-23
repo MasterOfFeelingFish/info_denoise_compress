@@ -319,7 +319,7 @@ async def interval_digest_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     logger.warning(f"Failed to parse created time for {telegram_id}: {e}")
 
         if not due_users:
-            logger.debug("No users due for push this interval")
+            logger.info("No users due for push this interval")
             return
 
         logger.info(f"Found {len(due_users)} users due for push")
