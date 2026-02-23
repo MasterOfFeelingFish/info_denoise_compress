@@ -762,6 +762,9 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "group_no_config": "未找到配置。请使用 /setup 开始配置。",
         "group_disabled": "❌ 群组推送已禁用。",
         "group_disabled_footer": "使用 /setup 重新启用。",
+        "group_ai_onboard_intro": "🤖 AI 将通过一段简短对话帮助配置群组简报偏好。",
+        "group_admin_hint": "💡 仅 {admin} 的回复会被处理",
+        "group_profile_saved": "群组画像已保存！",
     },
     
     "en": {
@@ -1519,6 +1522,9 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "group_no_config": "No config found. Use /setup to get started.",
         "group_disabled": "❌ Group push disabled.",
         "group_disabled_footer": "Use /setup to re-enable.",
+        "group_ai_onboard_intro": "🤖 AI will help configure the group digest through a short conversation.",
+        "group_admin_hint": "💡 Only {admin}'s replies will be processed",
+        "group_profile_saved": "Group profile saved!",
     },
     
     "ja": {
@@ -2022,6 +2028,9 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "group_no_config": "設定が見つかりません。/setup で設定を開始してください。",
         "group_disabled": "❌ グループ配信を無効にしました。",
         "group_disabled_footer": "/setup で再度有効にできます。",
+        "group_ai_onboard_intro": "🤖 AI が短い会話を通じてグループダイジェストの設定をお手伝いします。",
+        "group_admin_hint": "💡 {admin} の返信のみ処理されます",
+        "group_profile_saved": "グループプロフィールを保存しました！",
         "help_group_setup": "グループ配信ガイド",
     },
     
@@ -2526,6 +2535,9 @@ UI_STRINGS: Dict[str, Dict[str, str]] = {
         "group_no_config": "설정을 찾을 수 없습니다. /setup 으로 설정을 시작하세요.",
         "group_disabled": "❌ 그룹 푸시가 비활성화되었습니다.",
         "group_disabled_footer": "/setup 으로 다시 활성화하세요.",
+        "group_ai_onboard_intro": "🤖 AI가 짧은 대화를 통해 그룹 다이제스트 설정을 도와드립니다.",
+        "group_admin_hint": "💡 {admin}의 답변만 처리됩니다",
+        "group_profile_saved": "그룹 프로필이 저장되었습니다!",
         "help_group_setup": "그룹 푸시 가이드",
     },
 }
