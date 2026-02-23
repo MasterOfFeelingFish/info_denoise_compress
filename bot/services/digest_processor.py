@@ -293,7 +293,10 @@ async def process_single_user(
 
     except Exception as e:
         logger.error(f"Failed to send digest to {telegram_id}: {e}")
-        # Save error status
+        err_msg = str(e).lower()
+        if "blocked by the user" in err_msg or "user is deactivated" in err_msg:
+            set_user_last_push_time(telegram_id, current_push_time.isoformat())
+            logger.info(f"User {telegram_id} blocked/deactivated, updated last_push_time to avoid frequent retries")
         save_user_daily_stats(
             telegram_id=telegram_id,
             date=today,

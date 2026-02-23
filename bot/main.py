@@ -280,15 +280,18 @@ async def interval_digest_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             if not telegram_id:
                 continue
 
-            # User custom push_interval_hours (settings) or plan default
+            # Determine if user is truly Pro (only when payment system is on)
+            from config import FEATURE_PAYMENT
+            if FEATURE_PAYMENT:
+                is_pro = check_feature(telegram_id, "priority_push")
+            else:
+                from utils.permissions import get_user_plan
+                is_pro = get_user_plan(str(telegram_id)) == "pro"
+
             custom = user.get("settings", {}).get("push_interval_hours")
-            if custom is not None and isinstance(custom, (int, float)):
-                custom = max(1, min(24, int(custom)))
-                if check_feature(telegram_id, "priority_push"):
-                    interval_hours = custom
-                else:
-                    interval_hours = 24  # Free only 24h
-            elif check_feature(telegram_id, "priority_push"):
+            if custom is not None and isinstance(custom, (int, float)) and is_pro:
+                interval_hours = max(1, min(24, int(custom)))
+            elif is_pro:
                 interval_hours = PUSH_INTERVAL_PRO_HOURS
             else:
                 interval_hours = PUSH_INTERVAL_HOURS
