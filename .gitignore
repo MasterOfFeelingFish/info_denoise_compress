@@ -6,6 +6,7 @@ __pycache__/
 *.so
 .Python
 env/
+ENV/
 build/
 develop-eggs/
 dist/
@@ -27,6 +28,7 @@ wheels/
 .idea/
 *.swp
 *.swo
+*.swocwd
 *~
 
 # OS
@@ -36,4 +38,51 @@ Thumbs.db
 # Output files
 *.db
 *.log
+*-cwd
+nul
 
+# Sensitive files
+.env
+bot/.env
+bot/.env.test
+*.env.local
+*.env.production
+**/secrets/
+*.key
+*.pem
+*.p12
+credentials*.json
+
+# Runtime data
+data/
+data_dev/
+data_test/
+
+# Dev compose
+docker-compose.dev.yml
+
+# Claude Code
+.claude/
+CLAUDE.md
+tmpclaude-*
+
+# Internal docs (not for git)
+信息过滤服务流程与Prompt文档总结.md
+信息筛选算法升级说明2.0.md
+开发任务计划_Development_Tasks.md
+
+# ============ 测试/验收产物（不提交 Git） ============
+# 验收报告、测试结论等文档
+Sprint1_验收报告.md
+*_验收报告.md
+*_测试报告.md
+
+# 虚拟环境（仅本地测试用）
+venv/
+
+# pytest 缓存
+.pytest_cache/
+**/__pycache__/
+
+# 测试数据目录
+data_test/
