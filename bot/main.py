@@ -986,12 +986,13 @@ async def group_digest_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     # generate_group_digest not yet implemented, send simple summary
                     digest_text = f"📰 Web3 每日简报\n📅 {today}\n\n今日共收集 {len(raw_content)} 条信息。\n使用 /start 私聊 Bot 获取个性化推荐。"
 
-                # Add group CTA footer
+                # Read admin-configured CTA (falls back to default)
+                from utils.json_storage import get_system_config
+                from handlers.admin import DEFAULT_CTA_TEXT
+                cta_text = get_system_config("group_cta_text", DEFAULT_CTA_TEXT)
                 footer = (
                     "\n\n━━━━━━━━━━━━━━━━━━━━━\n"
-                    "🤖 想获得个性化推荐？\n"
-                    "私聊发送 /start，配置属于您自己偏好的 Web3 信息降噪 Bot\n"
-                    "Send \"/start\" in a private message to configure your own preferred web3 noise reduction bot.\n"
+                    f"{cta_text}\n"
                     "━━━━━━━━━━━━━━━━━━━━━"
                 )
 

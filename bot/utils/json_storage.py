@@ -1508,3 +1508,21 @@ def get_item_url(item_id: str) -> str:
     except Exception as e:
         logger.error(f"Error reading item URL for {item_id}: {e}")
         return ""
+
+
+# ─── System Config (platform-level settings) ───────────────────────────
+
+SYSTEM_CONFIG_FILE = os.path.join(DATA_DIR, "system_config.json")
+
+
+def get_system_config(key: str, default=None):
+    """Read a platform-level config value (e.g. CTA text)."""
+    data = _read_json(SYSTEM_CONFIG_FILE)
+    return data.get(key, default)
+
+
+def set_system_config(key: str, value) -> bool:
+    """Write a platform-level config value."""
+    data = _read_json(SYSTEM_CONFIG_FILE)
+    data[key] = value
+    return _write_json(SYSTEM_CONFIG_FILE, data)

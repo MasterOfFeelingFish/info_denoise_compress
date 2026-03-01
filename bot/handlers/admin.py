@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # Conversation states for admin flows
 WAITING_FOR_USER_ID = 100
 WAITING_FOR_BULK_SOURCES = 101
+WAITING_FOR_CTA_TEXT = 102
 
 
 def is_admin(user_id: int) -> bool:
@@ -67,6 +68,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(ui["admin_data_analysis"], callback_data="admin_analytics")],
         [InlineKeyboardButton("📡 信息源健康", callback_data="admin_source_health")],
         [InlineKeyboardButton("📢 群组管理", callback_data="admin_group_manage")],
+        [InlineKeyboardButton("📝 群简报 CTA 配置", callback_data="admin_cta_config")],
         [InlineKeyboardButton("🎫 生成兑换码", callback_data="admin_gen_code")],
         [InlineKeyboardButton(ui.get("admin_plan_config", "📋 方案与权限"), callback_data="admin_plan_config")],
         [InlineKeyboardButton(f"{toggle_emoji} {toggle_text}", callback_data="admin_wl_toggle")],
@@ -1073,6 +1075,124 @@ async def admin_gen_code_callback(update: Update, context: ContextTypes.DEFAULT_
     )
 
 
+# ============ Group CTA Configuration ============
+
+DEFAULT_CTA_TEXT = (
+    "🤖 想获得个性化推荐？\n"
+    "私聊发送 /start，配置属于您自己偏好的 Web3 信息降噪 Bot\n"
+    "Send \"/start\" in a private message to configure your own preferred web3 noise reduction bot."
+)
+
+
+async def admin_cta_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show current CTA config and options."""
+    query = update.callback_query
+    await query.answer()
+
+    if not is_admin(query.from_user.id):
+        await query.answer("🔒 无权限", show_alert=True)
+        return
+
+    from utils.json_storage import get_system_config
+    current_cta = get_system_config("group_cta_text", DEFAULT_CTA_TEXT)
+
+    keyboard = [
+        [InlineKeyboardButton("✏️ 修改 CTA 文案", callback_data="admin_cta_edit")],
+        [InlineKeyboardButton("🔄 恢复默认", callback_data="admin_cta_reset")],
+        [InlineKeyboardButton("« 返回管理面板", callback_data="admin_panel")],
+    ]
+
+    await query.edit_message_text(
+        f"📝 <b>群简报 CTA 引导文案</b>\n"
+        f"{'─' * 24}\n\n"
+        f"当前文案：\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{current_cta}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"此文案会追加在每条群简报推送的末尾。",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="HTML"
+    )
+
+
+async def admin_cta_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Prompt admin to input new CTA text."""
+    from utils.conv_manager import activate_conv
+    activate_conv(context, "admin")
+
+    query = update.callback_query
+    await query.answer()
+
+    if not is_admin(query.from_user.id):
+        return ConversationHandler.END
+
+    await query.edit_message_text(
+        "✏️ <b>修改群简报 CTA 文案</b>\n\n"
+        "请直接发送新的 CTA 引导文案。\n\n"
+        "💡 建议包含：\n"
+        "• 引导语（告诉群友可以做什么）\n"
+        "• Bot 私聊指令（如 /start）\n"
+        "• 可中英双语\n\n"
+        "发送 /cancel 取消",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("取消", callback_data="admin_cta_config")]
+        ]),
+        parse_mode="HTML"
+    )
+
+    return WAITING_FOR_CTA_TEXT
+
+
+async def handle_cta_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle admin's CTA text input."""
+    if not is_admin(update.effective_user.id):
+        return ConversationHandler.END
+
+    new_cta = update.message.text.strip()
+
+    if len(new_cta) < 5:
+        await update.message.reply_text("❌ 文案太短，请重新输入（至少 5 个字符）。")
+        return WAITING_FOR_CTA_TEXT
+
+    if len(new_cta) > 500:
+        await update.message.reply_text("❌ 文案太长，请控制在 500 字符以内。")
+        return WAITING_FOR_CTA_TEXT
+
+    from utils.json_storage import set_system_config
+    set_system_config("group_cta_text", new_cta)
+
+    keyboard = [
+        [InlineKeyboardButton("📝 CTA 配置", callback_data="admin_cta_config")],
+        [InlineKeyboardButton("« 返回管理面板", callback_data="admin_panel")],
+    ]
+
+    await update.message.reply_text(
+        f"✅ CTA 文案已更新！\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{new_cta}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"下次群简报推送将使用新文案。",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+    return ConversationHandler.END
+
+
+async def admin_cta_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reset CTA to default."""
+    query = update.callback_query
+    await query.answer()
+
+    if not is_admin(query.from_user.id):
+        return
+
+    from utils.json_storage import set_system_config
+    set_system_config("group_cta_text", DEFAULT_CTA_TEXT)
+
+    await query.answer("✅ 已恢复默认 CTA 文案", show_alert=True)
+    await admin_cta_config(update, context)
+
+
 # ============ Handler Registration ============
 
 def get_admin_handlers():
@@ -1083,6 +1203,7 @@ def get_admin_handlers():
             CallbackQueryHandler(admin_wl_add_callback, pattern="^admin_wl_add$"),
             CallbackQueryHandler(admin_wl_del_callback, pattern="^admin_wl_del$"),
             CallbackQueryHandler(admin_bulk_add_sources, pattern="^admin_bulk_add_sources$"),
+            CallbackQueryHandler(admin_cta_edit, pattern="^admin_cta_edit$"),
         ],
         states={
             WAITING_FOR_USER_ID: [
@@ -1091,10 +1212,14 @@ def get_admin_handlers():
             WAITING_FOR_BULK_SOURCES: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_bulk_sources_input),
             ],
+            WAITING_FOR_CTA_TEXT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_cta_text_input),
+            ],
         },
         fallbacks=[
             CallbackQueryHandler(cancel_admin_action, pattern="^admin_panel$"),
             CallbackQueryHandler(source_health_dashboard, pattern="^admin_source_health$"),
+            CallbackQueryHandler(admin_cta_config, pattern="^admin_cta_config$"),
         ],
         per_message=False,
     )
@@ -1115,6 +1240,9 @@ def get_admin_handlers():
         CallbackQueryHandler(admin_group_toggle, pattern="^admin_group_toggle_"),
         # Redeem code generation handler
         CallbackQueryHandler(admin_gen_code_callback, pattern="^admin_gen_code$"),
+        # CTA configuration handlers
+        CallbackQueryHandler(admin_cta_config, pattern="^admin_cta_config$"),
+        CallbackQueryHandler(admin_cta_reset, pattern="^admin_cta_reset$"),
         # Plan & permissions config
         CallbackQueryHandler(admin_plan_config_callback, pattern="^admin_plan_config$"),
         CallbackQueryHandler(plan_config_toggle_feature, pattern="^cfg_feat_[fp]_"),
